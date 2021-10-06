@@ -16,13 +16,20 @@
 
 package com.android.server.uwb;
 
+import static android.content.pm.PackageManager.PERMISSION_GRANTED;
+
 import android.annotation.NonNull;
 import android.content.AttributionSource;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
+import android.content.IntentFilter;
 import android.os.Binder;
 import android.os.IBinder;
 import android.os.PersistableBundle;
 import android.os.RemoteException;
+import android.os.SystemProperties;
+import android.provider.Settings;
 import android.util.ArrayMap;
 import android.util.Log;
 import android.uwb.IUwbAdapter;
@@ -33,7 +40,11 @@ import android.uwb.RangingSession;
 import android.uwb.SessionHandle;
 
 import com.android.internal.annotations.GuardedBy;
+import com.android.uwb.UwbService;
+import com.android.uwb.jni.NativeUwbManager;
 
+import java.io.FileDescriptor;
+import java.io.PrintWriter;
 import java.util.Map;
 
 /**
@@ -44,6 +55,7 @@ public class UwbServiceImpl extends IUwbAdapter.Stub implements IBinder.DeathRec
 
     private final Context mContext;
     private final UwbInjector mUwbInjector;
+    private final UwbSettingsStore mUwbSettingsStore;
     /**
      * Map for storing the callbacks wrapper for each session.
      */
@@ -230,20 +242,52 @@ public class UwbServiceImpl extends IUwbAdapter.Stub implements IBinder.DeathRec
         mVendorUwbAdapter = null;
     }
 
-    private synchronized IUwbAdapter getVendorUwbAdapter() throws IllegalStateException {
+    private synchronized IUwbAdapter getVendorUwbAdapter()
+            throws IllegalStateException, RemoteException {
         if (mVendorUwbAdapter != null) return mVendorUwbAdapter;
-        mVendorUwbAdapter = mUwbInjector.getVendorService();
-        if (mVendorUwbAdapter == null) {
-            throw new IllegalStateException("No vendor service found!");
+        // TODO(b/196225233): Remove this when qorvo stack is integrated.
+        if (SystemProperties.getBoolean("persist.uwb.enable_uci_stack", false)) {
+          Log.i(TAG, "Using the UCI stack");
+          mVendorUwbAdapter = new UwbService(mContext, new NativeUwbManager()).getIUwbAdapter();
+        } else {
+            Log.i(TAG, "Using the legacy stack");
+            mVendorUwbAdapter = mUwbInjector.getVendorService();
+            if (mVendorUwbAdapter == null) {
+                throw new IllegalStateException("No vendor service found!");
+            }
+            Log.i(TAG, "Retrieved vendor service");
+            linkToVendorServiceDeath();
         }
-        Log.i(TAG, "Retrieved vendor service");
-        linkToVendorServiceDeath();
+        // TODO(b/196225233): Remove this when the AOSP -> vendor bridge is removed.
+        getVendorUwbAdapter().setEnabled(isUwbEnabled());
         return mVendorUwbAdapter;
     }
 
     UwbServiceImpl(@NonNull Context context, @NonNull UwbInjector uwbInjector) {
         mContext = context;
         mUwbInjector = uwbInjector;
+        mUwbSettingsStore = uwbInjector.getUwbSettingsStore();
+
+        registerAirplaneModeReceiver();
+    }
+
+    /**
+     * Initialize the stack after boot completed.
+     */
+    public void initialize() {
+        mUwbSettingsStore.initialize();
+    }
+
+    @Override
+    protected void dump(FileDescriptor fd, PrintWriter pw, String[] args) {
+        if (mContext.checkCallingOrSelfPermission(android.Manifest.permission.DUMP)
+                != PERMISSION_GRANTED) {
+            pw.println("Permission Denial: can't dump UwbService from from pid="
+                    + Binder.getCallingPid()
+                    + ", uid=" + Binder.getCallingUid());
+            return;
+        }
+        mUwbSettingsStore.dump(fd, pw, args);
     }
 
     private void enforceUwbPrivilegedPermission() {
@@ -325,6 +369,44 @@ public class UwbServiceImpl extends IUwbAdapter.Stub implements IBinder.DeathRec
 
     @Override
     public synchronized void setEnabled(boolean enabled) throws RemoteException {
-        getVendorUwbAdapter().setEnabled(enabled);
+        enforceUwbPrivilegedPermission();
+        persistUwbToggleState(enabled);
+        getVendorUwbAdapter().setEnabled(isUwbEnabled());
+    }
+
+    private void persistUwbToggleState(boolean enabled) {
+        mUwbSettingsStore.put(UwbSettingsStore.SETTINGS_TOGGLE_STATE, enabled);
+    }
+
+    private boolean isUwbToggleEnabled() {
+        return mUwbSettingsStore.get(UwbSettingsStore.SETTINGS_TOGGLE_STATE);
+    }
+
+    /** Returns true if airplane mode is turned on. */
+    private boolean isAirplaneModeOn() {
+        return mUwbInjector.getSettingsInt(
+                Settings.Global.AIRPLANE_MODE_ON, 0) == 1;
+    }
+
+    /** Returns true if UWB is enabled - based on UWB and APM toggle */
+    private boolean isUwbEnabled() {
+        return isUwbToggleEnabled() && !isAirplaneModeOn();
+    }
+
+    private void registerAirplaneModeReceiver() {
+        mContext.registerReceiver(new BroadcastReceiver() {
+            @Override
+            public void onReceive(Context context, Intent intent) {
+                handleAirplaneModeEvent();
+            }
+        }, new IntentFilter(Intent.ACTION_AIRPLANE_MODE_CHANGED));
+    }
+
+    private void handleAirplaneModeEvent() {
+        try {
+            getVendorUwbAdapter().setEnabled(isUwbEnabled());
+        } catch (RemoteException e) {
+            Log.e(TAG, "Unable to set UWB Adapter state.", e);
+        }
     }
 }

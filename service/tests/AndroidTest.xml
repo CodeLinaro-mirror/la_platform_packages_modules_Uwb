@@ -24,11 +24,11 @@
             value="com.google.android.uwb.apex" />
     <test class="com.android.tradefed.testtype.AndroidJUnitTest" >
         <option name="package" value="com.android.server.uwb.test" />
-        <option name="runner" value="com.android.server.uwb.CustomTestRunner" />
+        <option name="runner" value="androidx.test.runner.AndroidJUnitRunner" />
         <option name="hidden-api-checks" value="false"/>
     </test>
 
-    <!-- Only run FrameworksWifiTests in MTS if the Wifi Mainline module is installed. -->
+    <!-- Only run FrameworksUwbTests in MTS if the Uwb Mainline module is installed. -->
     <object type="module_controller"
             class="com.android.tradefed.testtype.suite.module.MainlineTestModuleController">
         <option name="mainline-module-package-name" value="com.google.android.uwb" />
