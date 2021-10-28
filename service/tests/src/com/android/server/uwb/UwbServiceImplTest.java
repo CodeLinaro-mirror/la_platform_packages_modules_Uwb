@@ -17,11 +17,16 @@
 package com.android.server.uwb;
 
 import static android.Manifest.permission.UWB_PRIVILEGED;
+import static android.uwb.UwbManager.AdapterStateCallback.STATE_ENABLED_ACTIVE;
+import static android.uwb.UwbManager.AdapterStateCallback.STATE_ENABLED_INACTIVE;
+
+import static com.android.server.uwb.UwbSettingsStore.SETTINGS_TOGGLE_STATE;
 
 import static com.google.common.truth.Truth.assertThat;
 
 import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
@@ -29,14 +34,18 @@ import static org.mockito.Mockito.clearInvocations;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import android.content.AttributionSource;
+import android.content.BroadcastReceiver;
 import android.content.Context;
+import android.content.Intent;
 import android.os.IBinder;
 import android.os.PersistableBundle;
 import android.platform.test.annotations.Presubmit;
+import android.provider.Settings;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.uwb.IUwbAdapter;
 import android.uwb.IUwbAdapterStateCallbacks;
@@ -71,9 +80,11 @@ public class UwbServiceImplTest {
     @Mock private IBinder mVendorServiceBinder;
     @Mock private Context mContext;
     @Mock private UwbInjector mUwbInjector;
+    @Mock private UwbSettingsStore mUwbSettingsStore;
     @Captor private ArgumentCaptor<IUwbRangingCallbacks> mRangingCbCaptor;
     @Captor private ArgumentCaptor<IBinder.DeathRecipient> mClientDeathCaptor;
     @Captor private ArgumentCaptor<IBinder.DeathRecipient> mVendorServiceDeathCaptor;
+    @Captor private ArgumentCaptor<BroadcastReceiver> mApmModeBroadcastReceiver;
 
     private UwbServiceImpl mUwbServiceImpl;
 
@@ -83,7 +94,15 @@ public class UwbServiceImplTest {
         when(mUwbInjector.getVendorService()).thenReturn(mVendorService);
         when(mUwbInjector.checkUwbRangingPermissionForDataDelivery(any(), any())).thenReturn(true);
         when(mVendorService.asBinder()).thenReturn(mVendorServiceBinder);
+        when(mUwbInjector.getUwbSettingsStore()).thenReturn(mUwbSettingsStore);
+        when(mUwbSettingsStore.get(SETTINGS_TOGGLE_STATE)).thenReturn(true);
+        when(mUwbInjector.getSettingsInt(Settings.Global.AIRPLANE_MODE_ON, 0)).thenReturn(0);
+
         mUwbServiceImpl = new UwbServiceImpl(mContext, mUwbInjector);
+
+        verify(mContext).registerReceiver(
+                mApmModeBroadcastReceiver.capture(),
+                argThat(i -> i.getAction(0).equals(Intent.ACTION_AIRPLANE_MODE_CHANGED)));
     }
 
     @Test
@@ -324,6 +343,17 @@ public class UwbServiceImplTest {
     }
 
     @Test
+    public void testThrowSecurityExceptionWhenSetUwbEnabledCalledWithoutUwbPrivilegedPermission()
+            throws Exception {
+        doThrow(new SecurityException()).when(mContext).enforceCallingOrSelfPermission(
+                eq(UWB_PRIVILEGED), any());
+        try {
+            mUwbServiceImpl.setEnabled(true);
+            fail();
+        } catch (SecurityException e) { /* pass */ }
+    }
+
+    @Test
     public void testThrowSecurityExceptionWhenOpenRangingCalledWithoutUwbRangingPermission()
             throws Exception {
         doThrow(new SecurityException()).when(mUwbInjector).enforceUwbRangingPermissionForPreflight(
@@ -361,5 +391,66 @@ public class UwbServiceImplTest {
         final RangingReport rangingReport = new RangingReport.Builder().build();
         mRangingCbCaptor.getValue().onRangingResult(sessionHandle, rangingReport);
         verify(cb, never()).onRangingResult(sessionHandle, rangingReport);
+    }
+
+    @Test
+    public void testToggleStatePersistenceToSharedPrefs() throws Exception {
+        mUwbServiceImpl.setEnabled(true);
+        verify(mUwbSettingsStore).put(SETTINGS_TOGGLE_STATE, true);
+        verify(mVendorService, times(2)).setEnabled(true);
+
+        when(mUwbSettingsStore.get(SETTINGS_TOGGLE_STATE)).thenReturn(false);
+        mUwbServiceImpl.setEnabled(false);
+        verify(mUwbSettingsStore).put(SETTINGS_TOGGLE_STATE, false);
+        verify(mVendorService).setEnabled(false);
+    }
+
+    @Test
+    public void testToggleStatePersistenceToSharedPrefsWhenApmModeOn() throws Exception {
+        when(mUwbInjector.getSettingsInt(Settings.Global.AIRPLANE_MODE_ON, 0)).thenReturn(1);
+
+        mUwbServiceImpl.setEnabled(true);
+        verify(mUwbSettingsStore).put(SETTINGS_TOGGLE_STATE, true);
+        verify(mVendorService, times(2)).setEnabled(false);
+
+        mUwbServiceImpl.setEnabled(false);
+        verify(mUwbSettingsStore).put(SETTINGS_TOGGLE_STATE, false);
+        verify(mVendorService, times(3)).setEnabled(false);
+    }
+
+    @Test
+    public void testToggleStateReadFromSharedPrefsOnInitialization() throws Exception {
+        when(mVendorService.getAdapterState()).thenReturn(STATE_ENABLED_ACTIVE);
+        assertThat(mUwbServiceImpl.getAdapterState()).isEqualTo(STATE_ENABLED_ACTIVE);
+        // First call to vendor service should be preceded by sending the persisted UWB toggle
+        // state to the vendor stack.
+        verify(mVendorService).setEnabled(true);
+        verify(mVendorService).getAdapterState();
+
+        when(mVendorService.getAdapterState()).thenReturn(STATE_ENABLED_INACTIVE);
+        assertThat(mUwbServiceImpl.getAdapterState()).isEqualTo(STATE_ENABLED_INACTIVE);
+        verify(mVendorService, times(2)).getAdapterState();
+
+        // No new toggle state changes send to vendor stack.
+        verify(mVendorService, times(1)).setEnabled(anyBoolean());
+    }
+
+    @Test
+    public void testApmModeToggle() throws Exception {
+        mUwbServiceImpl.setEnabled(true);
+        verify(mUwbSettingsStore).put(SETTINGS_TOGGLE_STATE, true);
+        verify(mVendorService, times(2)).setEnabled(true);
+
+        // Toggle on
+        when(mUwbInjector.getSettingsInt(Settings.Global.AIRPLANE_MODE_ON, 0)).thenReturn(1);
+        mApmModeBroadcastReceiver.getValue().onReceive(
+                mContext, new Intent(Intent.ACTION_AIRPLANE_MODE_CHANGED));
+        verify(mVendorService).setEnabled(false);
+
+        // Toggle off
+        when(mUwbInjector.getSettingsInt(Settings.Global.AIRPLANE_MODE_ON, 0)).thenReturn(0);
+        mApmModeBroadcastReceiver.getValue().onReceive(
+                mContext, new Intent(Intent.ACTION_AIRPLANE_MODE_CHANGED));
+        verify(mVendorService, times(3)).setEnabled(true);
     }
 }
