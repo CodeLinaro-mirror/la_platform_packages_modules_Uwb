@@ -34,11 +34,12 @@ import android.util.Log;
 import android.uwb.IUwbAdapter;
 import android.uwb.IUwbAdapterStateCallbacks;
 import android.uwb.IUwbRangingCallbacks;
+import android.uwb.RangingChangeReason;
 import android.uwb.SessionHandle;
 import android.uwb.StateChangeReason;
 import android.uwb.UwbManager.AdapterStateCallback;
 
-import com.android.server.uwb.UwbInjector;
+import com.android.server.uwb.UwbCountryCode;
 import com.android.server.uwb.UwbMetrics;
 import com.android.uwb.data.UwbUciConstants;
 import com.android.uwb.info.UwbSpecificationInfo;
@@ -89,12 +90,13 @@ public class UwbService implements INativeUwbManager.DeviceNotification {
     private final UwbSessionManager mSessionManager;
     private final NativeUwbManager mNativeUwbManager;
     private final UwbMetrics mUwbMetrics;
+    private final UwbCountryCode mUwbCountryCode;
     private UwbSpecificationInfo mUwbSpecificationInfo = null;
     private /* @UwbManager.AdapterStateCallback.State */ int mState;
     private @StateChangeReason int mLastStateChangedReason;
 
     public UwbService(Context uwbApplicationContext, NativeUwbManager nativeUwbManager,
-            UwbMetrics uwbMetrics, UwbInjector uwbInjector) {
+            UwbMetrics uwbMetrics, UwbCountryCode uwbCountryCode) {
         mContext = uwbApplicationContext;
 
         Log.d(TAG, "Starting Uwb");
@@ -109,6 +111,7 @@ public class UwbService implements INativeUwbManager.DeviceNotification {
 
         mNativeUwbManager.setDeviceListener(this);
         mUwbMetrics = uwbMetrics;
+        mUwbCountryCode = uwbCountryCode;
         mSessionManager = new UwbSessionManager(mNativeUwbManager, mUwbMetrics);
 
         initIntentFilter();
@@ -230,7 +233,8 @@ public class UwbService implements INativeUwbManager.DeviceNotification {
         }
 
         @Override
-        public PersistableBundle getSpecificationInfo() throws RemoteException {
+        public PersistableBundle getSpecificationInfo()
+                throws RemoteException {
             if (mUwbSpecificationInfo == null) {
                 mUwbSpecificationInfo = mNativeUwbManager.getSpecificationInfo();
             }
@@ -267,6 +271,10 @@ public class UwbService implements INativeUwbManager.DeviceNotification {
                         cccOpenRangingParams, rangingCallbacks);
             } else {
                 Log.e(TAG, "openRanging - Wrong parameters");
+                try {
+                    rangingCallbacks.onRangingOpenFailed(sessionHandle,
+                            RangingChangeReason.BAD_PARAMETERS, new PersistableBundle());
+                } catch (RemoteException e) { }
             }
         }
 
@@ -381,6 +389,8 @@ public class UwbService implements INativeUwbManager.DeviceNotification {
                         Log.i(TAG, "Initialization success");
                         /* TODO : keep it until MW, FW fix b/196943897 */
                         handleDeviceStatusNotification(UwbUciConstants.DEVICE_STATE_READY);
+                        // Set country code on every enable.
+                        mUwbCountryCode.setCountryCode();
                     }
                 } finally {
                     mUwbWakeLock.release();
