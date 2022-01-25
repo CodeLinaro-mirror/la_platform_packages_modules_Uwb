@@ -17,6 +17,7 @@
 package android.uwb;
 
 import android.annotation.IntDef;
+import android.annotation.IntRange;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.annotation.SuppressLint;
@@ -36,6 +37,10 @@ import java.util.Objects;
  */
 @SystemApi
 public final class RangingMeasurement implements Parcelable {
+    public static final int RSSI_UNKNOWN = -128;
+    public static final int RSSI_MIN = -127;
+    public static final int RSSI_MAX = -1;
+
     private final UwbAddress mRemoteDeviceAddress;
     private final @Status int mStatus;
     private final long mElapsedRealtimeNanos;
@@ -43,12 +48,15 @@ public final class RangingMeasurement implements Parcelable {
     private final AngleOfArrivalMeasurement mAngleOfArrivalMeasurement;
     private final AngleOfArrivalMeasurement mDestinationAngleOfArrivalMeasurement;
     private final @LineOfSight int mLineOfSight;
+    private final @MeasurementFocus int mMeasurementFocus;
+    private final int mRssiDbm;
 
     private RangingMeasurement(@NonNull UwbAddress remoteDeviceAddress, @Status int status,
             long elapsedRealtimeNanos, @Nullable DistanceMeasurement distanceMeasurement,
             @Nullable AngleOfArrivalMeasurement angleOfArrivalMeasurement,
             @Nullable AngleOfArrivalMeasurement destinationAngleOfArrivalMeasurement,
-            @LineOfSight int lineOfSight) {
+            @LineOfSight int lineOfSight, @MeasurementFocus int measurementFocus,
+            @IntRange(from = RSSI_UNKNOWN, to = RSSI_MAX) int rssiDbm) {
         mRemoteDeviceAddress = remoteDeviceAddress;
         mStatus = status;
         mElapsedRealtimeNanos = elapsedRealtimeNanos;
@@ -56,6 +64,8 @@ public final class RangingMeasurement implements Parcelable {
         mAngleOfArrivalMeasurement = angleOfArrivalMeasurement;
         mDestinationAngleOfArrivalMeasurement = destinationAngleOfArrivalMeasurement;
         mLineOfSight = lineOfSight;
+        mMeasurementFocus = measurementFocus;
+        mRssiDbm = rssiDbm;
     }
 
     /**
@@ -187,6 +197,56 @@ public final class RangingMeasurement implements Parcelable {
     }
 
     /**
+     * Get the measured RSSI in dBm
+     */
+    public @IntRange(from = RSSI_UNKNOWN, to = RSSI_MAX) int getRssiDbm() {
+        return mRssiDbm;
+    }
+
+    /**
+     * @hide
+     */
+    @Retention(RetentionPolicy.SOURCE)
+    @IntDef(value = {
+            MEASUREMENT_FOCUS_NONE,
+            MEASUREMENT_FOCUS_RANGE,
+            MEASUREMENT_FOCUS_ANGLE_OF_ARRIVAL_AZIMUTH,
+            MEASUREMENT_FOCUS_ANGLE_OF_ARRIVAL_ELEVATION})
+    public @interface MeasurementFocus {}
+
+    /**
+     * Ranging measurement was done with no particular focus in terms of antennae selection.
+     */
+    public static final int MEASUREMENT_FOCUS_NONE = 0;
+
+    /**
+     * Ranging measurement was done with a focus on range calculation in terms of antennae
+     * selection.
+     */
+    public static final int MEASUREMENT_FOCUS_RANGE = 1;
+
+    /**
+     * Ranging measurement was done with a focus on ANGLE_OF_ARRIVAL azimuth calculation in terms of
+     * antennae selection.
+     */
+    public static final int MEASUREMENT_FOCUS_ANGLE_OF_ARRIVAL_AZIMUTH = 1;
+
+    /**
+     * Ranging measurement was done with a focus on ANGLE_OF_ARRIVAL azimuth calculation in terms of
+     * antennae selection.
+     */
+    public static final int MEASUREMENT_FOCUS_ANGLE_OF_ARRIVAL_ELEVATION = 2;
+
+    /**
+     * Gets the measurement focus in terms of antennae used for this measurement.
+     *
+     * @return focus of this measurement.
+     */
+    public @MeasurementFocus int getMeasurementFocus() {
+        return mMeasurementFocus;
+    }
+
+    /**
      * @hide
      */
     @Override
@@ -204,7 +264,9 @@ public final class RangingMeasurement implements Parcelable {
                     && mAngleOfArrivalMeasurement.equals(other.getAngleOfArrivalMeasurement())
                     && mDestinationAngleOfArrivalMeasurement.equals(
                             other.getDestinationAngleOfArrivalMeasurement())
-                    && mLineOfSight == other.getLineOfSight();
+                    && mLineOfSight == other.getLineOfSight()
+                    && mMeasurementFocus == other.getMeasurementFocus()
+                    && mRssiDbm == other.getRssiDbm();
         }
         return false;
     }
@@ -216,7 +278,7 @@ public final class RangingMeasurement implements Parcelable {
     public int hashCode() {
         return Objects.hash(mRemoteDeviceAddress, mStatus, mElapsedRealtimeNanos,
                 mDistanceMeasurement, mAngleOfArrivalMeasurement,
-                mDestinationAngleOfArrivalMeasurement, mLineOfSight);
+                mDestinationAngleOfArrivalMeasurement, mLineOfSight, mMeasurementFocus, mRssiDbm);
     }
 
     @Override
@@ -233,6 +295,8 @@ public final class RangingMeasurement implements Parcelable {
         dest.writeParcelable(mAngleOfArrivalMeasurement, flags);
         dest.writeParcelable(mDestinationAngleOfArrivalMeasurement, flags);
         dest.writeInt(mLineOfSight);
+        dest.writeInt(mMeasurementFocus);
+        dest.writeInt(mRssiDbm);
     }
 
     public static final @android.annotation.NonNull Creator<RangingMeasurement> CREATOR =
@@ -251,6 +315,8 @@ public final class RangingMeasurement implements Parcelable {
                     builder.setDestinationAngleOfArrivalMeasurement(
                             in.readParcelable(AngleOfArrivalMeasurement.class.getClassLoader()));
                     builder.setLineOfSight(in.readInt());
+                    builder.setMeasurementFocus(in.readInt());
+                    builder.setRssiDbm(in.readInt());
                     return builder.build();
                 }
 
@@ -268,6 +334,7 @@ public final class RangingMeasurement implements Parcelable {
                 + ", aoa measurement: " + mAngleOfArrivalMeasurement
                 + ", dest aoa measurement: " + mDestinationAngleOfArrivalMeasurement
                 + ", lineOfSight: " + mLineOfSight
+                + ", rssiDbm: " + mRssiDbm
                 + "]";
     }
 
@@ -281,7 +348,9 @@ public final class RangingMeasurement implements Parcelable {
         private DistanceMeasurement mDistanceMeasurement = null;
         private AngleOfArrivalMeasurement mAngleOfArrivalMeasurement = null;
         private AngleOfArrivalMeasurement mDestinationAngleOfArrivalMeasurement = null;
-        private @LineOfSight int mLineOfSight;
+        private @LineOfSight int mLineOfSight = LOS_UNDETERMINED;
+        private @MeasurementFocus int mMeasurementFocus = MEASUREMENT_FOCUS_NONE;
+        private int mRssiDbm = RSSI_UNKNOWN;
 
         /**
          * Set the remote device address that this measurement is for
@@ -368,6 +437,31 @@ public final class RangingMeasurement implements Parcelable {
         }
 
         /**
+         * Sets the measurement focus in terms of antennae used for this measurement.
+         *
+         * @param measurementFocus focus of this measurement.
+         */
+        @NonNull
+        public Builder setMeasurementFocus(@MeasurementFocus int measurementFocus) {
+            mMeasurementFocus = measurementFocus;
+            return this;
+        }
+
+        /**
+         * Set the RSSI in dBm
+         *
+         * @param rssiDbm the measured RSSI in dBm
+         */
+        @NonNull
+        public Builder setRssiDbm(@IntRange(from = RSSI_UNKNOWN, to = RSSI_MAX) int rssiDbm) {
+            if (rssiDbm != RSSI_UNKNOWN && (rssiDbm < RSSI_MIN || rssiDbm > RSSI_MAX)) {
+                throw new IllegalArgumentException("Invalid rssiDbm: " + rssiDbm);
+            }
+            mRssiDbm = rssiDbm;
+            return this;
+        }
+
+        /**
          * Build the {@link RangingMeasurement} object
          *
          * @throws IllegalStateException if a distance or angle of arrival measurement is provided
@@ -402,7 +496,8 @@ public final class RangingMeasurement implements Parcelable {
 
             return new RangingMeasurement(mRemoteDeviceAddress, mStatus, mElapsedRealtimeNanos,
                     mDistanceMeasurement, mAngleOfArrivalMeasurement,
-                    mDestinationAngleOfArrivalMeasurement, mLineOfSight);
+                    mDestinationAngleOfArrivalMeasurement, mLineOfSight, mMeasurementFocus,
+                    mRssiDbm);
         }
     }
 }
