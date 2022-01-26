@@ -32,6 +32,8 @@ import android.uwb.RangingChangeReason;
 import android.uwb.SessionHandle;
 import android.uwb.UwbAddress;
 
+import com.android.server.uwb.UwbMetrics;
+import com.android.server.uwb.proto.UwbStatsLog;
 import com.android.uwb.data.UwbCccConstants;
 import com.android.uwb.data.UwbMulticastListUpdateStatus;
 import com.android.uwb.data.UwbRangingData;
@@ -48,10 +50,10 @@ import com.google.uwb.support.fira.FiraRangingReconfigureParams;
 
 import java.nio.ByteBuffer;
 import java.util.Arrays;
-import java.util.Hashtable;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -68,16 +70,18 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
     private static final int SESSION_RECONFIG_RANGING = 4;
     private static final int SESSION_CLOSE = 5;
 
-    private final Hashtable<Integer, UwbSession> mSessionTable = new Hashtable();
+    private final ConcurrentHashMap<Integer, UwbSession> mSessionTable = new ConcurrentHashMap();
     private final NativeUwbManager mNativeUwbManager;
+    private final UwbMetrics mUwbMetrics;
     private final UwbSessionNotificationManager mSessionNotificationManager;
     private final UwbConfigurationManager mConfigurationManager;
     private final int mMaxSessionNumber;
     private final EventTask mEventTask;
 
-    public UwbSessionManager(NativeUwbManager nativeUwbManager) {
+    public UwbSessionManager(NativeUwbManager nativeUwbManager, UwbMetrics uwbMetrics) {
         mNativeUwbManager = nativeUwbManager;
         mNativeUwbManager.setSessionListener(this);
+        mUwbMetrics = uwbMetrics;
         mConfigurationManager = new UwbConfigurationManager(nativeUwbManager);
         mSessionNotificationManager = new UwbSessionNotificationManager();
         mMaxSessionNumber = mNativeUwbManager.getMaxSessionNumber();
@@ -93,6 +97,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
         UwbSession uwbSession = getUwbSession((int) sessionId);
         if (uwbSession != null) {
             mSessionNotificationManager.onRangingResult(uwbSession, rangingData);
+            mUwbMetrics.logRangingResult(uwbSession.getProfileType(), rangingData);
         } else {
             Log.i(TAG, "Session is not initialized or Ranging Data is Null");
         }
@@ -107,7 +112,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
             Log.d(TAG, "onSessionStatusNotificationReceived - invalid session");
             return;
         }
-
+        uwbSession.setMulticastListUpdateStatus(multicastListUpdateStatus);
         synchronized (uwbSession.getWaitObj()) {
             uwbSession.getWaitObj().notify();
         }
@@ -345,6 +350,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
                     REASON_STATE_CHANGE_WITH_SESSION_MANAGEMENT_COMMANDS);
             removeSession(uwbSession);
         }
+
         mNativeUwbManager.resetDevice(UwbUciConstants.UWBS_RESET);
     }
 
@@ -371,8 +377,8 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
         return mSessionTable.keySet();
     }
 
-    public int reconfigurations(SessionHandle sessionHandle, PersistableBundle params) {
-        Log.i(TAG, "reconfigurations() - Session Handle : " + sessionHandle);
+    public int reconfigure(SessionHandle sessionHandle, PersistableBundle params) {
+        Log.i(TAG, "reconfigure() - Session Handle : " + sessionHandle);
         int status = UwbUciConstants.STATUS_CODE_ERROR_SESSION_NOT_EXIST;
         if (!isExistedSession(sessionHandle)) {
             Log.i(TAG, "Not initialized session ID");
@@ -429,7 +435,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
                 case SESSION_RECONFIG_RANGING: {
                     Log.d(TAG, "SESSION_RECONFIG_RANGING");
                     Pair<SessionHandle, Params> info = (Pair<SessionHandle, Params>) msg.obj;
-                    reconfigurations(info.first, info.second);
+                    reconfigure(info.first, info.second);
                     break;
                 }
 
@@ -464,6 +470,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
                                     getSessionType(uwbSession.getParams().getProtocolName()));
 
                             if (status != UwbUciConstants.STATUS_CODE_OK) {
+                                mUwbMetrics.logRangingSessionInitEvent(uwbSession, status);
                                 return status;
                             }
 
@@ -473,6 +480,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
                                     == UwbUciConstants.UWB_SESSION_STATE_INIT) {
                                 status = UwbSessionManager.this.setAppConfigurations(uwbSession);
                                 if (status != UwbUciConstants.STATUS_CODE_OK) {
+                                    mUwbMetrics.logRangingSessionInitEvent(uwbSession, status);
                                     return status;
                                 }
 
@@ -485,8 +493,10 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
                                 } else {
                                     status = UwbUciConstants.STATUS_CODE_FAILED;
                                 }
+                                mUwbMetrics.logRangingSessionInitEvent(uwbSession, status);
                                 return status;
                             }
+                            mUwbMetrics.logRangingSessionInitEvent(uwbSession, status);
                             return status;
                         }
                     });
@@ -511,6 +521,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
                 Log.i(TAG, "Failed to initialize session - status : " + status);
                 mSessionNotificationManager.onRangingOpenFailed(uwbSession, status);
                 mNativeUwbManager.deInitSession(uwbSession.getSessionId());
+                mUwbMetrics.logRangingSessionInitEvent(uwbSession, status);
                 removeSession(uwbSession);
             }
             Log.i(TAG, "sessionInit() : finish - sessionId : " + uwbSession.getSessionId());
@@ -611,7 +622,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
             }
         }
 
-        private void reconfigurations(SessionHandle sessionHandle, Params param) {
+        private void reconfigure(SessionHandle sessionHandle, Params param) {
             FiraRangingReconfigureParams rangingReconfigureParams =
                     (FiraRangingReconfigureParams) param;
             UwbSession uwbSession = getUwbSession(getSessionId(sessionHandle));
@@ -639,12 +650,25 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
                                 if (status != UwbUciConstants.STATUS_CODE_OK) {
                                     return status;
                                 }
-                                /*
-                                    TODO - Add synchornized lock after UWB FW is fixed
-                                    - FW send notification depends on session status
-                                */
 
-                                //uwbSession.getWaitObj().wait();
+                                uwbSession.getWaitObj().wait();
+
+                                UwbMulticastListUpdateStatus multicastList =
+                                        uwbSession.getMulticastListUpdateStatus();
+                                if (multicastList != null) {
+                                    if (rangingReconfigureParams.getAction()
+                                            == FiraParams.MULTICAST_LIST_UPDATE_ACTION_ADD) {
+                                        for (int i = 0; i < multicastList.getNumOfControlee();
+                                                i++) {
+                                            if (multicastList.getStatus()[i]
+                                                    != UwbUciConstants.STATUS_CODE_OK) {
+                                                //TODO - Need implement for partial fail case.
+                                                return UwbUciConstants.STATUS_CODE_FAILED;
+                                            }
+                                        }
+                                    }
+                                }
+
                             }
 
                             status = mConfigurationManager.setAppConfigurations(
@@ -668,7 +692,6 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
             } catch (TimeoutException e) {
                 Log.i(TAG, "Failed to Reconfigure - status : TIMEOUT");
                 executor.shutdownNow();
-                mSessionNotificationManager.onRangingReconfigureFailed(uwbSession, status);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             } catch (ExecutionException e) {
@@ -727,6 +750,8 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
         public boolean isWait;
         private Params mParams;
         private int mSessionState;
+        private UwbMulticastListUpdateStatus mMulticastListUpdateStatus;
+        private final int mProfileType;
 
         UwbSession(SessionHandle sessionHandle, int sessionId, String protocolName,
                 Params params, IUwbRangingCallbacks iUwbRangingCallbacks) {
@@ -739,6 +764,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
             this.mParams = params;
             this.mWaitObj = new Object();
             this.isWait = false;
+            this.mProfileType = convertProtolNameToProfileType(protocolName);
         }
 
         public int getSessionId() {
@@ -773,6 +799,29 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
             this.mSessionState = state;
         }
 
+        public void setMulticastListUpdateStatus(
+                UwbMulticastListUpdateStatus multicastListUpdateStatus) {
+            mMulticastListUpdateStatus = multicastListUpdateStatus;
+        }
+
+        public UwbMulticastListUpdateStatus getMulticastListUpdateStatus() {
+            return mMulticastListUpdateStatus;
+        }
+
+        private int convertProtolNameToProfileType(String protocolName) {
+            if (protocolName.equals(FiraParams.PROTOCOL_NAME)) {
+                return UwbStatsLog.UWB_SESSION_INITIATED__PROFILE__FIRA;
+            } else if (protocolName.equals(CccParams.PROTOCOL_NAME)) {
+                return UwbStatsLog.UWB_SESSION_INITIATED__PROFILE__CCC;
+            } else {
+                return UwbStatsLog.UWB_SESSION_INITIATED__PROFILE__CUSTOMIZED;
+            }
+        }
+
+        public int getProfileType() {
+            return mProfileType;
+        }
+
         public IBinder getBinder() {
             return mIBinder;
         }
@@ -782,7 +831,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
         }
 
         @Override
-        public void binderDied() { // TODO: if multi session... (1 application, 2 session)
+        public void binderDied() {
             Log.i(TAG, "binderDied : getSessionId is getSessionId() " + getSessionId());
 
             synchronized (UwbSessionManager.this) {

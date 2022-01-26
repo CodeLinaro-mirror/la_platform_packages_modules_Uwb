@@ -15,6 +15,7 @@
  */
 package com.android.uwb.jni;
 
+import android.os.SystemProperties;
 import android.util.Log;
 
 import com.android.uwb.data.UwbMulticastListUpdateStatus;
@@ -38,7 +39,12 @@ public class NativeUwbManager {
     }
 
     protected void loadLibrary() {
-        System.loadLibrary("uwb_uci_jni");
+        // TODO(b/197341298): Remove this when rust native stack is ready.
+        if (SystemProperties.getBoolean("persist.uwb.enable_uci_rust_stack", false)) {
+            System.loadLibrary("uwb_uci_jni_rust");
+        } else {
+            System.loadLibrary("uwb_uci_jni");
+        }
         nativeInit();
     }
 
@@ -96,7 +102,9 @@ public class NativeUwbManager {
     }
 
     public synchronized long getTimestampResolutionNanos() {
-        return nativeGetTimestampResolutionNanos();
+        return 0L;
+        /* TODO: Not Implemented in native stack
+        return nativeGetTimestampResolutionNanos(); */
     }
 
     public UwbSpecificationInfo getSpecificationInfo() {
@@ -222,20 +230,20 @@ public class NativeUwbManager {
      *                     0x01 - removing
      * @param noOfControlee : The number(n) of Controlees
      * @param address       : address list of Controlees
-     * @param subSessionIds : Specific sub-session ID list of Controlees
+     * @param subSessionId : Specific sub-session ID list of Controlees
      * @return : refer to SESSION_SET_APP_CONFIG_RSP
      * in the Table 16: Control messages to set Application configurations
      */
     public byte controllerMulticastListUpdate(int sessionId, int action, int noOfControlee,
-            byte[] address, int[]subSessionIds) {
-    /*TODO :
-       1. change address type short[] to byte[]
-       2. call native function after jni function is implemented correctly
-     */
+            byte[] address, int[]subSessionId) {
+        /**
+         * TODO:
+         * 1. change address type short[] to byte[]
+         * 2. call native function after jni function is implemented correctly
+         */
         synchronized (mSessionFnLock) {
-            return (byte) 0x00;
-            /*return nativeControllerMulticastListUpdate(sessionId, action, noOfControlee,
-                    address, subSessionIds);*/
+            return nativeControllerMulticastListUpdate(sessionId, (byte) action,
+                    (byte) noOfControlee, address, subSessionId);
         }
     }
 
@@ -268,7 +276,6 @@ public class NativeUwbManager {
     private native byte[] nativeSetAppConfigurations(int sessionId, int noOfParams,
             int appConfigParamLen, byte[] appConfigParams);
 
-    /*
-    private native byte nativeControllerMulticastListUpdate(int sessionId, int action,
-            int noOfControlee, byte[] address, int[]subSessionIds);*/
+    private native byte nativeControllerMulticastListUpdate(int sessionId, byte action,
+            byte noOfControlee, byte[] address, int[]subSessionId);
 }

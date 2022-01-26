@@ -33,8 +33,10 @@ import android.provider.Settings;
 import android.util.ArrayMap;
 import android.util.Log;
 import android.uwb.IUwbAdapter;
+import android.uwb.IUwbAdapter2;
 import android.uwb.IUwbAdapterStateCallbacks;
 import android.uwb.IUwbRangingCallbacks;
+import android.uwb.IUwbRangingCallbacks2;
 import android.uwb.RangingReport;
 import android.uwb.RangingSession;
 import android.uwb.SessionHandle;
@@ -48,14 +50,15 @@ import java.io.PrintWriter;
 import java.util.Map;
 
 /**
- * Implementation of {@link android.uwb.IUwbAdapter} binder service.
+ * Implementation of {@link android.uwb.IUwbAdapter2} binder service.
  */
-public class UwbServiceImpl extends IUwbAdapter.Stub implements IBinder.DeathRecipient{
+public class UwbServiceImpl extends IUwbAdapter2.Stub implements IBinder.DeathRecipient{
     private static final String TAG = "UwbServiceImpl";
 
     private final Context mContext;
     private final UwbInjector mUwbInjector;
     private final UwbSettingsStore mUwbSettingsStore;
+    private final UwbMetrics mUwbMetrics;
     /**
      * Map for storing the callbacks wrapper for each session.
      */
@@ -77,12 +80,12 @@ public class UwbServiceImpl extends IUwbAdapter.Stub implements IBinder.DeathRec
             implements IBinder.DeathRecipient {
         private final AttributionSource mAttributionSource;
         private final SessionHandle mSessionHandle;
-        private final IUwbRangingCallbacks mExternalCb;
+        private final IUwbRangingCallbacks2 mExternalCb;
         private boolean mIsValid;
 
         UwbRangingCallbacksWrapper(@NonNull AttributionSource attributionSource,
                 @NonNull SessionHandle sessionHandle,
-                @NonNull IUwbRangingCallbacks externalCb) {
+                @NonNull IUwbRangingCallbacks2 externalCb) {
             mAttributionSource = attributionSource;
             mSessionHandle = sessionHandle;
             mExternalCb = externalCb;
@@ -247,8 +250,9 @@ public class UwbServiceImpl extends IUwbAdapter.Stub implements IBinder.DeathRec
         if (mVendorUwbAdapter != null) return mVendorUwbAdapter;
         // TODO(b/196225233): Remove this when qorvo stack is integrated.
         if (SystemProperties.getBoolean("persist.uwb.enable_uci_stack", false)) {
-          Log.i(TAG, "Using the UCI stack");
-          mVendorUwbAdapter = new UwbService(mContext, new NativeUwbManager()).getIUwbAdapter();
+            Log.i(TAG, "Using the UCI stack");
+            mVendorUwbAdapter = new UwbService(mContext, new NativeUwbManager(), mUwbMetrics,
+                    mUwbInjector).getIUwbAdapter();
         } else {
             Log.i(TAG, "Using the legacy stack");
             mVendorUwbAdapter = mUwbInjector.getVendorService();
@@ -267,7 +271,7 @@ public class UwbServiceImpl extends IUwbAdapter.Stub implements IBinder.DeathRec
         mContext = context;
         mUwbInjector = uwbInjector;
         mUwbSettingsStore = uwbInjector.getUwbSettingsStore();
-
+        mUwbMetrics = new UwbMetrics(uwbInjector);
         registerAirplaneModeReceiver();
     }
 
@@ -288,6 +292,7 @@ public class UwbServiceImpl extends IUwbAdapter.Stub implements IBinder.DeathRec
             return;
         }
         mUwbSettingsStore.dump(fd, pw, args);
+        mUwbMetrics.dump(fd, pw, args);
     }
 
     private void enforceUwbPrivilegedPermission() {
@@ -323,7 +328,7 @@ public class UwbServiceImpl extends IUwbAdapter.Stub implements IBinder.DeathRec
 
     @Override
     public void openRanging(AttributionSource attributionSource,
-            SessionHandle sessionHandle, IUwbRangingCallbacks rangingCallbacks,
+            SessionHandle sessionHandle, IUwbRangingCallbacks2 rangingCallbacks,
             PersistableBundle parameters) throws RemoteException {
         enforceUwbPrivilegedPermission();
         mUwbInjector.enforceUwbRangingPermissionForPreflight(attributionSource);
