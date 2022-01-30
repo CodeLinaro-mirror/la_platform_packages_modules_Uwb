@@ -35,6 +35,7 @@ public class NativeUwbManager {
     public final Object mSetAppConfigFnLock = new Object();
     protected INativeUwbManager.DeviceNotification mDeviceListener;
     protected INativeUwbManager.SessionNotification mSessionListener;
+    private long mDispatcherPointer;
 
     public NativeUwbManager() {
         loadLibrary();
@@ -48,6 +49,9 @@ public class NativeUwbManager {
             System.loadLibrary("uwb_uci_jni");
         }
         nativeInit();
+        if (SystemProperties.getBoolean("persist.uwb.enable_uci_rust_stack", false)) {
+            this.mDispatcherPointer = nativeDispatcherNew();
+        }
     }
 
     public void setDeviceListener(INativeUwbManager.DeviceNotification deviceListener) {
@@ -100,7 +104,11 @@ public class NativeUwbManager {
      * @return : If this returns true, UWB is off
      */
     public synchronized boolean doDeinitialize() {
-        return nativeDoDeinitialize();
+        boolean res = nativeDoDeinitialize();
+        if (res && SystemProperties.getBoolean("persist.uwb.enable_uci_rust_stack", false)) {
+            nativeDispatcherDestroy();
+        }
+        return res;
     }
 
     public synchronized long getTimestampResolutionNanos() {
@@ -224,6 +232,23 @@ public class NativeUwbManager {
     }
 
     /**
+     * Get APP Configuration Parameters for the requested UWB session
+     *
+     * @param noOfParams        : The number (n) of APP Configuration Parameters
+     * @param appConfigParamLen : The length of APP Configuration Parameters
+     * @param appConfigIds      : APP Configuration Parameter
+     * @return : refer to SESSION_GET_APP_CONFIG_RSP in the Table 16: Control messages to get
+     * Application configurations
+     */
+    public byte[] getAppConfigurations(int sessionId, int noOfParams, int appConfigParamLen,
+            byte[] appConfigIds) {
+        synchronized (mSetAppConfigFnLock) {
+            return nativeGetAppConfigurations(sessionId, noOfParams, appConfigParamLen,
+                    appConfigIds);
+        }
+    }
+
+    /**
      * Update Multicast list for the requested UWB session
      *
      * @param sessionId  : Session ID to which multicast list to be updated
@@ -289,6 +314,10 @@ public class NativeUwbManager {
         return "defaultChipId";
     }
 
+    private native long nativeDispatcherNew();
+
+    private native void nativeDispatcherDestroy();
+
     private native boolean nativeInit();
 
     private native boolean nativeDoInitialize();
@@ -316,6 +345,9 @@ public class NativeUwbManager {
     private native byte nativeGetSessionState(int sessionId);
 
     private native byte[] nativeSetAppConfigurations(int sessionId, int noOfParams,
+            int appConfigParamLen, byte[] appConfigParams);
+
+    private native byte[] nativeGetAppConfigurations(int sessionId, int noOfParams,
             int appConfigParamLen, byte[] appConfigParams);
 
     private native byte nativeControllerMulticastListUpdate(int sessionId, byte action,
