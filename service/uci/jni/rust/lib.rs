@@ -1,11 +1,13 @@
 //! jni for uwb native stack
+use android_logger::FilterBuilder;
 use jni::JNIEnv;
 use jni::objects::{JObject, JValue};
 use jni::sys::{jboolean, jbyte, jbyteArray, jint, jintArray, jlong, jobject};
-use log::{error, info, warn};
-use uwb_uci_rust::adaptation::UwbAdaptation;
+use log::{error, info, warn, LevelFilter};
+use uwb_uci_rust::event_manager::EventManager;
 use uwb_uci_rust::error::UwbErr;
-use uwb_uci_rust::uci::{Dispatcher, JNICommand};
+use uwb_uci_rust::uci::{BlockingJNICommand, Dispatcher, JNICommand, uci_hrcv::UciResponse};
+use uwb_uci_packets::StatusCode;
 
 const STATUS_OK: i8 = 0;
 const STATUS_FAILED: i8 = 2;
@@ -13,8 +15,12 @@ const STATUS_FAILED: i8 = 2;
 /// Initialize UWB
 #[no_mangle]
 pub extern "system" fn Java_com_android_uwb_jni_NativeUwbManager_nativeInit(_env: JNIEnv, _obj: JObject) -> jboolean {
-    logger::init(
-        logger::Config::default().with_tag_on_device("uwb").with_min_level(log::Level::Trace),
+    let crates_log_lvl_filter = FilterBuilder::new()
+            .filter(None, LevelFilter::Trace) // default log level
+            .filter(Some("jni"), LevelFilter::Info) // reduced log level for jni crate
+            .build();
+    android_logger::init_once(
+        android_logger::Config::default().with_tag("uwb").with_min_level(log::Level::Trace).with_filter(crates_log_lvl_filter),
     );
     info!("Java_com_android_uwb_jni_NativeUwbManager_nativeInit: enter");
     true as jboolean
@@ -162,13 +168,16 @@ fn byte_result_helper(result: Result<(), UwbErr>, function_name: &str) -> jbyte 
 
 fn do_initialize(env: JNIEnv, obj: JObject) -> Result<(), UwbErr> {
     dispatch_command(env, obj, JNICommand::UwaEnable)?;
-    let mut uwb_adaptation = UwbAdaptation::new(None);
-    uwb_adaptation.initialize();
     uwa_init(); // todo: implement this
     clear_all_session_context(); // todo: implement this
     uwa_enable()?; // todo: implement this, and add a lock here
-    uwb_adaptation.core_initialization()?;
-    uwa_get_device_info()?;
+    match uwa_get_device_info(env, obj) {
+        Ok(device_info) => info!("Get the device info: {:?}", device_info),
+        Err(e) => {
+            warn!("Failed to get device info with: {:?}", e);
+            return Err(UwbErr::failed());
+        },
+    }
     match set_core_device_configurations() {
         Ok(()) => {
             info!("set_core_device_configurations is success");
@@ -180,7 +189,6 @@ fn do_initialize(env: JNIEnv, obj: JObject) -> Result<(), UwbErr> {
         Ok(()) => info!("UWA_disable(false) success."),
         _ => warn!("UWA_disable(false) is failed."),
     };
-    uwb_adaptation.finalize(false);
     Err(UwbErr::failed())
 }
 
@@ -192,7 +200,16 @@ fn do_deinitialize(env: JNIEnv, obj: JObject) -> Result<(), UwbErr> {
 }
 
 fn session_init(env: JNIEnv, obj: JObject, session_id: u32, session_type: u8) -> Result<(), UwbErr> {
-    dispatch_command(env, obj, JNICommand::UwaSessionInit(session_id, session_type))
+    let dispatcher = get_dispatcher(env, obj)?;
+    let res = match dispatcher.block_on_jni_command(BlockingJNICommand::UwaSessionInit(session_id, session_type))? {
+        UciResponse::SessionInitRsp(data) => data,
+        _ => return Err(UwbErr::failed()),
+    };
+    info!("session_init_response: {:?}", res);
+    match res.status {
+        StatusCode::UciStatusOk => Ok(()),
+        _ => Err(UwbErr::failed()),
+    }
 }
 
 fn session_deinit(env: JNIEnv, obj: JObject, session_id: u32) -> Result<(), UwbErr> {
@@ -236,6 +253,10 @@ fn dispatch_command(env: JNIEnv, obj: JObject, command: JNICommand) -> Result<()
 fn get_dispatcher<'a>(env: JNIEnv, obj: JObject) -> Result<&'a mut Dispatcher, UwbErr> {
     let dispatcher_ptr_value = env.get_field(obj, "mDispatcherPointer", "J")?;
     let dispatcher_ptr = dispatcher_ptr_value.j()?;
+    if dispatcher_ptr == 0i64 {
+        warn!("The dispatcher is not initialized.");
+        return Err(UwbErr::NoneDispatcher);
+    }
     // Safety: dispatcher pointer must not be a null pointer and it must point to a valid dispatcher object.
     // This can be ensured because the dispatcher is created in an earlier stage and
     // won't be deleted before calling doDeinitialize.
@@ -244,8 +265,9 @@ fn get_dispatcher<'a>(env: JNIEnv, obj: JObject) -> Result<&'a mut Dispatcher, U
 
 /// create a dispatcher instance
 #[no_mangle]
-pub extern "system" fn Java_com_android_uwb_jni_NativeUwbManager_nativeDispatcherNew(_env: JNIEnv, _obj: JObject) -> jlong {
-    let dispatcher = match Dispatcher::new() {
+pub extern "system" fn Java_com_android_uwb_jni_NativeUwbManager_nativeDispatcherNew(env: JNIEnv, obj: JObject) -> jlong {
+    let eventmanager = EventManager::new(env, obj).expect("Failed to create event manager");
+    let dispatcher = match Dispatcher::new(eventmanager) {
         Ok(dispatcher) => dispatcher,
         Err(_err) => panic!("Fail to create dispatcher"),
     };
@@ -276,8 +298,10 @@ fn uwa_init() {
 
 }
 
-fn uwa_get_device_info() -> Result<(), UwbErr> {
-    Ok(())
+fn uwa_get_device_info(env: JNIEnv, obj: JObject) -> Result<UciResponse, UwbErr> {
+    let dispatcher = get_dispatcher(env, obj)?;
+    let res = dispatcher.block_on_jni_command(BlockingJNICommand::GetDeviceInfo)?;
+    Ok(res)
 }
 
 fn uwa_enable() -> Result<(), UwbErr> {
@@ -293,5 +317,5 @@ fn uwa_disable(_para: bool) -> Result<(), UwbErr> {
 }
 
 fn set_core_device_configurations() -> Result<(), UwbErr> {
-    Err(UwbErr::failed())
+    Ok(())
 }
