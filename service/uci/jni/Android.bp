@@ -62,10 +62,12 @@ rust_ffi_shared {
     min_sdk_version: "current",
     srcs: ["rust/lib.rs"],
     rustlibs: [
+        "libandroid_logger",
         "libjni",
         "liblog_rust",
         "libbinder_rs",
         "liblogger",
+        "libuwb_uci_packets",
         "libuwb_uci_rust",
     ],
     shared_libs: [
