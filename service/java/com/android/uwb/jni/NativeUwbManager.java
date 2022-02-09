@@ -15,9 +15,10 @@
  */
 package com.android.uwb.jni;
 
-import android.os.SystemProperties;
+import android.annotation.NonNull;
 import android.util.Log;
 
+import com.android.server.uwb.UwbInjector;
 import com.android.uwb.data.UwbMulticastListUpdateStatus;
 import com.android.uwb.data.UwbRangingData;
 import com.android.uwb.data.UwbUciConstants;
@@ -33,17 +34,21 @@ public class NativeUwbManager {
     public final Object mGetRangingCountFnLock = new Object();
     public final Object mGetSessionStatusFnLock = new Object();
     public final Object mSetAppConfigFnLock = new Object();
+    private final UwbInjector mUwbInjector;
     protected INativeUwbManager.DeviceNotification mDeviceListener;
     protected INativeUwbManager.SessionNotification mSessionListener;
     private long mDispatcherPointer;
+    protected INativeUwbManager.VendorNotification mVendorListener;
 
-    public NativeUwbManager() {
+
+    public NativeUwbManager(@NonNull UwbInjector uwbInjector) {
+        mUwbInjector = uwbInjector;
         loadLibrary();
     }
 
     protected void loadLibrary() {
         // TODO(b/197341298): Remove this when rust native stack is ready.
-        if (SystemProperties.getBoolean("persist.uwb.enable_uci_rust_stack", false)) {
+        if (mUwbInjector.isUciRustStackEnabled()) {
             System.loadLibrary("uwb_uci_jni_rust");
         } else {
             System.loadLibrary("uwb_uci_jni");
@@ -57,6 +62,10 @@ public class NativeUwbManager {
 
     public void setSessionListener(INativeUwbManager.SessionNotification sessionListener) {
         mSessionListener = sessionListener;
+    }
+
+    public void setVendorListener(INativeUwbManager.VendorNotification vendorListener) {
+        mVendorListener = vendorListener;
     }
 
     public void onDeviceStatusNotificationReceived(int deviceState) {
@@ -92,8 +101,7 @@ public class NativeUwbManager {
      * @return : If this returns true, UWB is on
      */
     public synchronized boolean doInitialize() {
-        if (SystemProperties.getBoolean("persist.uwb.enable_uci_rust_stack", false)
-                && this.mDispatcherPointer == 0L) {
+        if (mUwbInjector.isUciRustStackEnabled() && this.mDispatcherPointer == 0L) {
             this.mDispatcherPointer = nativeDispatcherNew();
         }
         return nativeDoInitialize();
@@ -106,8 +114,9 @@ public class NativeUwbManager {
      */
     public synchronized boolean doDeinitialize() {
         boolean res = nativeDoDeinitialize();
-        if (res && SystemProperties.getBoolean("persist.uwb.enable_uci_rust_stack", false)) {
+        if (res && mUwbInjector.isUciRustStackEnabled()) {
             nativeDispatcherDestroy();
+            this.mDispatcherPointer = 0L;
         }
         return res;
     }
@@ -281,9 +290,15 @@ public class NativeUwbManager {
      * @param countryCode 2 char ISO country code
      */
     public byte setCountryCode(byte[] countryCode) {
+        Log.i(TAG, "setCountryCode: " + new String(countryCode));
         synchronized (mSessionFnLock) {
             return nativeSetCountryCode(countryCode);
         }
+    }
+
+    public byte sendRawUci(int gid, int oid, byte[] payload) {
+        // TODO(b/210933436): Implement native stack.
+        return UwbUciConstants.STATUS_CODE_OK;
     }
 
     /**

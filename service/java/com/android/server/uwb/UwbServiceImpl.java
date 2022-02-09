@@ -38,6 +38,7 @@ import android.uwb.IUwbAdapterStateCallbacks;
 import android.uwb.IUwbAdfProvisionStateCallbacks;
 import android.uwb.IUwbRangingCallbacks;
 import android.uwb.IUwbRangingCallbacks2;
+import android.uwb.IUwbVendorUciCallback;
 import android.uwb.RangingReport;
 import android.uwb.RangingSession;
 import android.uwb.SessionHandle;
@@ -278,6 +279,10 @@ public class UwbServiceImpl extends IUwbAdapter2.Stub implements IBinder.DeathRe
      */
     public void initialize() {
         mUwbSettingsStore.initialize();
+        // Initialize the UWB stack state.
+        try {
+            getVendorUwbAdapter();
+        } catch (RemoteException e) { }
         if (mUwbInjector.isUciStackEnabled()) mUwbInjector.getUwbCountryCode().initialize();
     }
 
@@ -306,6 +311,27 @@ public class UwbServiceImpl extends IUwbAdapter2.Stub implements IBinder.DeathRe
         enforceUwbPrivilegedPermission();
         getVendorUwbAdapter().registerAdapterStateCallbacks(adapterStateCallbacks);
     }
+
+    @Override
+    public void registerVendorExtensionCallback(IUwbVendorUciCallback callbacks)
+            throws RemoteException {
+        Log.i(TAG, "Register the callback");
+        enforceUwbPrivilegedPermission();
+        // TODO(b/210933436): Implement this.
+        throw new IllegalStateException("Not implemented");
+        /** getVendorUwbAdapter().registerVendorExtensionCallback(callbacks); */
+    }
+
+    @Override
+    public void unregisterVendorExtensionCallback(IUwbVendorUciCallback callbacks)
+            throws RemoteException {
+        Log.i(TAG, "Unregister the callback");
+        enforceUwbPrivilegedPermission();
+        // TODO(b/210933436): Implement this.
+        throw new IllegalStateException("Not implemented");
+        /** getVendorUwbAdapter().unregisterVendorExtensionCallback(callbacks); */
+    }
+
 
     @Override
     public void unregisterAdapterStateCallbacks(IUwbAdapterStateCallbacks adapterStateCallbacks)
@@ -373,6 +399,17 @@ public class UwbServiceImpl extends IUwbAdapter2.Stub implements IBinder.DeathRe
     public void closeRanging(SessionHandle sessionHandle) throws RemoteException {
         enforceUwbPrivilegedPermission();
         getVendorUwbAdapter().closeRanging(sessionHandle);
+    }
+
+    @Override
+    public synchronized int sendVendorUciMessage(int gid, int oid, byte[] payload)
+            throws RemoteException {
+        enforceUwbPrivilegedPermission();
+        // TODO(b/210933436): Implement this.
+        throw new IllegalStateException("Not implemented");
+        /**
+        return getVendorUwbAdapter().sendVendorUciMessage(rawUCi);
+         **/
     }
 
     @Override
