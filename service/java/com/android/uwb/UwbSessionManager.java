@@ -18,7 +18,6 @@ package com.android.uwb;
 import static com.android.uwb.data.UwbUciConstants.REASON_STATE_CHANGE_WITH_SESSION_MANAGEMENT_COMMANDS;
 
 import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.IBinder;
 import android.os.Looper;
 import android.os.Message;
@@ -78,17 +77,15 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
     private final int mMaxSessionNumber;
     private final EventTask mEventTask;
 
-    public UwbSessionManager(NativeUwbManager nativeUwbManager, UwbMetrics uwbMetrics) {
+    public UwbSessionManager(NativeUwbManager nativeUwbManager, UwbMetrics uwbMetrics,
+            Looper serviceLooper) {
         mNativeUwbManager = nativeUwbManager;
         mNativeUwbManager.setSessionListener(this);
         mUwbMetrics = uwbMetrics;
         mConfigurationManager = new UwbConfigurationManager(nativeUwbManager);
         mSessionNotificationManager = new UwbSessionNotificationManager();
         mMaxSessionNumber = mNativeUwbManager.getMaxSessionNumber();
-
-        HandlerThread handlerThread = new HandlerThread("EventTask", Thread.MAX_PRIORITY);
-        handlerThread.start();
-        mEventTask = new EventTask(handlerThread.getLooper());
+        mEventTask = new EventTask(serviceLooper);
     }
 
     @Override
@@ -235,13 +232,16 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
         Log.i(TAG, "startRanging() - Session ID : " + sessionId);
 
         UwbSession uwbSession = getUwbSession(sessionId);
-        CccRangingStartedParams params = null;
 
-        int status = UwbUciConstants.STATUS_CODE_ERROR_SESSION_NOT_EXIST;
         int currentSessionState = getCurrentSessionState(sessionId);
         if (currentSessionState == UwbUciConstants.UWB_SESSION_STATE_IDLE) {
+            mEventTask.execute(SESSION_START_RANGING, uwbSession);
+        } else if (currentSessionState == UwbUciConstants.UWB_SESSION_STATE_ACTIVE) {
+            Log.i(TAG, "session is already ranging");
+            // TODO: Ensure |rangingStartedParams| is valid for FIRA sessions as well.
+            Params rangingStartedParams = uwbSession.getParams();
             if (uwbSession.getProtocolName().equals(CccParams.PROTOCOL_NAME)) {
-                params = new CccRangingStartedParams.Builder()
+                rangingStartedParams = new CccRangingStartedParams.Builder()
                         .setHopModeKey(parameters.getInt(UwbCccConstants.KEY_HOP_MODE_KEY))
                         .setStartingStsIndex(
                                 parameters.getInt(UwbCccConstants.KEY_STARTING_STS_INDEX))
@@ -249,20 +249,9 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
                         .setUwbTime0(parameters.getLong(UwbCccConstants.KEY_UWB_TIME_0))
                         .setRanMultiplier(parameters.getInt(UwbCccConstants.KEY_RAN_MULTIPLIER))
                         .build();
-
-                status = mConfigurationManager.setAppConfigurations(sessionId, params);
-
-                if (status != UwbUciConstants.STATUS_CODE_OK) {
-                    mSessionNotificationManager.onRangingStartFailed(uwbSession, status);
-                    return;
-                }
             }
-
-            mEventTask.execute(SESSION_START_RANGING, uwbSession);
-        } else if (currentSessionState == UwbUciConstants.UWB_SESSION_STATE_ACTIVE) {
-            Log.i(TAG, "session is already ranging");
             mSessionNotificationManager.onRangingStarted(
-                    uwbSession, UwbUciConstants.STATUS_CODE_OK);
+                    uwbSession, rangingStartedParams);
         } else {
             Log.i(TAG, "session can't start ranging");
             mSessionNotificationManager.onRangingStartFailed(
@@ -554,7 +543,24 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
                             uwbSession.getWaitObj().wait();
                             if (uwbSession.getSessionState()
                                     == UwbUciConstants.UWB_SESSION_STATE_ACTIVE) {
-                                mSessionNotificationManager.onRangingStarted(uwbSession, status);
+                                // TODO: Ensure |rangingStartedParams| is valid for FIRA sessions
+                                // as well.
+                                Params rangingStartedParams = uwbSession.getParams();
+                                // For CCC sessions, retrieve the app configs
+                                if (uwbSession.getProtocolName().equals(CccParams.PROTOCOL_NAME)) {
+                                    Pair<Integer, CccRangingStartedParams> statusAndParams  =
+                                            mConfigurationManager.getAppConfigurations(
+                                                    uwbSession.getSessionId(),
+                                                    CccParams.PROTOCOL_NAME,
+                                                    new byte[0],
+                                                    CccRangingStartedParams.class);
+                                    if (status != UwbUciConstants.STATUS_CODE_OK) {
+                                        Log.e(TAG, "Failed to get CCC ranging started params");
+                                    }
+                                    rangingStartedParams = statusAndParams.second;
+                                }
+                                mSessionNotificationManager.onRangingStarted(
+                                        uwbSession, rangingStartedParams);
                             } else {
                                 mSessionNotificationManager.onRangingStartFailed(
                                         uwbSession, UwbUciConstants.STATUS_CODE_FAILED);

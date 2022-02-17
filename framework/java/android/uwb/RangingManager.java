@@ -17,6 +17,7 @@
 package android.uwb;
 
 import android.annotation.NonNull;
+import android.annotation.Nullable;
 import android.content.AttributionSource;
 import android.os.CancellationSignal;
 import android.os.PersistableBundle;
@@ -24,6 +25,7 @@ import android.os.RemoteException;
 import android.util.Log;
 
 import java.util.Hashtable;
+import java.util.List;
 import java.util.concurrent.Executor;
 
 /**
@@ -50,20 +52,39 @@ public class RangingManager extends android.uwb.IUwbRangingCallbacks2.Stub {
      * @param executor {@link Executor} to run callbacks
      * @param callbacks {@link RangingSession.Callback} to associate with the {@link RangingSession}
      *                  that is being opened.
+     * @param chipId identifier of UWB chip to be used in ranging session, or {@code null} if
+     *                the default chip should be used
      * @return a {@link CancellationSignal} that may be used to cancel the opening of the
      *         {@link RangingSession}.
      */
     public CancellationSignal openSession(@NonNull AttributionSource attributionSource,
             @NonNull PersistableBundle params,
             @NonNull Executor executor,
-            @NonNull RangingSession.Callback callbacks) {
+            @NonNull RangingSession.Callback callbacks,
+            @Nullable String chipId) {
+        if (chipId != null) {
+            try {
+                List<String> validChipIds = mAdapter.getChipIds();
+                if (!validChipIds.contains(chipId)) {
+                    throw new IllegalArgumentException("openSession - received invalid chipId: "
+                            + chipId);
+                }
+            } catch (RemoteException e)  {
+                e.rethrowFromSystemServer();
+            }
+        }
+
         synchronized (this) {
             SessionHandle sessionHandle = new SessionHandle(mNextSessionId++);
             RangingSession session =
-                    new RangingSession(executor, callbacks, mAdapter, sessionHandle);
+                    new RangingSession(executor, callbacks, mAdapter, sessionHandle, chipId);
             mRangingSessionTable.put(sessionHandle, session);
             try {
-                mAdapter.openRanging(attributionSource, sessionHandle, this, params);
+                mAdapter.openRanging(attributionSource,
+                        sessionHandle,
+                        this,
+                        params,
+                        chipId);
             } catch (RemoteException e) {
                 throw e.rethrowFromSystemServer();
             }
@@ -227,6 +248,213 @@ public class RangingManager extends android.uwb.IUwbRangingCallbacks2.Stub {
         }
     }
 
+    @Override
+    public void onControleeAdded(SessionHandle sessionHandle, PersistableBundle parameters) {
+        synchronized (this) {
+            if (!hasSession(sessionHandle)) {
+                Log.w(TAG, "onControleeAdded - received unexpected SessionHandle: "
+                        + sessionHandle);
+                return;
+            }
+
+            RangingSession session = mRangingSessionTable.get(sessionHandle);
+            session.onControleeAdded(parameters);
+        }
+    }
+
+    @Override
+    public void onControleeAddFailed(SessionHandle sessionHandle, @RangingChangeReason int reason,
+            PersistableBundle parameters) {
+        synchronized (this) {
+            if (!hasSession(sessionHandle)) {
+                Log.w(TAG, "onControleeAddFailed - received unexpected SessionHandle: "
+                        + sessionHandle);
+                return;
+            }
+
+            RangingSession session = mRangingSessionTable.get(sessionHandle);
+            session.onControleeAddFailed(reason, parameters);
+        }
+    }
+
+    @Override
+    public void onControleeRemoved(SessionHandle sessionHandle, PersistableBundle parameters) {
+        synchronized (this) {
+            if (!hasSession(sessionHandle)) {
+                Log.w(TAG, "onControleeRemoved - received unexpected SessionHandle: "
+                        + sessionHandle);
+                return;
+            }
+
+            RangingSession session = mRangingSessionTable.get(sessionHandle);
+            session.onControleeRemoved(parameters);
+        }
+    }
+
+    @Override
+    public void onControleeRemoveFailed(SessionHandle sessionHandle,
+            @RangingChangeReason int reason, PersistableBundle parameters) {
+        synchronized (this) {
+            if (!hasSession(sessionHandle)) {
+                Log.w(TAG, "onControleeRemoveFailed - received unexpected SessionHandle: "
+                        + sessionHandle);
+                return;
+            }
+
+            RangingSession session = mRangingSessionTable.get(sessionHandle);
+            session.onControleeRemoveFailed(reason, parameters);
+        }
+    }
+
+    @Override
+    public void onRangingSuspended(SessionHandle sessionHandle, PersistableBundle parameters) {
+        synchronized (this) {
+            if (!hasSession(sessionHandle)) {
+                Log.w(TAG, "onRangingSuspended - received unexpected SessionHandle: "
+                        + sessionHandle);
+                return;
+            }
+
+            RangingSession session = mRangingSessionTable.get(sessionHandle);
+            session.onRangingSuspended(parameters);
+        }
+    }
+
+    @Override
+    public void onRangingSuspendFailed(SessionHandle sessionHandle, @RangingChangeReason int reason,
+            PersistableBundle parameters) {
+        synchronized (this) {
+            if (!hasSession(sessionHandle)) {
+                Log.w(TAG, "onRangingSuspendFailed - received unexpected SessionHandle: "
+                        + sessionHandle);
+                return;
+            }
+
+            RangingSession session = mRangingSessionTable.get(sessionHandle);
+            session.onRangingSuspendFailed(reason, parameters);
+        }
+    }
+
+    @Override
+    public void onRangingResumed(SessionHandle sessionHandle, PersistableBundle parameters) {
+        synchronized (this) {
+            if (!hasSession(sessionHandle)) {
+                Log.w(TAG, "onRangingResumed - received unexpected SessionHandle: "
+                        + sessionHandle);
+                return;
+            }
+
+            RangingSession session = mRangingSessionTable.get(sessionHandle);
+            session.onRangingResumed(parameters);
+        }
+    }
+
+    @Override
+    public void onRangingResumeFailed(SessionHandle sessionHandle, @RangingChangeReason int reason,
+            PersistableBundle parameters) {
+        synchronized (this) {
+            if (!hasSession(sessionHandle)) {
+                Log.w(TAG, "onRangingResumeFailed - received unexpected SessionHandle: "
+                        + sessionHandle);
+                return;
+            }
+
+            RangingSession session = mRangingSessionTable.get(sessionHandle);
+            session.onRangingResumeFailed(reason, parameters);
+        }
+    }
+
+    @Override
+    public void onDataSent(SessionHandle sessionHandle, UwbAddress remoteDeviceAddress,
+            PersistableBundle parameters) {
+        synchronized (this) {
+            if (!hasSession(sessionHandle)) {
+                Log.w(TAG, "onDataSent - received unexpected SessionHandle: " + sessionHandle);
+                return;
+            }
+
+            RangingSession session = mRangingSessionTable.get(sessionHandle);
+            session.onDataSent(remoteDeviceAddress, parameters);
+        }
+    }
+
+    @Override
+    public void onDataSendFailed(SessionHandle sessionHandle, UwbAddress remoteDeviceAddress,
+            @RangingChangeReason int reason, PersistableBundle parameters) {
+        synchronized (this) {
+            if (!hasSession(sessionHandle)) {
+                Log.w(TAG, "onDataSendFailed - received unexpected SessionHandle: "
+                        + sessionHandle);
+                return;
+            }
+
+            RangingSession session = mRangingSessionTable.get(sessionHandle);
+            session.onDataSendFailed(remoteDeviceAddress, reason, parameters);
+        }
+    }
+
+    @Override
+    public void onDataReceived(SessionHandle sessionHandle, UwbAddress remoteDeviceAddress,
+            PersistableBundle parameters, byte[] data) {
+        synchronized (this) {
+            if (!hasSession(sessionHandle)) {
+                Log.w(TAG, "onDataReceived - received unexpected SessionHandle: "
+                        + sessionHandle);
+                return;
+            }
+
+            RangingSession session = mRangingSessionTable.get(sessionHandle);
+            session.onDataReceived(remoteDeviceAddress, parameters, data);
+        }
+    }
+
+    @Override
+    public void onDataReceiveFailed(SessionHandle sessionHandle, UwbAddress remoteDeviceAddress,
+            @RangingChangeReason int reason, PersistableBundle parameters) {
+        synchronized (this) {
+            if (!hasSession(sessionHandle)) {
+                Log.w(TAG, "onDataReceiveFailed - received unexpected SessionHandle: "
+                        + sessionHandle);
+                return;
+            }
+
+            RangingSession session = mRangingSessionTable.get(sessionHandle);
+            session.onDataReceiveFailed(remoteDeviceAddress, reason, parameters);
+        }
+    }
+
+    @Override
+    public void onServiceDiscovered(SessionHandle sessionHandle,
+            @NonNull PersistableBundle parameters) {
+        synchronized (this) {
+            if (!hasSession(sessionHandle)) {
+                Log.w(TAG, "onServiceDiscovered - received unexpected SessionHandle: "
+                        + sessionHandle);
+                return;
+            }
+
+            RangingSession session = mRangingSessionTable.get(sessionHandle);
+            session.onServiceDiscovered(parameters);
+        }
+    }
+
+
+    @Override
+    public void onServiceConnected(SessionHandle sessionHandle,
+            @NonNull PersistableBundle parameters) {
+        synchronized (this) {
+            if (!hasSession(sessionHandle)) {
+                Log.w(TAG, "onServiceConnected - received unexpected SessionHandle: "
+                        + sessionHandle);
+                return;
+            }
+
+            RangingSession session = mRangingSessionTable.get(sessionHandle);
+            session.onServiceConnected(parameters);
+        }
+    }
+
+    // TODO(b/211025367): Remove this conversion and use direct API values.
     @RangingSession.Callback.Reason
     private static int convertToReason(@RangingChangeReason int reason) {
         switch (reason) {
@@ -247,6 +475,9 @@ public class RangingManager extends android.uwb.IUwbRangingCallbacks2.Stub {
 
             case RangingChangeReason.BAD_PARAMETERS:
                 return RangingSession.Callback.REASON_BAD_PARAMETERS;
+
+            case RangingChangeReason.MAX_RR_RETRY_REACHED:
+                return RangingSession.Callback.REASON_MAX_RR_RETRY_REACHED;
 
             case RangingChangeReason.UNKNOWN:
             default:

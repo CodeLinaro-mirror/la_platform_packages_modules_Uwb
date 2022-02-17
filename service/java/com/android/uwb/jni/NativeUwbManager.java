@@ -23,6 +23,8 @@ import com.android.uwb.data.UwbRangingData;
 import com.android.uwb.data.UwbUciConstants;
 import com.android.uwb.info.UwbSpecificationInfo;
 
+import java.util.List;
+
 public class NativeUwbManager {
     private static final String TAG = NativeUwbManager.class.getSimpleName();
 
@@ -33,6 +35,7 @@ public class NativeUwbManager {
     public final Object mSetAppConfigFnLock = new Object();
     protected INativeUwbManager.DeviceNotification mDeviceListener;
     protected INativeUwbManager.SessionNotification mSessionListener;
+    private long mDispatcherPointer;
 
     public NativeUwbManager() {
         loadLibrary();
@@ -89,6 +92,10 @@ public class NativeUwbManager {
      * @return : If this returns true, UWB is on
      */
     public synchronized boolean doInitialize() {
+        if (SystemProperties.getBoolean("persist.uwb.enable_uci_rust_stack", false)
+                && this.mDispatcherPointer == 0L) {
+            this.mDispatcherPointer = nativeDispatcherNew();
+        }
         return nativeDoInitialize();
     }
 
@@ -98,7 +105,11 @@ public class NativeUwbManager {
      * @return : If this returns true, UWB is off
      */
     public synchronized boolean doDeinitialize() {
-        return nativeDoDeinitialize();
+        boolean res = nativeDoDeinitialize();
+        if (res && SystemProperties.getBoolean("persist.uwb.enable_uci_rust_stack", false)) {
+            nativeDispatcherDestroy();
+        }
+        return res;
     }
 
     public synchronized long getTimestampResolutionNanos() {
@@ -222,6 +233,23 @@ public class NativeUwbManager {
     }
 
     /**
+     * Get APP Configuration Parameters for the requested UWB session
+     *
+     * @param noOfParams        : The number (n) of APP Configuration Parameters
+     * @param appConfigParamLen : The length of APP Configuration Parameters
+     * @param appConfigIds      : APP Configuration Parameter
+     * @return : refer to SESSION_GET_APP_CONFIG_RSP in the Table 16: Control messages to get
+     * Application configurations
+     */
+    public byte[] getAppConfigurations(int sessionId, int noOfParams, int appConfigParamLen,
+            byte[] appConfigIds) {
+        synchronized (mSetAppConfigFnLock) {
+            return nativeGetAppConfigurations(sessionId, noOfParams, appConfigParamLen,
+                    appConfigIds);
+        }
+    }
+
+    /**
      * Update Multicast list for the requested UWB session
      *
      * @param sessionId  : Session ID to which multicast list to be updated
@@ -246,6 +274,50 @@ public class NativeUwbManager {
                     (byte) noOfControlee, address, subSessionId);
         }
     }
+
+    /**
+     * Set country code.
+     *
+     * @param countryCode 2 char ISO country code
+     */
+    public byte setCountryCode(byte[] countryCode) {
+        synchronized (mSessionFnLock) {
+            return nativeSetCountryCode(countryCode);
+        }
+    }
+
+    /**
+     * Returns a list of UWB chip identifiers.
+     *
+     * Callers can invoke methods on a specific UWB chip by passing its {@code chipId} to the
+     * method.
+     *
+     * @return list of UWB chip identifiers for a multi-HAL system, or a list of a single chip
+     * identifier for a single HAL system.
+     */
+    public List<String> getChipIds() {
+        // TODO(b/206150133): Get list of chip ids from configuration file
+        return List.of(getDefaultChipId());
+    }
+
+    /**
+     * Returns the default UWB chip identifier.
+     *
+     * If callers do not pass a specific {@code chipId} to UWB methods, then the method will be
+     * invoked on the default chip, which is determined at system initialization from a
+     * configuration file.
+     *
+     * @return default UWB chip identifier for a multi-HAL system, or the identifier of the only UWB
+     * chip in a single HAL system.
+     */
+    public String getDefaultChipId() {
+        // TODO(b/206150133): Get list of chip ids from configuration file
+        return "defaultChipId";
+    }
+
+    private native long nativeDispatcherNew();
+
+    private native void nativeDispatcherDestroy();
 
     private native boolean nativeInit();
 
@@ -276,6 +348,11 @@ public class NativeUwbManager {
     private native byte[] nativeSetAppConfigurations(int sessionId, int noOfParams,
             int appConfigParamLen, byte[] appConfigParams);
 
+    private native byte[] nativeGetAppConfigurations(int sessionId, int noOfParams,
+            int appConfigParamLen, byte[] appConfigParams);
+
     private native byte nativeControllerMulticastListUpdate(int sessionId, byte action,
             byte noOfControlee, byte[] address, int[]subSessionId);
+
+    private native byte nativeSetCountryCode(byte[] countryCode);
 }

@@ -32,6 +32,7 @@ import com.android.uwb.data.UwbUciConstants;
 import com.android.uwb.params.TlvUtil;
 import com.android.uwb.util.UwbUtil;
 
+import com.google.uwb.support.base.Params;
 import com.google.uwb.support.fira.FiraParams;
 
 import java.util.ArrayList;
@@ -83,13 +84,11 @@ public class UwbSessionNotificationManager {
         }
     }
 
-    public void onRangingStarted(UwbSession uwbSession, int reasonCode) {
+    public void onRangingStarted(UwbSession uwbSession, Params rangingStartedParams) {
         SessionHandle sessionHandle = uwbSession.getSessionHandle();
         IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
         try {
-            uwbRangingCallbacks.onRangingStarted(sessionHandle,
-                    UwbSessionNotificationHelper.convertReasonToParam(uwbSession.getProtocolName(),
-                            reasonCode));
+            uwbRangingCallbacks.onRangingStarted(sessionHandle, rangingStartedParams.toBundle());
             Log.i(TAG, "IUwbRangingCallbacks - onRangingStarted");
         } catch (Exception e) {
             Log.e(TAG, "IUwbRangingCallbacks - onRangingStarted : Failed");
@@ -188,7 +187,7 @@ public class UwbSessionNotificationManager {
         }
     }
 
-    private RangingReport getRangingReport(UwbRangingData rangingData) {
+    private static RangingReport getRangingReport(UwbRangingData rangingData) {
         if (rangingData.getRangingMeasuresType()
                 != UwbUciConstants.RANGING_MEASUREMENT_TYPE_TWO_WAY) {
             return null;
@@ -203,25 +202,42 @@ public class UwbSessionNotificationManager {
             long elapsedRealtimeNanos = 0;
             DistanceMeasurement distanceMeasurement = null;
             AngleOfArrivalMeasurement angleOfArrivalMeasurement = null;
+            AngleOfArrivalMeasurement destinationAngleOfArrivalMeasurement = null;
+            int los = uwbTwoWayMeasurement[i].mNLoS;
 
             if (rangingStatus == FiraParams.STATUS_CODE_OK) {
                 // DistanceMeasurement
                 distanceMeasurement = new DistanceMeasurement.Builder()
                         .setMeters(uwbTwoWayMeasurement[i].getDistance() / (double) 100)
                         .setErrorMeters(0)
+                        // TODO: Need to fetch distance FOM once it is added to UCI spec.
                         .setConfidenceLevel(0)
                         .build();
 
                 AngleMeasurement azimuthAngleMeasurement = new AngleMeasurement(
-                        UwbUtil.degreeToRadian(uwbTwoWayMeasurement[i].getAoaAzimuth()), 0, 0);
+                        UwbUtil.degreeToRadian(uwbTwoWayMeasurement[i].getAoaAzimuth()), 0,
+                        uwbTwoWayMeasurement[i].getAoaAzimuthFom() / (double) 100);
+
+                AngleMeasurement destinationAzimuthAngleMeasurement = new AngleMeasurement(
+                        UwbUtil.degreeToRadian(uwbTwoWayMeasurement[i].getAoaDestAzimuth()), 0,
+                        uwbTwoWayMeasurement[i].getAoaDestAzimuthFom() / (double) 100);
 
                 AngleMeasurement altitudeAngleMeasurement = new AngleMeasurement(
-                        UwbUtil.degreeToRadian(uwbTwoWayMeasurement[i].getAoaElevation()), 0, 0);
+                        UwbUtil.degreeToRadian(uwbTwoWayMeasurement[i].getAoaElevation()), 0,
+                        uwbTwoWayMeasurement[i].getAoaElevationFom() / (double) 100);
+
+                AngleMeasurement destinationAltitudeAngleMeasurement = new AngleMeasurement(
+                        UwbUtil.degreeToRadian(uwbTwoWayMeasurement[i].getAoaDestElevation()), 0,
+                        uwbTwoWayMeasurement[i].getAoaDestElevationFom() / (double) 100);
 
                 // AngleOfArrivalMeasurement
                 angleOfArrivalMeasurement = new AngleOfArrivalMeasurement.Builder(
                         azimuthAngleMeasurement)
                         .setAltitude(altitudeAngleMeasurement)
+                        .build();
+                destinationAngleOfArrivalMeasurement = new AngleOfArrivalMeasurement.Builder(
+                        destinationAzimuthAngleMeasurement)
+                        .setAltitude(destinationAltitudeAngleMeasurement)
                         .build();
             }
             rangingMeasurements.add(new RangingMeasurement.Builder()
@@ -230,6 +246,8 @@ public class UwbSessionNotificationManager {
                     .setElapsedRealtimeNanos(elapsedRealtimeNanos)
                     .setDistanceMeasurement(distanceMeasurement)
                     .setAngleOfArrivalMeasurement(angleOfArrivalMeasurement)
+                    .setDestinationAngleOfArrivalMeasurement(destinationAngleOfArrivalMeasurement)
+                    .setLineOfSight(los)
                     .build());
         }
         if (rangingMeasurements.size() == 1) {

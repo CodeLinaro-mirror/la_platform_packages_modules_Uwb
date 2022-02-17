@@ -67,6 +67,8 @@ static SyncEvent
                                   // UWA_ControllerMulticastListUpdate
 static SyncEvent sUwaSendBlinkDataEvent;
 static SyncEvent sErrNotify;
+static SyncEvent sUwaSetCountryCodeEvent; // event for
+                                          // UWA_ControllerSetCountryCode
 
 static deviceInfo_t sUwbDeviceInfo;
 static uint8_t sSetAppConfig[UCI_MAX_PAYLOAD_SIZE];
@@ -94,6 +96,7 @@ static bool sRangeStopStatus = false;
 static bool sSetAppConfigRespStatus = false;
 static bool sGetAppConfigRespStatus = false;
 static bool sMulticastListUpdateStatus = false;
+static bool sSetCountryCodeStatus = false;
 
 static uint8_t sSessionState = UWB_UNKNOWN_SESSION;
 
@@ -465,6 +468,20 @@ static void uwaDeviceManagementCallback(uint8_t dmEvent,
     }
     break;
 
+  case UWA_DM_SET_COUNTRY_CODE_RSP_EVT:
+    JNI_TRACE_I("%s: UWA_DM_COUNTRY_CODE_UPDATE_RSP_EVT", fn);
+    {
+      SyncEventGuard guard(sUwaSetCountryCodeEvent);
+      if (eventData->status == UWA_STATUS_OK) {
+        sSetCountryCodeStatus = true;
+        JNI_TRACE_I("%s: UWA_DM_COUNTRY_CODE_UPDATE_RSP_EVT Success", fn);
+      } else {
+        JNI_TRACE_E("%s: UWA_DM_COUNTRY_CODE_UPDATE_RSP_EVT failed", fn);
+      }
+      sUwaSetCountryCodeEvent.notifyOne();
+    }
+    break;
+
   case UWA_DM_SEND_BLINK_DATA_RSP_EVT:
     JNI_TRACE_I("%s: UWA_DM_SEND_BLINK_DATA_RSP_EVT", fn);
     {
@@ -496,6 +513,7 @@ static void uwaDeviceManagementCallback(uint8_t dmEvent,
           eventData->sCore_gen_err_status.status);
     }
     break;
+
     //    case UWA_DM_UWBS_RESP_TIMEOUT_EVT:
     //      JNI_TRACE_I("%s: UWA_DM_UWBS_RESP_TIMEOUT_EVT", fn);
     //      {
@@ -932,7 +950,7 @@ jobject uwbNativeManager_getSpecificationInfo(JNIEnv *env, jobject obj) {
       "com/android/uwb/info/UwbSpecificationInfo";
   jclass deviceDataClass = env->FindClass(DEVICE_DATA_CLASS_NAME);
   jmethodID constructor =
-      env->GetMethodID(deviceDataClass, "<init>", "(IIIIIIIIIIII)V");
+      env->GetMethodID(deviceDataClass, "<init>", "(IIIIIIIIIIIIIIII)V");
   if (constructor == JNI_NULL) {
     JNI_TRACE_E("%s: jni cannot find the method deviceInfoClass", fn);
     return NULL;
@@ -956,7 +974,9 @@ jobject uwbNativeManager_getSpecificationInfo(JNIEnv *env, jobject obj) {
   return env->NewObject(deviceDataClass, constructor, uciMajor, uciMaintenance,
                         uciMinor, macMajor, macMaintenance, macMinor, phyMajor,
                         phyMaintenance, phyMinor, uciTestMajor,
-                        uciTestMaintenance, uciTestMinor);
+                        uciTestMaintenance, uciTestMinor,
+                        1 /* firaMajorVersion */, 0 /* firaMinorVersion */,
+                        1 /* cccMajorVersion */, 0 /* cccMinorVersion*/);
 }
 
 /*******************************************************************************
@@ -1694,6 +1714,60 @@ jbyte uwbNativeManager_ControllerMulticastListUpdate(
 
 /*******************************************************************************
 **
+** Function:        uwbNativeManager_SetCountryCode()
+**
+** Description:     API to set country code
+**
+** Params:          env: JVM environment.
+**                  o: Java object.
+**                  countryCode: ISO country code
+**
+** Returns:         UFA_STATUS_OK on success or UFA_STATUS_FAILED on failure
+**
+*******************************************************************************/
+jbyte uwbNativeManager_SetCountryCode(JNIEnv *env, jobject o,
+                                      jbyteArray countryCode) {
+  static const char fn[] = "uwbNativeManager_SetCountryCode";
+  tUWA_STATUS status = UWA_STATUS_FAILED;
+  uint8_t *countryCodeArray = NULL;
+  JNI_TRACE_E("%s: enter; ", fn);
+
+  if (!gIsUwaEnabled) {
+    JNI_TRACE_E("%s: UWB device is not initialized", fn);
+    return status;
+  }
+  if (countryCode == NULL) {
+    JNI_TRACE_E("%s: country code value is NULL", fn);
+    return status;
+  }
+  uint8_t countryCodeArrayLen = env->GetArrayLength(countryCode);
+  if (countryCodeArrayLen != 2) {
+    JNI_TRACE_E("%s: Malformed country code arraylen %d", fn,
+                countryCodeArrayLen);
+    return status;
+  }
+
+  countryCodeArray = (uint8_t *)malloc(countryCodeArrayLen);
+  if (countryCodeArray == NULL) {
+    JNI_TRACE_E("%s: malloc failure for countryCodeArray", fn);
+    return status;
+  }
+  memset(countryCodeArray, 0, countryCodeArrayLen);
+  env->GetByteArrayRegion(countryCode, 0, countryCodeArrayLen,
+                          (jbyte *)countryCodeArray);
+  sSetCountryCodeStatus = false;
+  SyncEventGuard guard(sUwaSetCountryCodeEvent);
+  status = UWA_ControllerSetCountryCode(countryCodeArray);
+  if (status == UWA_STATUS_OK) {
+    sUwaSetCountryCodeEvent.wait(UWB_CMD_TIMEOUT);
+  }
+  free(countryCodeArray);
+  JNI_TRACE_I("%s: exit", fn);
+  return (sSetCountryCodeStatus) ? UWA_STATUS_OK : UWA_STATUS_FAILED;
+}
+
+/*******************************************************************************
+**
 ** Function:        uwbManager_sendBlinkData()
 **
 ** Description:     API to test uwb send blink data
@@ -1811,6 +1885,8 @@ static JNINativeMethod gMethods[] = {
     {"nativeSessionDeInit", "(I)B", (void *)uwbNativeManager_sessionDeInit},
     {"nativeSetAppConfigurations", "(III[B)[B",
      (void *)uwbNativeManager_setAppConfigurations},
+    {"nativeGetAppConfigurations", "(III[B)[B",
+     (void *)uwbNativeManager_getAppConfigurations},
     {"nativeRangingStart", "(I)B", (void *)uwbNativeManager_startRanging},
     {"nativeRangingStop", "(I)B", (void *)uwbNativeManager_stopRanging},
     {"nativeGetSessionCount", "()B", (void *)uwbNativeManager_getSessionCount},
@@ -1823,6 +1899,7 @@ static JNINativeMethod gMethods[] = {
     {"nativeGetSessionState", "(I)B", (void *)uwbNativeManager_getSessionState},
     {"nativeControllerMulticastListUpdate", "(IBB[B[I)B",
      (void *)uwbNativeManager_ControllerMulticastListUpdate},
+    {"nativeSetCountryCode", "([B)B", (void *)uwbNativeManager_SetCountryCode},
     // {"nativeSendBlinkData", "(IB[B)B", (void*)uwbManager_sendBlinkData},
     // {"nativeSendRawUci", "([BI)[B", (void*)uwbNativeManager_sendRawUci},
     // {"nativeEnableConformanceTest", "(Z)",
