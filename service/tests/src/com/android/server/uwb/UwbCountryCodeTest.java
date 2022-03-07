@@ -29,8 +29,8 @@ import android.telephony.TelephonyManager;
 
 import androidx.test.filters.SmallTest;
 
-import com.android.uwb.data.UwbUciConstants;
-import com.android.uwb.jni.NativeUwbManager;
+import com.android.server.uwb.data.UwbUciConstants;
+import com.android.server.uwb.jni.NativeUwbManager;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -86,6 +86,18 @@ public class UwbCountryCodeTest {
         mUwbCountryCode.initialize();
         verify(mNativeUwbManager).setCountryCode(
                 TEST_COUNTRY_CODE.getBytes(StandardCharsets.UTF_8));
+    }
+
+    @Test
+    public void testInitializeCountryCodeFromTelephonyVerifyListener() {
+        UwbCountryCode.CountryCodeChangedListener listener = mock(
+                UwbCountryCode.CountryCodeChangedListener.class);
+        mUwbCountryCode.addListener(listener);
+        when(mTelephonyManager.getNetworkCountryIso()).thenReturn(TEST_COUNTRY_CODE);
+        mUwbCountryCode.initialize();
+        verify(mNativeUwbManager).setCountryCode(
+                TEST_COUNTRY_CODE.getBytes(StandardCharsets.UTF_8));
+        verify(listener).onCountryCodeChanged(TEST_COUNTRY_CODE);
     }
 
     @Test

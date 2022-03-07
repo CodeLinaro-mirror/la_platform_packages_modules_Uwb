@@ -15,6 +15,9 @@
  */
 package com.android.server.uwb.util;
 
+import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
+
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 
@@ -50,14 +53,19 @@ public class DataTypeConversionUtil {
     /**
      * Convert the byte array to hex string.
      */
-    public static String byteArrayToHexString(byte[] response) {
+    @NonNull
+    public static String byteArrayToHexString(@Nullable byte[] response) {
+        if (response == null) {
+            return "";
+        }
         return byteArrayToHexString(response, 0, response.length);
     }
 
     /**
      * Convertt part of the byte array to hex string.
      */
-    public static String byteArrayToHexString(byte[] response, int startIndex, int endIndex) {
+    public static String byteArrayToHexString(
+            byte[] response, int startIndex, int endIndex) {
         char[] hex = new char[(endIndex - startIndex) * 2];
         int v;
         for (int i = 0; i < endIndex - startIndex; i++) {
@@ -90,6 +98,19 @@ public class DataTypeConversionUtil {
             throw new NumberFormatException("Expected length 4 but was " + bytes.length);
         }
         return ByteBuffer.wrap(bytes).order(ByteOrder.BIG_ENDIAN).getInt();
+    }
+
+    /**
+     * Convert the byte array with arbitrary size less than 5 to int using big endian.
+     */
+    public static int arbitraryByteArrayToI32(byte[] bytes) {
+        if (bytes.length > 4 || bytes.length < 1) {
+            throw new NumberFormatException("Expected length less than 4 but was " + bytes.length);
+        }
+        ByteBuffer byteBuffer = ByteBuffer.allocate(Integer.BYTES);
+        byteBuffer.position(Integer.BYTES - bytes.length);
+        byteBuffer.put(bytes).rewind();
+        return byteBuffer.getInt();
     }
 
     /**
