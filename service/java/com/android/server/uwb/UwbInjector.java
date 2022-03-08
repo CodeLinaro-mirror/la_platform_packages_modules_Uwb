@@ -36,8 +36,8 @@ import android.util.AtomicFile;
 import android.util.Log;
 import android.uwb.IUwbAdapter;
 
-import com.android.uwb.UwbService;
-import com.android.uwb.jni.NativeUwbManager;
+import com.android.server.uwb.jni.NativeUwbManager;
+import com.android.server.uwb.multchip.UwbMultichipData;
 
 import java.io.File;
 import java.lang.reflect.InvocationTargetException;
@@ -67,9 +67,10 @@ public class UwbInjector {
     private final NativeUwbManager mNativeUwbManager;
     private final UwbCountryCode mUwbCountryCode;
     // TODO(b/196225233): Make these final when qorvo stack is integrated.
-    private UwbService mUwbService;
+    private UwbServiceCore mUwbService;
     private final UwbMetrics mUwbMetrics;
     private final DeviceConfigFacade mDeviceConfigFacade;
+    private final UwbMultichipData mUwbMultichipData;
 
     public UwbInjector(@NonNull UwbContext context) {
         // Create UWB service thread.
@@ -88,6 +89,7 @@ public class UwbInjector {
                 new UwbCountryCode(mContext, mNativeUwbManager, new Handler(mLooper), this);
         mUwbMetrics = new UwbMetrics(this);
         mDeviceConfigFacade = new DeviceConfigFacade(new Handler(mLooper), this);
+        mUwbMultichipData = new UwbMultichipData(mContext);
     }
 
     public UwbSettingsStore getUwbSettingsStore() {
@@ -110,11 +112,20 @@ public class UwbInjector {
         return mDeviceConfigFacade;
     }
 
-    public UwbService getUwbService() {
+    public UwbMultichipData getMultichipData() {
+        return mUwbMultichipData;
+    }
+
+    public UwbServiceCore getUwbServiceCore() {
         // TODO(b/196225233): Remove this lazy initialization when qorvo stack is integrated.
         if (mUwbService == null) {
-            mUwbService = new UwbService(mContext, mNativeUwbManager, mUwbMetrics, mUwbCountryCode,
-                    mLooper);
+            UwbConfigurationManager uwbConfigurationManager =
+                    new UwbConfigurationManager(mNativeUwbManager);
+            UwbSessionManager uwbSessionManager =
+                    new UwbSessionManager(uwbConfigurationManager, mNativeUwbManager, mUwbMetrics,
+                            mLooper);
+            mUwbService = new UwbServiceCore(mContext, mNativeUwbManager, mUwbMetrics,
+                    mUwbCountryCode, uwbSessionManager, uwbConfigurationManager, mLooper);
         }
         return mUwbService;
     }
@@ -144,17 +155,17 @@ public class UwbInjector {
     }
 
     /**
-     * @return Returns whether the UCI stack is enabled or not.
+     * @return Returns whether the UCI stack is enabled or not (Disabled by default).
      */
     public boolean isUciStackEnabled() {
         return SystemProperties.getBoolean("persist.uwb.enable_uci_stack", false);
     }
 
     /**
-     * @return Returns whether the UCI rust stack is enabled or not.
+     * @return Returns whether the UCI rust stack is enabled or not (Enabled by default).
      */
     public boolean isUciRustStackEnabled() {
-        return SystemProperties.getBoolean("persist.uwb.enable_uci_rust_stack", false);
+        return SystemProperties.getBoolean("persist.uwb.enable_uci_rust_stack", true);
     }
 
     /**
