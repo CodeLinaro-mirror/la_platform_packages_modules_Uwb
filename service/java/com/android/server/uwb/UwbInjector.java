@@ -23,6 +23,7 @@ import android.annotation.NonNull;
 import android.content.ApexEnvironment;
 import android.content.AttributionSource;
 import android.content.pm.ApplicationInfo;
+import android.os.Binder;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.os.IBinder;
@@ -121,9 +122,11 @@ public class UwbInjector {
         if (mUwbService == null) {
             UwbConfigurationManager uwbConfigurationManager =
                     new UwbConfigurationManager(mNativeUwbManager);
+            UwbSessionNotificationManager uwbSessionNotificationManager =
+                    new UwbSessionNotificationManager(this);
             UwbSessionManager uwbSessionManager =
                     new UwbSessionManager(uwbConfigurationManager, mNativeUwbManager, mUwbMetrics,
-                            mLooper);
+                            uwbSessionNotificationManager, mLooper);
             mUwbService = new UwbServiceCore(mContext, mNativeUwbManager, mUwbMetrics,
                     mUwbCountryCode, uwbSessionManager, uwbConfigurationManager, mLooper);
         }
@@ -162,13 +165,6 @@ public class UwbInjector {
     }
 
     /**
-     * @return Returns whether the UCI rust stack is enabled or not (Enabled by default).
-     */
-    public boolean isUciRustStackEnabled() {
-        return SystemProperties.getBoolean("persist.uwb.enable_uci_rust_stack", true);
-    }
-
-    /**
      * Throws security exception if the UWB_RANGING permission is not granted for the calling app.
      *
      * <p>Should be used in situations where the app op should not be noted.
@@ -176,7 +172,8 @@ public class UwbInjector {
     public void enforceUwbRangingPermissionForPreflight(
             @NonNull AttributionSource attributionSource) {
         if (!attributionSource.checkCallingUid()) {
-            throw new SecurityException("Invalid attribution source " + attributionSource);
+            throw new SecurityException("Invalid attribution source " + attributionSource
+                    + ", callingUid: " + Binder.getCallingUid());
         }
         int permissionCheckResult = mPermissionManager.checkPermissionForPreflight(
                 UWB_RANGING, attributionSource);
@@ -246,6 +243,15 @@ public class UwbInjector {
      */
     public long getElapsedSinceBootMillis() {
         return SystemClock.elapsedRealtime();
+    }
+
+    /**
+     * Returns nanoseconds since boot, including time spent in sleep.
+     *
+     * @return Current time since boot in milliseconds.
+     */
+    public long getElapsedSinceBootNanos() {
+        return SystemClock.elapsedRealtimeNanos();
     }
 
     /**
