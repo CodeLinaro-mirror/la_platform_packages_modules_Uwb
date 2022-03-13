@@ -20,6 +20,9 @@ import static com.android.server.uwb.data.UwbUciConstants.RANGING_MEASUREMENT_TY
 import static com.android.server.uwb.util.UwbUtil.convertFloatToQFormat;
 import static com.android.server.uwb.util.UwbUtil.degreeToRadian;
 
+import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.any;
 import static org.mockito.Mockito.validateMockitoUsage;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -40,6 +43,7 @@ import androidx.test.runner.AndroidJUnit4;
 
 import com.android.server.uwb.data.UwbRangingData;
 import com.android.server.uwb.data.UwbTwoWayMeasurement;
+import com.android.server.uwb.data.UwbUciConstants;
 import com.android.server.uwb.params.TlvUtil;
 
 import com.google.uwb.support.fira.FiraParams;
@@ -77,10 +81,13 @@ public class UwbSessionNotificationManagerTest {
     private static final float TEST_AOA_DEST_ELEVATION = 37;
     private static final int TEST_AOA_DEST_ELEVATION_FOM = 90;
     private static final int TEST_SLOT_IDX = 10;
+    private static final long TEST_ELAPSED_NANOS = 100L;
 
+    @Mock private UwbInjector mUwbInjector;
     @Mock private UwbSessionManager.UwbSession mUwbSession;
     @Mock private SessionHandle mSessionHandle;
     @Mock private IUwbRangingCallbacks mIUwbRangingCallbacks;
+    @Mock private FiraParams mFiraParams;
 
     private UwbSessionNotificationManager mUwbSessionNotificationManager;
 
@@ -90,7 +97,10 @@ public class UwbSessionNotificationManagerTest {
 
         when(mUwbSession.getSessionHandle()).thenReturn(mSessionHandle);
         when(mUwbSession.getIUwbRangingCallbacks()).thenReturn(mIUwbRangingCallbacks);
-        mUwbSessionNotificationManager = new UwbSessionNotificationManager();
+        when(mUwbSession.getProtocolName()).thenReturn(FiraParams.PROTOCOL_NAME);
+        when(mUwbSession.getParams()).thenReturn(mFiraParams);
+        when(mUwbInjector.getElapsedSinceBootNanos()).thenReturn(TEST_ELAPSED_NANOS);
+        mUwbSessionNotificationManager = new UwbSessionNotificationManager(mUwbInjector);
     }
 
     /**
@@ -109,6 +119,88 @@ public class UwbSessionNotificationManagerTest {
                 mUwbSession, testRangingDataAndRangingReport.first);
         verify(mIUwbRangingCallbacks).onRangingResult(
                 mSessionHandle, testRangingDataAndRangingReport.second);
+    }
+
+    @Test
+    public void testOnRangingOpened() throws Exception {
+        mUwbSessionNotificationManager.onRangingOpened(mUwbSession);
+
+        verify(mIUwbRangingCallbacks).onRangingOpened(mSessionHandle);
+    }
+
+    @Test
+    public void testOnRangingOpenFailed() throws Exception {
+        int status = UwbUciConstants.STATUS_CODE_ERROR_MAX_SESSIONS_EXCEEDED;
+        mUwbSessionNotificationManager.onRangingOpenFailed(mUwbSession, status);
+
+        verify(mIUwbRangingCallbacks).onRangingOpenFailed(eq(mSessionHandle),
+                eq(UwbSessionNotificationHelper.convertStatusCode(status)),
+                argThat(p -> (p.getInt("status_code")) == status));
+    }
+
+    @Test
+    public void testOnRangingStarted() throws Exception {
+        mUwbSessionNotificationManager.onRangingStarted(mUwbSession, mUwbSession.getParams());
+
+        verify(mIUwbRangingCallbacks).onRangingStarted(mSessionHandle,
+                mUwbSession.getParams().toBundle());
+    }
+
+    @Test
+    public void testOnRangingStartFailed() throws Exception {
+        int status =  UwbUciConstants.STATUS_CODE_INVALID_PARAM;
+        mUwbSessionNotificationManager.onRangingStartFailed(mUwbSession, status);
+
+        verify(mIUwbRangingCallbacks).onRangingStartFailed(eq(mSessionHandle),
+                eq(UwbSessionNotificationHelper.convertStatusCode(status)),
+                argThat(p -> (p.getInt("status_code")) == status));
+    }
+
+    @Test
+    public void testOnRangingStopped() throws Exception {
+        int reason = UwbUciConstants.REASON_STATE_CHANGE_WITH_SESSION_MANAGEMENT_COMMANDS;
+        mUwbSessionNotificationManager.onRangingStopped(mUwbSession, reason);
+
+        verify(mIUwbRangingCallbacks).onRangingStopped(eq(mSessionHandle),
+                eq(UwbSessionNotificationHelper.convertReasonCode(reason)),
+                argThat(p-> p.getInt("reason_code") == reason));
+    }
+
+    @Test
+    public void testORangingStopFailed() throws Exception {
+        int status = UwbUciConstants.STATUS_CODE_INVALID_RANGE;
+        mUwbSessionNotificationManager.onRangingStopFailed(mUwbSession, status);
+
+        verify(mIUwbRangingCallbacks).onRangingStopFailed(eq(mSessionHandle),
+                eq(UwbSessionNotificationHelper.convertStatusCode(status)),
+                argThat(p -> (p.getInt("status_code")) == status));
+    }
+
+    @Test
+    public void testOnRangingReconfigured() throws Exception {
+        mUwbSessionNotificationManager.onRangingReconfigured(mUwbSession);
+
+        verify(mIUwbRangingCallbacks).onRangingReconfigured(eq(mSessionHandle), any());
+    }
+
+    @Test
+    public void testOnRangingReconfigureFailed() throws Exception {
+        int status =  UwbUciConstants.STATUS_CODE_INVALID_MESSAGE_SIZE;
+        mUwbSessionNotificationManager.onRangingReconfigureFailed(mUwbSession, status);
+
+        verify(mIUwbRangingCallbacks).onRangingReconfigureFailed(eq(mSessionHandle),
+                eq(UwbSessionNotificationHelper.convertStatusCode(status)),
+                argThat(p -> (p.getInt("status_code")) == status));
+    }
+
+    @Test
+    public void testOnRangingClosed() throws Exception {
+        int reason = UwbUciConstants.REASON_ERROR_SLOT_LENGTH_NOT_SUPPORTED;
+        mUwbSessionNotificationManager.onRangingClosed(mUwbSession, reason);
+
+        verify(mIUwbRangingCallbacks).onRangingClosed(eq(mSessionHandle),
+                eq(UwbSessionNotificationHelper.convertReasonCode(reason)),
+                argThat(p-> p.getInt("reason_code") == reason));
     }
 
     // Helper method to generate a UwbRangingData instance and corresponding RangingMeasurement
@@ -146,7 +238,7 @@ public class UwbSessionNotificationManagerTest {
                 .setRemoteDeviceAddress(UwbAddress.fromBytes(
                         TlvUtil.getReverseBytes(TEST_MAC_ADDRESS)))
                 .setStatus(TEST_STATUS)
-                .setElapsedRealtimeNanos(0)
+                .setElapsedRealtimeNanos(TEST_ELAPSED_NANOS)
                 .setDistanceMeasurement(
                         new DistanceMeasurement.Builder()
                                 .setMeters(TEST_DISTANCE / (double) 100)

@@ -6,7 +6,10 @@ use jni::JNIEnv;
 use log::{error, info, LevelFilter};
 use num_traits::ToPrimitive;
 use uwb_uci_packets::{
-    GetCapsInfoRspPacket, SessionGetAppConfigRspPacket, SessionSetAppConfigRspPacket, StatusCode,
+    GetCapsInfoRspPacket, Packet, SessionGetAppConfigRspPacket, SessionSetAppConfigRspPacket,
+    StatusCode, UciResponseChild, UciResponsePacket, UciVendor_9_ResponseChild,
+    UciVendor_A_ResponseChild, UciVendor_B_ResponseChild, UciVendor_E_ResponseChild,
+    UciVendor_F_ResponseChild,
 };
 use uwb_uci_rust::error::UwbErr;
 use uwb_uci_rust::event_manager::EventManagerImpl as EventManager;
@@ -101,14 +104,13 @@ pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeGe
 
 /// reset the device
 #[no_mangle]
-pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeResetDevice(
-    _env: JNIEnv,
-    _obj: JObject,
-    _reset_config: jbyte,
+pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeDeviceReset(
+    env: JNIEnv,
+    obj: JObject,
+    reset_config: jbyte,
 ) -> jbyte {
-    info!("Java_com_android_server_uwb_jni_NativeUwbManager_nativeResetDevice: enter");
-    // TODO: implement this function
-    0
+    info!("Java_com_android_server_uwb_jni_NativeUwbManager_nativeDeviceReset: enter");
+    byte_result_helper(reset_device(env, obj, reset_config as u8), "ResetDevice")
 }
 
 /// init the session
@@ -405,6 +407,27 @@ pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeSe
     }
 }
 
+/// retrieve the UWB power stats
+#[no_mangle]
+pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeGetPowerStats(
+    env: JNIEnv,
+    obj: JObject,
+) -> jobject {
+    info!("Java_com_android_server_uwb_jni_NativeUwbManager_nativeGetPowerStats: enter");
+    let uwb_power_stats_class =
+        env.find_class("com/android/server/uwb/info/UwbPowerStats").unwrap();
+    match get_power_stats(env, obj) {
+        Ok(para) => {
+            let power_stats = env.new_object(uwb_power_stats_class, "(IIII)V", &para).unwrap();
+            *power_stats
+        }
+        Err(e) => {
+            error!("Get power stats failed with: {:?}", e);
+            *JObject::null()
+        }
+    }
+}
+
 fn boolean_result_helper(result: Result<(), UwbErr>, function_name: &str) -> jboolean {
     match result {
         Ok(()) => true as jboolean,
@@ -428,9 +451,6 @@ fn byte_result_helper(result: Result<(), UwbErr>, function_name: &str) -> jbyte 
 fn do_initialize(env: JNIEnv, obj: JObject) -> Result<(), UwbErr> {
     let dispatcher = get_dispatcher(env, obj)?;
     dispatcher.send_jni_command(JNICommand::Enable)?;
-    uwa_init(); // todo: implement this
-    clear_all_session_context(); // todo: implement this
-    uwa_enable()?; // todo: implement this, and add a lock here
     match uwa_get_device_info(dispatcher) {
         Ok(res) => {
             if let UciResponse::GetDeviceInfoRsp(device_info) = res {
@@ -442,23 +462,12 @@ fn do_initialize(env: JNIEnv, obj: JObject) -> Result<(), UwbErr> {
             return Err(UwbErr::failed());
         }
     }
-    match set_core_device_configurations() {
-        Ok(()) => {
-            info!("set_core_device_configurations is success");
-            return Ok(());
-        }
-        Err(e) => error!("set_core_device_configurations failed with: {:?}", e),
-    };
-    match uwa_disable(false) {
-        Ok(()) => info!("UWA_disable(false) success."),
-        _ => error!("UWA_disable(false) is failed."),
-    };
-    Err(UwbErr::failed())
+    Ok(())
 }
 
 fn do_deinitialize(env: JNIEnv, obj: JObject) -> Result<(), UwbErr> {
     let dispatcher = get_dispatcher(env, obj)?;
-    dispatcher.send_jni_command(JNICommand::Disable(true))?;
+    dispatcher.block_on_jni_command(JNICommand::Disable(true))?;
     dispatcher.send_jni_command(JNICommand::Exit)?;
     Ok(())
 }
@@ -643,17 +652,50 @@ fn set_country_code(env: JNIEnv, obj: JObject, country_code: jbyteArray) -> Resu
     status_code_to_res(res.get_status())
 }
 
+fn get_vendor_uci_payload(data: UciResponsePacket) -> Result<Vec<u8>, UwbErr> {
+    match data.specialize() {
+        UciResponseChild::UciVendor_9_Response(evt) => match evt.specialize() {
+            UciVendor_9_ResponseChild::Payload(payload) => Ok(payload.to_vec()),
+            UciVendor_9_ResponseChild::None => Ok(Vec::new()),
+        },
+        UciResponseChild::UciVendor_A_Response(evt) => match evt.specialize() {
+            UciVendor_A_ResponseChild::Payload(payload) => Ok(payload.to_vec()),
+            UciVendor_A_ResponseChild::None => Ok(Vec::new()),
+        },
+        UciResponseChild::UciVendor_B_Response(evt) => match evt.specialize() {
+            UciVendor_B_ResponseChild::Payload(payload) => Ok(payload.to_vec()),
+            UciVendor_B_ResponseChild::None => Ok(Vec::new()),
+        },
+        UciResponseChild::UciVendor_E_Response(evt) => match evt.specialize() {
+            UciVendor_E_ResponseChild::Payload(payload) => Ok(payload.to_vec()),
+            UciVendor_E_ResponseChild::None => Ok(Vec::new()),
+        },
+        UciResponseChild::UciVendor_F_Response(evt) => match evt.specialize() {
+            UciVendor_F_ResponseChild::Payload(payload) => Ok(payload.to_vec()),
+            UciVendor_F_ResponseChild::None => Ok(Vec::new()),
+        },
+        _ => {
+            error!("Invalid vendor response with gid {:?}", data.get_group_id());
+            Err(UwbErr::Specialize(data.to_vec()))
+        }
+    }
+}
+
 fn send_raw_vendor_cmd(
     env: JNIEnv,
     obj: JObject,
     gid: u32,
     oid: u32,
     payload: jbyteArray,
-) -> Result<(u32, u32, Vec<u8>), UwbErr> {
+) -> Result<(i32, i32, Vec<u8>), UwbErr> {
     let payload = env.convert_byte_array(payload)?;
     let dispatcher = get_dispatcher(env, obj)?;
     match dispatcher.block_on_jni_command(JNICommand::UciRawVendorCmd { gid, oid, payload })? {
-        UciResponse::RawVendorRsp { gid, oid, payload } => Ok((gid, oid, payload)),
+        UciResponse::RawVendorRsp(response) => Ok((
+            response.get_group_id().to_i32().unwrap(),
+            response.get_opcode().to_i32().unwrap(),
+            get_vendor_uci_payload(response)?,
+        )),
         _ => Err(UwbErr::failed()),
     }
 }
@@ -684,12 +726,20 @@ pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeDi
     env: JNIEnv,
     obj: JObject,
 ) -> jlong {
-    let eventmanager = EventManager::new(env, obj).expect("Failed to create event manager");
-    let dispatcher = match Dispatcher::new(eventmanager) {
-        Ok(dispatcher) => dispatcher,
-        Err(_err) => panic!("Fail to create dispatcher"),
+    let eventmanager = match EventManager::new(env, obj) {
+        Ok(evtmgr) => evtmgr,
+        Err(err) => {
+            error!("Fail to create event manager{:?}", err);
+            return *JObject::null() as jlong;
+        }
     };
-    Box::into_raw(Box::new(dispatcher)) as jlong
+    match Dispatcher::new(eventmanager) {
+        Ok(dispatcher) => Box::into_raw(Box::new(dispatcher)) as jlong,
+        Err(err) => {
+            error!("Fail to create dispatcher {:?}", err);
+            *JObject::null() as jlong
+        }
+    }
 }
 
 /// destroy the dispatcher instance
@@ -705,7 +755,13 @@ pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeDi
             return;
         }
     };
-    let dispatcher_ptr = dispatcher_ptr_value.j().expect("Failed to get the pointer!");
+    let dispatcher_ptr = match dispatcher_ptr_value.j() {
+        Ok(value) => value,
+        Err(err) => {
+            error!("Failed to get the pointer with: {:?}", err);
+            return;
+        }
+    };
     // Safety: dispatcher pointer must not be a null pointer and must point to a valid dispatcher object.
     // This can be ensured because the dispatcher is created in an earlier stage and
     // won't be deleted before calling this destroy function.
@@ -714,24 +770,29 @@ pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeDi
     info!("The dispatcher successfully destroyed.");
 }
 
-// TODO: Implement these functions
-fn uwa_init() {}
+fn get_power_stats<'a>(env: JNIEnv, obj: JObject) -> Result<[JValue<'a>; 4], UwbErr> {
+    let dispatcher = get_dispatcher(env, obj)?;
+    match dispatcher.block_on_jni_command(JNICommand::UciGetPowerStats)? {
+        UciResponse::AndroidGetPowerStatsRsp(data) => Ok([
+            JValue::Int(data.get_stats().idle_time_ms as i32),
+            JValue::Int(data.get_stats().tx_time_ms as i32),
+            JValue::Int(data.get_stats().rx_time_ms as i32),
+            JValue::Int(data.get_stats().total_wake_count as i32),
+        ]),
+        _ => Err(UwbErr::failed()),
+    }
+}
 
 fn uwa_get_device_info(dispatcher: &Dispatcher) -> Result<UciResponse, UwbErr> {
     let res = dispatcher.block_on_jni_command(JNICommand::UciGetDeviceInfo)?;
     Ok(res)
 }
 
-fn uwa_enable() -> Result<(), UwbErr> {
-    Ok(())
-}
-
-fn clear_all_session_context() {}
-
-fn uwa_disable(_para: bool) -> Result<(), UwbErr> {
-    Err(UwbErr::refused())
-}
-
-fn set_core_device_configurations() -> Result<(), UwbErr> {
-    Ok(())
+fn reset_device(env: JNIEnv, obj: JObject, reset_config: u8) -> Result<(), UwbErr> {
+    let dispatcher = get_dispatcher(env, obj)?;
+    let res = match dispatcher.block_on_jni_command(JNICommand::UciDeviceReset { reset_config })? {
+        UciResponse::DeviceResetRsp(data) => data,
+        _ => return Err(UwbErr::failed()),
+    };
+    status_code_to_res(res.get_status())
 }

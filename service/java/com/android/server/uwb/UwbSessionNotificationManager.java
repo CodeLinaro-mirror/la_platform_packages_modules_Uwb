@@ -15,6 +15,8 @@
  */
 package com.android.server.uwb;
 
+import android.annotation.NonNull;
+import android.os.PersistableBundle;
 import android.util.Log;
 import android.uwb.AngleMeasurement;
 import android.uwb.AngleOfArrivalMeasurement;
@@ -33,22 +35,29 @@ import com.android.server.uwb.params.TlvUtil;
 import com.android.server.uwb.util.UwbUtil;
 
 import com.google.uwb.support.base.Params;
+import com.google.uwb.support.ccc.CccParams;
+import com.google.uwb.support.ccc.CccRangingReconfiguredParams;
 import com.google.uwb.support.fira.FiraParams;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 
 public class UwbSessionNotificationManager {
     private static final String TAG = "UwbSessionNotiManager";
+    private final UwbInjector mUwbInjector;
 
-    public UwbSessionNotificationManager() {
+    public UwbSessionNotificationManager(@NonNull UwbInjector uwbInjector) {
+        mUwbInjector = uwbInjector;
     }
 
     public void onRangingResult(UwbSession uwbSession, UwbRangingData rangingData) {
         SessionHandle sessionHandle = uwbSession.getSessionHandle();
         IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
         try {
-            uwbRangingCallbacks.onRangingResult(sessionHandle, getRangingReport(rangingData));
+            uwbRangingCallbacks.onRangingResult(
+                    sessionHandle,
+                    getRangingReport(rangingData, mUwbInjector.getElapsedSinceBootNanos()));
             Log.i(TAG, "IUwbRangingCallbacks - onRangingResult");
         } catch (Exception e) {
             Log.e(TAG, "IUwbRangingCallbacks - onRangingResult : Failed");
@@ -142,14 +151,20 @@ public class UwbSessionNotificationManager {
         }
     }
 
-    public void onRangingReconfigured(UwbSession uwbSession, int reasonCode) {
+    public void onRangingReconfigured(UwbSession uwbSession) {
         Log.d(TAG, "call onRangingReconfigured");
         SessionHandle sessionHandle = uwbSession.getSessionHandle();
         IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
+        PersistableBundle params;
+        if (Objects.equals(uwbSession.getProtocolName(), CccParams.PROTOCOL_NAME)) {
+            // Why are there no params defined for this bundle?
+            params = new CccRangingReconfiguredParams.Builder().build().toBundle();
+        } else {
+            // No params defined for FiRa reconfigure.
+            params = new PersistableBundle();
+        }
         try {
-            uwbRangingCallbacks.onRangingReconfigured(sessionHandle,
-                    UwbSessionNotificationHelper.convertReasonToParam(uwbSession.getProtocolName(),
-                            reasonCode));
+            uwbRangingCallbacks.onRangingReconfigured(sessionHandle, params);
             Log.i(TAG, "IUwbRangingCallbacks - onRangingReconfigured");
         } catch (Exception e) {
             Log.e(TAG, "IUwbRangingCallbacks - onRangingReconfigured : Failed");
@@ -187,7 +202,8 @@ public class UwbSessionNotificationManager {
         }
     }
 
-    private static RangingReport getRangingReport(UwbRangingData rangingData) {
+    private static RangingReport getRangingReport(
+            @NonNull UwbRangingData rangingData, long elapsedRealtimeNanos) {
         if (rangingData.getRangingMeasuresType()
                 != UwbUciConstants.RANGING_MEASUREMENT_TYPE_TWO_WAY) {
             return null;
@@ -198,8 +214,6 @@ public class UwbSessionNotificationManager {
             UwbAddress macAddress = UwbAddress.fromBytes(TlvUtil.getReverseBytes(
                     uwbTwoWayMeasurement[i].getMacAddress()));
             int rangingStatus = uwbTwoWayMeasurement[i].getRangingStatus();
-            // TODO(b/186727830): Retrieve this.
-            long elapsedRealtimeNanos = 0;
             DistanceMeasurement distanceMeasurement = null;
             AngleOfArrivalMeasurement angleOfArrivalMeasurement = null;
             AngleOfArrivalMeasurement destinationAngleOfArrivalMeasurement = null;
