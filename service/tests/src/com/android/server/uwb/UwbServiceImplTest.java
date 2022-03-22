@@ -61,7 +61,10 @@ import android.uwb.SessionHandle;
 
 import androidx.test.runner.AndroidJUnit4;
 
-import com.android.uwb.jni.NativeUwbManager;
+import com.android.server.uwb.jni.NativeUwbManager;
+import com.android.server.uwb.multchip.UwbMultichipData;
+
+import com.google.uwb.support.multichip.ChipInfoParams;
 
 import org.junit.Before;
 import org.junit.Test;
@@ -84,6 +87,8 @@ public class UwbServiceImplTest {
     private static final int UID_2 = 343453;
     private static final String PACKAGE_NAME = "com.uwb.test";
     private static final String DEFAULT_CHIP_ID = "defaultChipId";
+    private static final ChipInfoParams DEFAULT_CHIP_INFO_PARAMS =
+            ChipInfoParams.createBuilder().setChipId(DEFAULT_CHIP_ID).build();
     private static final AttributionSource ATTRIBUTION_SOURCE =
             new AttributionSource.Builder(UID).setPackageName(PACKAGE_NAME).build();
     private static final AttributionSource ATTRIBUTION_SOURCE_2 =
@@ -95,6 +100,7 @@ public class UwbServiceImplTest {
     @Mock private UwbInjector mUwbInjector;
     @Mock private UwbSettingsStore mUwbSettingsStore;
     @Mock private NativeUwbManager mNativeUwbManager;
+    @Mock private UwbMultichipData mUwbMultichipData;
     @Captor private ArgumentCaptor<IUwbRangingCallbacks> mRangingCbCaptor;
     @Captor private ArgumentCaptor<IUwbRangingCallbacks> mRangingCbCaptor2;
     @Captor private ArgumentCaptor<IBinder.DeathRecipient> mClientDeathCaptor;
@@ -112,8 +118,9 @@ public class UwbServiceImplTest {
         when(mVendorService.asBinder()).thenReturn(mVendorServiceBinder);
         when(mUwbInjector.getUwbSettingsStore()).thenReturn(mUwbSettingsStore);
         when(mUwbSettingsStore.get(SETTINGS_TOGGLE_STATE)).thenReturn(true);
-        when(mNativeUwbManager.getChipIds()).thenReturn(List.of(DEFAULT_CHIP_ID));
-        when(mNativeUwbManager.getDefaultChipId()).thenReturn(DEFAULT_CHIP_ID);
+        when(mUwbMultichipData.getChipInfos()).thenReturn(List.of(DEFAULT_CHIP_INFO_PARAMS));
+        when(mUwbMultichipData.getDefaultChipId()).thenReturn(DEFAULT_CHIP_ID);
+        when(mUwbInjector.getMultichipData()).thenReturn(mUwbMultichipData);
         when(mUwbInjector.getSettingsInt(Settings.Global.AIRPLANE_MODE_ON, 0)).thenReturn(0);
         when(mUwbInjector.getNativeUwbManager()).thenReturn(mNativeUwbManager);
 
@@ -562,8 +569,52 @@ public class UwbServiceImplTest {
     }
 
     @Test
+    public void testThrowSecurityExceptionWhenGetDefaultChipIdWithoutUwbPrivilegedPermission()
+            throws Exception {
+        doThrow(new SecurityException()).when(mContext).enforceCallingOrSelfPermission(
+                eq(UWB_PRIVILEGED), any());
+        try {
+            mUwbServiceImpl.getDefaultChipId();
+            fail();
+        } catch (SecurityException e) { /* pass */ }
+    }
+
+    @Test
     public void testGetChipIds() {
-        assertThat(List.of(DEFAULT_CHIP_ID))
-                .containsExactlyElementsIn(mUwbServiceImpl.getChipIds());
+        List<String> chipIds = mUwbServiceImpl.getChipIds();
+        assertThat(chipIds).containsExactly(DEFAULT_CHIP_ID);
+    }
+
+    @Test
+    public void testThrowSecurityExceptionWhenGetChipIdsWithoutUwbPrivilegedPermission()
+            throws Exception {
+        doThrow(new SecurityException()).when(mContext).enforceCallingOrSelfPermission(
+                eq(UWB_PRIVILEGED), any());
+        try {
+            mUwbServiceImpl.getChipIds();
+            fail();
+        } catch (SecurityException e) { /* pass */ }
+    }
+
+    @Test
+    public void testGetChipInfos() {
+        List<PersistableBundle> chipInfos = mUwbServiceImpl.getChipInfos();
+        assertThat(chipInfos).hasSize(1);
+        ChipInfoParams chipInfoParams = ChipInfoParams.fromBundle(chipInfos.get(0));
+        assertThat(chipInfoParams.getChipId()).isEqualTo(DEFAULT_CHIP_ID);
+        assertThat(chipInfoParams.getPositionX()).isEqualTo(0.);
+        assertThat(chipInfoParams.getPositionY()).isEqualTo(0.);
+        assertThat(chipInfoParams.getPositionZ()).isEqualTo(0.);
+    }
+
+    @Test
+    public void testThrowSecurityExceptionWhenGetChipInfosWithoutUwbPrivilegedPermission()
+            throws Exception {
+        doThrow(new SecurityException()).when(mContext).enforceCallingOrSelfPermission(
+                eq(UWB_PRIVILEGED), any());
+        try {
+            mUwbServiceImpl.getChipInfos();
+            fail();
+        } catch (SecurityException e) { /* pass */ }
     }
 }
