@@ -55,6 +55,13 @@ public class UwbSessionNotificationManager {
     public void onRangingResult(UwbSession uwbSession, UwbRangingData rangingData) {
         SessionHandle sessionHandle = uwbSession.getSessionHandle();
         IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
+        boolean permissionGranted = mUwbInjector.checkUwbRangingPermissionForDataDelivery(
+                uwbSession.getAttributionSource(), "uwb ranging result");
+        if (!permissionGranted) {
+            Log.e(TAG, "Not delivering ranging result because of permission denial"
+                    + sessionHandle);
+            return;
+        }
         try {
             uwbRangingCallbacks.onRangingResult(
                     sessionHandle,
@@ -85,7 +92,8 @@ public class UwbSessionNotificationManager {
 
         try {
             uwbRangingCallbacks.onRangingOpenFailed(sessionHandle,
-                    UwbSessionNotificationHelper.convertStatusCode(status),
+                    UwbSessionNotificationHelper.convertStatusToReasonCode(
+                            uwbSession.getProtocolName(), status),
                     UwbSessionNotificationHelper.convertStatusToParam(uwbSession.getProtocolName(),
                             status));
             Log.i(TAG, "IUwbRangingCallbacks - onRangingOpenFailed");
@@ -113,7 +121,8 @@ public class UwbSessionNotificationManager {
         IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
         try {
             uwbRangingCallbacks.onRangingStartFailed(sessionHandle,
-                    UwbSessionNotificationHelper.convertStatusCode(status),
+                    UwbSessionNotificationHelper.convertStatusToReasonCode(
+                            uwbSession.getProtocolName(), status),
                     UwbSessionNotificationHelper.convertStatusToParam(uwbSession.getProtocolName(),
                             status));
             Log.i(TAG, "IUwbRangingCallbacks - onRangingStartFailed");
@@ -123,14 +132,15 @@ public class UwbSessionNotificationManager {
         }
     }
 
-    public void onRangingStopped(UwbSession uwbSession, int reasonCode) {
+    public void onRangingStopped(UwbSession uwbSession, int status)  {
         SessionHandle sessionHandle = uwbSession.getSessionHandle();
         IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
         try {
             uwbRangingCallbacks.onRangingStopped(sessionHandle,
-                    UwbSessionNotificationHelper.convertReasonCode(reasonCode),
-                    UwbSessionNotificationHelper.convertReasonToParam(uwbSession.getProtocolName(),
-                            reasonCode));
+                    UwbSessionNotificationHelper.convertStatusToReasonCode(
+                            uwbSession.getProtocolName(), status),
+                    UwbSessionNotificationHelper.convertStatusToParam(uwbSession.getProtocolName(),
+                            status));
             Log.i(TAG, "IUwbRangingCallbacks - onRangingStopped");
         } catch (Exception e) {
             Log.e(TAG, "IUwbRangingCallbacks - onRangingStopped : Failed");
@@ -143,7 +153,8 @@ public class UwbSessionNotificationManager {
         IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
         try {
             uwbRangingCallbacks.onRangingStopFailed(sessionHandle,
-                    UwbSessionNotificationHelper.convertStatusCode(status),
+                    UwbSessionNotificationHelper.convertStatusToReasonCode(
+                            uwbSession.getProtocolName(), status),
                     UwbSessionNotificationHelper.convertStatusToParam(uwbSession.getProtocolName(),
                             status));
             Log.i(TAG, "IUwbRangingCallbacks - onRangingStopFailed");
@@ -179,7 +190,8 @@ public class UwbSessionNotificationManager {
         IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
         try {
             uwbRangingCallbacks.onRangingReconfigureFailed(sessionHandle,
-                    UwbSessionNotificationHelper.convertStatusCode(status),
+                    UwbSessionNotificationHelper.convertStatusToReasonCode(
+                            uwbSession.getProtocolName(), status),
                     UwbSessionNotificationHelper.convertStatusToParam(uwbSession.getProtocolName(),
                             status));
             Log.i(TAG, "IUwbRangingCallbacks - onRangingReconfigureFailed");
@@ -189,12 +201,27 @@ public class UwbSessionNotificationManager {
         }
     }
 
-    public void onRangingClosed(UwbSession uwbSession, int reasonCode) {
+    public void onRangingClosed(UwbSession uwbSession, int status) {
         SessionHandle sessionHandle = uwbSession.getSessionHandle();
         IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
         try {
             uwbRangingCallbacks.onRangingClosed(sessionHandle,
-                    UwbSessionNotificationHelper.convertReasonCode(reasonCode),
+                    UwbSessionNotificationHelper.convertStatusToReasonCode(
+                            uwbSession.getProtocolName(), status),
+                    UwbSessionNotificationHelper.convertStatusToParam(uwbSession.getProtocolName(),
+                            status));
+            Log.i(TAG, "IUwbRangingCallbacks - onRangingClosed");
+        } catch (Exception e) {
+            Log.e(TAG, "IUwbRangingCallbacks - onRangingClosed : Failed");
+            e.printStackTrace();
+        }
+    }
+
+    public void onRangingClosedWithReasonCode(UwbSession uwbSession, int reasonCode) {
+        SessionHandle sessionHandle = uwbSession.getSessionHandle();
+        IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
+        try {
+            uwbRangingCallbacks.onRangingClosed(sessionHandle, reasonCode,
                     UwbSessionNotificationHelper.convertReasonToParam(uwbSession.getProtocolName(),
                             reasonCode));
             Log.i(TAG, "IUwbRangingCallbacks - onRangingClosed");
