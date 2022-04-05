@@ -436,7 +436,7 @@ public class UwbServiceImpl extends IUwbAdapter2.Stub implements IBinder.DeathRe
     }
 
     @Override
-    public void suspend(SessionHandle sessionHandle, PersistableBundle params) {
+    public void pause(SessionHandle sessionHandle, PersistableBundle params) {
         enforceUwbPrivilegedPermission();
         // TODO(b/200678461): Implement this.
         throw new IllegalStateException("Not implemented");
@@ -590,7 +590,7 @@ public class UwbServiceImpl extends IUwbAdapter2.Stub implements IBinder.DeathRe
     private void handleAirplaneModeEvent() {
         try {
             getVendorUwbAdapter().setEnabled(isUwbEnabled());
-        } catch (RemoteException e) {
+        } catch (Exception e) {
             Log.e(TAG, "Unable to set UWB Adapter state.", e);
         }
     }
