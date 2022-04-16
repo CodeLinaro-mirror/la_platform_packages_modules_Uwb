@@ -23,10 +23,12 @@ import static com.android.server.uwb.util.UwbUtil.degreeToRadian;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.any;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.validateMockitoUsage;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import android.content.AttributionSource;
 import android.platform.test.annotations.Presubmit;
 import android.test.suitebuilder.annotation.SmallTest;
 import android.util.Pair;
@@ -34,6 +36,7 @@ import android.uwb.AngleMeasurement;
 import android.uwb.AngleOfArrivalMeasurement;
 import android.uwb.DistanceMeasurement;
 import android.uwb.IUwbRangingCallbacks;
+import android.uwb.RangingChangeReason;
 import android.uwb.RangingMeasurement;
 import android.uwb.RangingReport;
 import android.uwb.SessionHandle;
@@ -83,6 +86,10 @@ public class UwbSessionNotificationManagerTest {
     private static final int TEST_AOA_DEST_ELEVATION_FOM = 90;
     private static final int TEST_SLOT_IDX = 10;
     private static final long TEST_ELAPSED_NANOS = 100L;
+    private static final int UID = 343453;
+    private static final String PACKAGE_NAME = "com.uwb.test";
+    private static final AttributionSource ATTRIBUTION_SOURCE =
+            new AttributionSource.Builder(UID).setPackageName(PACKAGE_NAME).build();
 
     @Mock private UwbInjector mUwbInjector;
     @Mock private UwbSessionManager.UwbSession mUwbSession;
@@ -95,14 +102,15 @@ public class UwbSessionNotificationManagerTest {
     @Before
     public void setUp() throws Exception {
         MockitoAnnotations.initMocks(this);
-
         when(mUwbSession.getSessionHandle()).thenReturn(mSessionHandle);
         when(mUwbSession.getIUwbRangingCallbacks()).thenReturn(mIUwbRangingCallbacks);
         when(mUwbSession.getProtocolName()).thenReturn(FiraParams.PROTOCOL_NAME);
         when(mUwbSession.getParams()).thenReturn(mFiraParams);
+        when(mUwbSession.getAttributionSource()).thenReturn(ATTRIBUTION_SOURCE);
         when(mFiraParams.getAoaResultRequest()).thenReturn(
                 FiraParams.AOA_RESULT_REQUEST_MODE_REQ_AOA_RESULTS);
         when(mFiraParams.hasResultReportPhase()).thenReturn(false);
+        when(mUwbInjector.checkUwbRangingPermissionForDataDelivery(any(), any())).thenReturn(true);
         when(mUwbInjector.getElapsedSinceBootNanos()).thenReturn(TEST_ELAPSED_NANOS);
         mUwbSessionNotificationManager = new UwbSessionNotificationManager(mUwbInjector);
     }
@@ -113,6 +121,18 @@ public class UwbSessionNotificationManagerTest {
     @After
     public void cleanup() {
         validateMockitoUsage();
+    }
+
+    @Test
+    public void testOnRangingResultWithoutUwbRangingPermission() throws Exception {
+        Pair<UwbRangingData, RangingReport> testRangingDataAndRangingReport =
+                generateRangingDataAndRangingReport(true, true, false, false);
+        when(mUwbInjector.checkUwbRangingPermissionForDataDelivery(eq(ATTRIBUTION_SOURCE), any()))
+                .thenReturn(false);
+        mUwbSessionNotificationManager.onRangingResult(
+                mUwbSession, testRangingDataAndRangingReport.first);
+
+        verify(mIUwbRangingCallbacks, never()).onRangingResult(any(), any());
     }
 
     @Test
@@ -190,7 +210,7 @@ public class UwbSessionNotificationManagerTest {
         mUwbSessionNotificationManager.onRangingOpenFailed(mUwbSession, status);
 
         verify(mIUwbRangingCallbacks).onRangingOpenFailed(eq(mSessionHandle),
-                eq(UwbSessionNotificationHelper.convertStatusCode(status)),
+                eq(UwbSessionNotificationHelper.convertUciStatusToApiReasonCode(status)),
                 argThat(p -> (p.getInt("status_code")) == status));
     }
 
@@ -208,18 +228,18 @@ public class UwbSessionNotificationManagerTest {
         mUwbSessionNotificationManager.onRangingStartFailed(mUwbSession, status);
 
         verify(mIUwbRangingCallbacks).onRangingStartFailed(eq(mSessionHandle),
-                eq(UwbSessionNotificationHelper.convertStatusCode(status)),
+                eq(UwbSessionNotificationHelper.convertUciStatusToApiReasonCode(status)),
                 argThat(p -> (p.getInt("status_code")) == status));
     }
 
     @Test
     public void testOnRangingStopped() throws Exception {
-        int reason = UwbUciConstants.REASON_STATE_CHANGE_WITH_SESSION_MANAGEMENT_COMMANDS;
-        mUwbSessionNotificationManager.onRangingStopped(mUwbSession, reason);
+        int status = UwbUciConstants.REASON_STATE_CHANGE_WITH_SESSION_MANAGEMENT_COMMANDS;
+        mUwbSessionNotificationManager.onRangingStopped(mUwbSession, status);
 
         verify(mIUwbRangingCallbacks).onRangingStopped(eq(mSessionHandle),
-                eq(UwbSessionNotificationHelper.convertReasonCode(reason)),
-                argThat(p-> p.getInt("reason_code") == reason));
+                eq(UwbSessionNotificationHelper.convertUciStatusToApiReasonCode(status)),
+                argThat(p-> p.getInt("status_code") == status));
     }
 
     @Test
@@ -228,7 +248,7 @@ public class UwbSessionNotificationManagerTest {
         mUwbSessionNotificationManager.onRangingStopFailed(mUwbSession, status);
 
         verify(mIUwbRangingCallbacks).onRangingStopFailed(eq(mSessionHandle),
-                eq(UwbSessionNotificationHelper.convertStatusCode(status)),
+                eq(UwbSessionNotificationHelper.convertUciStatusToApiReasonCode(status)),
                 argThat(p -> (p.getInt("status_code")) == status));
     }
 
@@ -245,18 +265,28 @@ public class UwbSessionNotificationManagerTest {
         mUwbSessionNotificationManager.onRangingReconfigureFailed(mUwbSession, status);
 
         verify(mIUwbRangingCallbacks).onRangingReconfigureFailed(eq(mSessionHandle),
-                eq(UwbSessionNotificationHelper.convertStatusCode(status)),
+                eq(UwbSessionNotificationHelper.convertUciStatusToApiReasonCode(status)),
                 argThat(p -> (p.getInt("status_code")) == status));
     }
 
     @Test
     public void testOnRangingClosed() throws Exception {
-        int reason = UwbUciConstants.REASON_ERROR_SLOT_LENGTH_NOT_SUPPORTED;
-        mUwbSessionNotificationManager.onRangingClosed(mUwbSession, reason);
+        int status = UwbUciConstants.REASON_ERROR_SLOT_LENGTH_NOT_SUPPORTED;
+        mUwbSessionNotificationManager.onRangingClosed(mUwbSession, status);
 
         verify(mIUwbRangingCallbacks).onRangingClosed(eq(mSessionHandle),
-                eq(UwbSessionNotificationHelper.convertReasonCode(reason)),
-                argThat(p-> p.getInt("reason_code") == reason));
+                eq(UwbSessionNotificationHelper.convertUciStatusToApiReasonCode(status)),
+                argThat(p-> p.getInt("status_code") == status));
+    }
+
+    @Test
+    public void testOnRangingClosedWithReasonCode() throws Exception {
+        int reasonCode = RangingChangeReason.SYSTEM_POLICY;
+        mUwbSessionNotificationManager.onRangingClosedWithApiReasonCode(mUwbSession, reasonCode);
+
+        verify(mIUwbRangingCallbacks).onRangingClosed(eq(mSessionHandle),
+                eq(reasonCode),
+                argThat(p-> p.isEmpty()));
     }
 
     // Helper method to generate a UwbRangingData instance and corresponding RangingMeasurement
