@@ -59,6 +59,8 @@ import com.google.uwb.support.fira.FiraRangingReconfigureParams;
 import com.google.uwb.support.generic.GenericParams;
 import com.google.uwb.support.generic.GenericSpecificationParams;
 
+import java.io.FileDescriptor;
+import java.io.PrintWriter;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -176,6 +178,8 @@ public class UwbServiceCore implements INativeUwbManager.DeviceNotification,
         // TODO(b/227488208): Should we try to restart (like wifi) instead?
         if ((byte) deviceState == UwbUciConstants.DEVICE_STATE_ERROR) {
             Log.e(TAG, "Error device status received. Disabling...");
+            mUwbMetrics.incrementDeviceStatusErrorCount();
+            takBugReportAfterDeviceError("UWB is disabled due to device status error");
             setEnabled(false);
             return;
         }
@@ -212,6 +216,7 @@ public class UwbServiceCore implements INativeUwbManager.DeviceNotification,
     @Override
     public void onCoreGenericErrorNotificationReceived(int status) {
         Log.e(TAG, "onCoreGenericErrorNotificationReceived status = " + status);
+        mUwbMetrics.incrementUciGenericErrorCount();
     }
 
     @Override
@@ -516,11 +521,14 @@ public class UwbServiceCore implements INativeUwbManager.DeviceNotification,
                 try {
                     if (!mNativeUwbManager.doInitialize()) {
                         Log.e(TAG, "Error enabling UWB");
+                        mUwbMetrics.incrementDeviceInitFailureCount();
+                        takBugReportAfterDeviceError("Error enabling UWB");
                         updateState(AdapterStateCallback.STATE_DISABLED,
                                 StateChangeReason.SYSTEM_POLICY);
                     } else {
                         Log.i(TAG, "Initialization success");
                         /* TODO : keep it until MW, FW fix b/196943897 */
+                        mUwbMetrics.incrementDeviceInitSuccessCount();
                         handleDeviceStatusNotification(UwbUciConstants.DEVICE_STATE_READY);
                         // Set country code on every enable.
                         mUwbCountryCode.setCountryCode(true);
@@ -625,5 +633,20 @@ public class UwbServiceCore implements INativeUwbManager.DeviceNotification,
             mIBinder.unlinkToDeath(this, 0);
             mAdapterMap.remove(mPid);
         }
+    }
+
+    private void takBugReportAfterDeviceError(String bugTitle) {
+        if (mUwbInjector.getDeviceConfigFacade().isDeviceErrorBugreportEnabled()) {
+            mUwbInjector.getUwbDiagnostics().takeBugReport(bugTitle);
+        }
+    }
+
+    /**
+     * Dump the UWB service status
+     */
+    public synchronized void dump(FileDescriptor fd, PrintWriter pw, String[] args) {
+        pw.println("---- Dump of UwbServiceCore ----");
+        pw.println("device state = " + getDeviceStateString(mState));
+        pw.println("mLastStateChangedReason = " + mLastStateChangedReason);
     }
 }
