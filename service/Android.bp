@@ -59,6 +59,7 @@ java_library {
         "ServiceUwbResources",
         "framework-statsd.stubs.module_lib",
         "framework-wifi.stubs.module_lib",
+        "framework-bluetooth.stubs.module_lib",
     ],
 
     static_libs: [
@@ -73,6 +74,8 @@ java_library {
         "modules-utils-handlerexecutor",
         "modules-utils-preconditions",
         "guava",
+        "libprotobuf-java-lite",
+        "uwb-config-proto",
     ],
 
     apex_available: [
