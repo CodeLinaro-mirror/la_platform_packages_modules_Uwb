@@ -27,6 +27,7 @@ import android.content.IntentFilter;
 import android.os.Binder;
 import android.os.ParcelFileDescriptor;
 import android.os.PersistableBundle;
+import android.os.Process;
 import android.os.RemoteException;
 import android.provider.Settings;
 import android.util.Log;
@@ -37,6 +38,8 @@ import android.uwb.IUwbRangingCallbacks;
 import android.uwb.IUwbVendorUciCallback;
 import android.uwb.SessionHandle;
 import android.uwb.UwbAddress;
+
+import com.android.server.uwb.data.UwbUciConstants;
 
 import com.google.uwb.support.multichip.ChipInfoParams;
 import com.google.uwb.support.profile.ServiceProfile;
@@ -135,15 +138,17 @@ public class UwbServiceImpl extends IUwbAdapter.Stub {
     @Override
     public long getTimestampResolutionNanos(String chipId) throws RemoteException {
         enforceUwbPrivilegedPermission();
-        checkValidChipId(chipId);
+        validateChipId(chipId);
+        // TODO(/b/237601383): Determine whether getTimestampResolutionNanos should take a chipId
+        // parameter
         return mUwbServiceCore.getTimestampResolutionNanos();
     }
 
     @Override
     public PersistableBundle getSpecificationInfo(String chipId) throws RemoteException {
         enforceUwbPrivilegedPermission();
-        checkValidChipId(chipId);
-        return mUwbServiceCore.getSpecificationInfo();
+        chipId = validateChipId(chipId);
+        return mUwbServiceCore.getSpecificationInfo(chipId);
     }
 
     @Override
@@ -152,10 +157,14 @@ public class UwbServiceImpl extends IUwbAdapter.Stub {
             IUwbRangingCallbacks rangingCallbacks,
             PersistableBundle parameters,
             String chipId) throws RemoteException {
-
         enforceUwbPrivilegedPermission();
+        chipId = validateChipId(chipId);
         mUwbInjector.enforceUwbRangingPermissionForPreflight(attributionSource);
-        mUwbServiceCore.openRanging(attributionSource, sessionHandle, rangingCallbacks, parameters);
+        mUwbServiceCore.openRanging(attributionSource,
+                sessionHandle,
+                rangingCallbacks,
+                parameters,
+                chipId);
     }
 
     @Override
@@ -188,7 +197,8 @@ public class UwbServiceImpl extends IUwbAdapter.Stub {
     public synchronized int sendVendorUciMessage(int gid, int oid, byte[] payload)
             throws RemoteException {
         enforceUwbPrivilegedPermission();
-        return mUwbServiceCore.sendVendorUciMessage(gid, oid, payload);
+        // TODO(b/237533396): Add a sendVendorUciMessage that takes a chipId parameter
+        return mUwbServiceCore.sendVendorUciMessage(gid, oid, payload, getDefaultChipId());
     }
 
     @Override
@@ -234,6 +244,11 @@ public class UwbServiceImpl extends IUwbAdapter.Stub {
     public synchronized void setEnabled(boolean enabled) throws RemoteException {
         enforceUwbPrivilegedPermission();
         persistUwbToggleState(enabled);
+        // Shell command from rooted shell, we allow UWB toggle on even if APM mode is on.
+        if (Binder.getCallingUid() == Process.ROOT_UID) {
+            mUwbServiceCore.setEnabled(isUwbToggleEnabled());
+            return;
+        }
         mUwbServiceCore.setEnabled(isUwbEnabled());
     }
 
@@ -281,8 +296,13 @@ public class UwbServiceImpl extends IUwbAdapter.Stub {
     @Override
     public int removeServiceProfile(@NonNull PersistableBundle parameters) {
         enforceUwbPrivilegedPermission();
-        // TODO(b/200678461): Implement this.
-        throw new IllegalStateException("Not implemented");
+        UuidBundleWrapper uuidBundleWrapper = UuidBundleWrapper.fromBundle(parameters);
+        if (uuidBundleWrapper.getServiceInstanceID().isPresent()) {
+            return mUwbInjector
+                    .getProfileManager()
+                    .removeServiceProfile(uuidBundleWrapper.getServiceInstanceID().get());
+        }
+        return UwbUciConstants.STATUS_CODE_FAILED;
     }
 
     @Override
@@ -369,10 +389,16 @@ public class UwbServiceImpl extends IUwbAdapter.Stub {
         }
     }
 
-    private void checkValidChipId(String chipId) {
-        if (chipId != null && !getChipIds().contains(chipId)) {
+    private String validateChipId(String chipId) {
+        if (chipId == null || chipId.isEmpty()) {
+            return getDefaultChipId();
+        }
+
+        if (!getChipIds().contains(chipId)) {
             throw new IllegalArgumentException("invalid chipId: " + chipId);
         }
+
+        return chipId;
     }
 
     public void handleUserSwitch(int userId) {

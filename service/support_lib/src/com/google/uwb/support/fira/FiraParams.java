@@ -284,6 +284,8 @@ public abstract class FiraParams extends Params {
                 STS_CONFIG_STATIC,
                 STS_CONFIG_DYNAMIC,
                 STS_CONFIG_DYNAMIC_FOR_CONTROLEE_INDIVIDUAL_KEY,
+                STS_CONFIG_PROVISIONED,
+                STS_CONFIG_PROVISIONED_FOR_CONTROLEE_INDIVIDUAL_KEY,
             })
     public @interface StsConfig {}
 
@@ -292,6 +294,10 @@ public abstract class FiraParams extends Params {
     public static final int STS_CONFIG_DYNAMIC = 1;
 
     public static final int STS_CONFIG_DYNAMIC_FOR_CONTROLEE_INDIVIDUAL_KEY = 2;
+
+    public static final int STS_CONFIG_PROVISIONED = 3;
+
+    public static final int STS_CONFIG_PROVISIONED_FOR_CONTROLEE_INDIVIDUAL_KEY = 4;
 
     /** AoA request */
     @IntDef(
@@ -375,13 +381,23 @@ public abstract class FiraParams extends Params {
             value = {
                 RANGE_DATA_NTF_CONFIG_DISABLE,
                 RANGE_DATA_NTF_CONFIG_ENABLE,
-                RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY,
+                RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_LEVEL_TRIG,
+                RANGE_DATA_NTF_CONFIG_ENABLE_AOA_LEVEL_TRIG,
+                RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_AOA_LEVEL_TRIG,
+                RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_EDGE_TRIG,
+                RANGE_DATA_NTF_CONFIG_ENABLE_AOA_EDGE_TRIG,
+                RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_AOA_EDGE_TRIG,
             })
     public @interface RangeDataNtfConfig {}
 
     public static final int RANGE_DATA_NTF_CONFIG_DISABLE = 0;
     public static final int RANGE_DATA_NTF_CONFIG_ENABLE = 1;
-    public static final int RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY = 2;
+    public static final int RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_LEVEL_TRIG = 2;
+    public static final int RANGE_DATA_NTF_CONFIG_ENABLE_AOA_LEVEL_TRIG = 3;
+    public static final int RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_AOA_LEVEL_TRIG = 4;
+    public static final int RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_EDGE_TRIG = 5;
+    public static final int RANGE_DATA_NTF_CONFIG_ENABLE_AOA_EDGE_TRIG = 6;
+    public static final int RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_AOA_EDGE_TRIG = 7;
 
     /** MAC address mode: short (2 bytes) or extended (8 bytes) */
     @IntDef(
@@ -541,6 +557,13 @@ public abstract class FiraParams extends Params {
     public static final int DEVICE_CLASS_2 = 2; // Controller
     public static final int DEVICE_CLASS_3 = 3; // Controlee
 
+    public static final int RANGE_DATA_NTF_PROXIMITY_NEAR_DEFAULT = 0;
+    public static final int RANGE_DATA_NTF_PROXIMITY_FAR_DEFAULT = 20000;
+    public static final double RANGE_DATA_NTF_AOA_AZIMUTH_LOWER_DEFAULT = -Math.PI;
+    public static final double RANGE_DATA_NTF_AOA_AZIMUTH_UPPER_DEFAULT = Math.PI;
+    public static final double RANGE_DATA_NTF_AOA_ELEVATION_LOWER_DEFAULT = -Math.PI;
+    public static final double RANGE_DATA_NTF_AOA_ELEVATION_UPPER_DEFAULT = Math.PI;
+
     public enum AoaCapabilityFlag implements FlagEnum {
         HAS_AZIMUTH_SUPPORT(1),
         HAS_ELEVATION_SUPPORT(1 << 1),
@@ -647,7 +670,9 @@ public abstract class FiraParams extends Params {
     public enum StsCapabilityFlag implements FlagEnum {
         HAS_STATIC_STS_SUPPORT(1),
         HAS_DYNAMIC_STS_SUPPORT(1 << 1),
-        HAS_DYNAMIC_STS_INDIVIDUAL_CONTROLEE_KEY_SUPPORT(1 << 2);
+        HAS_DYNAMIC_STS_INDIVIDUAL_CONTROLEE_KEY_SUPPORT(1 << 2),
+        HAS_PROVISIONED_STS_SUPPORT(1 << 3),
+        HAS_PROVISIONED_STS_INDIVIDUAL_CONTROLEE_KEY_SUPPORT(1 << 4);
 
         private final long mValue;
 
@@ -739,6 +764,36 @@ public abstract class FiraParams extends Params {
         private final long mValue;
 
         private HprfParameterSetCapabilityFlag(long value) {
+            mValue = value;
+        }
+
+        @Override
+        public long getValue() {
+            return mValue;
+        }
+    }
+
+    public enum RangeDataNtfConfigCapabilityFlag implements FlagEnum {
+        HAS_RANGE_DATA_NTF_CONFIG_DISABLE(1 << RANGE_DATA_NTF_CONFIG_DISABLE),
+        HAS_RANGE_DATA_NTF_CONFIG_ENABLE(1 << RANGE_DATA_NTF_CONFIG_ENABLE),
+        HAS_RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_LEVEL_TRIG(
+                1 << RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_LEVEL_TRIG),
+        HAS_RANGE_DATA_NTF_CONFIG_ENABLE_AOA_LEVEL_TRIG(
+                1 << RANGE_DATA_NTF_CONFIG_ENABLE_AOA_LEVEL_TRIG),
+        HAS_RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_AOA_LEVEL_TRIG(
+                1 << RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_AOA_LEVEL_TRIG),
+        HAS_RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_EDGE_TRIG(
+                1 << RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_EDGE_TRIG),
+        HAS_RANGE_DATA_NTF_CONFIG_ENABLE_AOA_EDGE_TRIG(
+                1 << RANGE_DATA_NTF_CONFIG_ENABLE_AOA_EDGE_TRIG),
+        HAS_RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_AOA_EDGE_TRIG(
+                1 << RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_AOA_EDGE_TRIG);
+
+
+
+        private final long mValue;
+
+        private RangeDataNtfConfigCapabilityFlag(long value) {
             mValue = value;
         }
 

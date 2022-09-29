@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2016 The Android Open Source Project
+ * Copyright (C) 2022 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,22 +14,19 @@
  * limitations under the License.
  */
 
-syntax = "proto2";
+package com.android.server.uwb.util;
 
-package com_android_server_uwb;
+import android.os.Binder;
 
-option java_package = "com.android.server.uwb.proto";
-option java_outer_classname = "UwbConfigProto";
-
-message ServiceConfig {
-  required string service_instance_id = 1;
-  required int32 uid = 2;
-  required string package_name = 3;
-  required int32 service_id = 4;
-  optional int32 service_applet_id = 5;
-  optional int32 service_adf_id = 6;
-}
-message UwbConfig {
-  required int32 version = 1;
-  repeated ServiceConfig service_config = 2;
+/**
+ * Utilities for faking the calling uid in Binder.
+ */
+public class BinderUtil {
+    /**
+     * Fake the calling uid in Binder.
+     * @param uid the calling uid that Binder should return from now on
+     */
+    public static void setUid(int uid) {
+        Binder.restoreCallingIdentity((((long) uid) << 32) | Binder.getCallingPid());
+    }
 }

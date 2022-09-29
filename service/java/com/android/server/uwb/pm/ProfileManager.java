@@ -16,15 +16,22 @@
 
 package com.android.server.uwb.pm;
 
+import static com.google.uwb.support.fira.FiraParams.PACS_PROFILE_SERVICE_ID;
+
 import android.annotation.NonNull;
+import android.content.AttributionSource;
 import android.content.Context;
 import android.os.Binder;
 import android.os.Handler;
+import android.util.Log;
+import android.uwb.IUwbRangingCallbacks;
+import android.uwb.SessionHandle;
 
 import com.android.server.uwb.UwbConfigStore;
 import com.android.server.uwb.UwbInjector;
 import com.android.server.uwb.data.ServiceProfileData;
 import com.android.server.uwb.data.ServiceProfileData.ServiceProfileInfo;
+import com.android.server.uwb.data.UwbUciConstants;
 
 import com.google.uwb.support.fira.FiraParams.ServiceID;
 
@@ -45,8 +52,10 @@ public class ProfileManager {
     public final Map<Integer, List<ServiceProfileInfo>> mAppServiceProfileMap =
             new HashMap<>();
 
-    private static final int MAX_RETRIES = 10;
+    public final Map<SessionHandle, RangingSessionController> mRangingSessionTable =
+            new HashMap<>();
 
+    private static final int MAX_RETRIES = 10;
 
     private final Context mContext;
     private final Handler mHandler;
@@ -121,7 +130,8 @@ public class ProfileManager {
         return Optional.of(serviceInstanceID);
     }
 
-    public void removeServiceProfile(UUID serviceInstanceID) {
+    /** Remove existing service profile from profile manager */
+    public int removeServiceProfile(UUID serviceInstanceID) {
         int app_uid = Binder.getCallingUid();
         if (mServiceProfileMap.containsKey(serviceInstanceID)) {
             ServiceProfileInfo serviceProfileInfo = mServiceProfileMap.get(serviceInstanceID);
@@ -138,7 +148,11 @@ public class ProfileManager {
                 }
             }
         }
+        else {
+            return UwbUciConstants.STATUS_CODE_FAILED;
+        }
         mHandler.post(() -> mUwbConfigStore.saveToStore(true));
+        return UwbUciConstants.STATUS_CODE_OK;
     }
 
     public void loadServiceProfile(Map<UUID, ServiceProfileInfo> serviceProfileDataMap) {
@@ -166,5 +180,72 @@ public class ProfileManager {
             return mAppServiceProfileMap.get(app_uid);
         }
         return null;
+    }
+
+    /** Initializes state machine and session related info */
+    public void activateProfile(AttributionSource attributionSource, SessionHandle sessionHandle,
+            UUID serviceInstanceId, IUwbRangingCallbacks rangingCallbacks) {
+
+        if (!mServiceProfileMap.containsKey(serviceInstanceId)) {
+            Log.e(TAG, "UUID not found");
+            return;
+        }
+        ServiceProfileInfo profileInfo = mServiceProfileMap.get(serviceInstanceId);
+
+        switch (profileInfo.serviceID) {
+            /* Only PACS controlee/responder is supported now*/
+            case PACS_PROFILE_SERVICE_ID :
+                RangingSessionController rangingSessionController = new PacsControleeSession(
+                        sessionHandle,  attributionSource, mContext, mUwbInjector, profileInfo,
+                        rangingCallbacks, mHandler);
+                mRangingSessionTable.put(sessionHandle, rangingSessionController);
+                break;
+            default:
+                Log.e(TAG, "Service ID not supported yet");
+                return;
+        }
+
+        /* Session has been initialized, notify app */
+        try {
+            rangingCallbacks.onRangingOpened(sessionHandle);
+            Log.i(TAG, "IUwbRangingCallbacks - onRangingOpened");
+        } catch (Exception e) {
+            Log.e(TAG, "IUwbRangingCallbacks - onRangingOpened : Failed");
+            e.printStackTrace();
+        }
+    }
+
+    /** Start Ranging */
+    public void startRanging(SessionHandle sessionHandle) {
+        if (mRangingSessionTable.containsKey(sessionHandle)) {
+            RangingSessionController rangingSessionController = mRangingSessionTable.get(
+                    sessionHandle);
+            rangingSessionController.startSession();
+        } else {
+            Log.e(TAG, "Session Handle not found");
+        }
+    }
+
+    /** Stop Ranging, can be started again, session will not be reset */
+    public void stopRanging(SessionHandle sessionHandle) {
+        if (mRangingSessionTable.containsKey(sessionHandle)) {
+            RangingSessionController rangingSessionController = mRangingSessionTable.get(
+                    sessionHandle);
+            rangingSessionController.stopSession();
+        } else {
+            Log.e(TAG, "Session Handle not found");
+        }
+    }
+
+    /** End Ranging session, session info will be reset */
+    public void closeRanging(SessionHandle sessionHandle) {
+        if (mRangingSessionTable.containsKey(sessionHandle)) {
+            RangingSessionController rangingSessionController = mRangingSessionTable.get(
+                    sessionHandle);
+            rangingSessionController.closeSession();
+            mRangingSessionTable.remove(sessionHandle);
+        } else {
+            Log.e(TAG, "Session Handle not found");
+        }
     }
 }
