@@ -235,6 +235,16 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
             Log.d(TAG, "onSessionStatusNotificationReceived - invalid session");
             return;
         }
+        if (mUwbInjector.getUwbServiceCore().isOemExtensionCbRegistered()) {
+            // TODO: Fill in all required info
+            PersistableBundle sessionStatusChange = new PersistableBundle();
+            try {
+                mUwbInjector.getUwbServiceCore().getOemExtensionCallback()
+                        .onSessionStatusNotificationReceived(sessionStatusChange);
+            } catch (RemoteException e) {
+                Log.e(TAG, "Failed to send vendor notification", e);
+            }
+        }
         int prevState = uwbSession.getSessionState();
         synchronized (uwbSession.getWaitObj()) {
             uwbSession.getWaitObj().blockingNotify();
@@ -276,8 +286,17 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
     }
 
     private int setAppConfigurations(UwbSession uwbSession) {
-        return mConfigurationManager.setAppConfigurations(uwbSession.getSessionId(),
+        int status = mConfigurationManager.setAppConfigurations(uwbSession.getSessionId(),
                 uwbSession.getParams(), uwbSession.getChipId());
+        if (mUwbInjector.getUwbServiceCore().isOemExtensionCbRegistered()) {
+            try {
+                status = mUwbInjector.getUwbServiceCore().getOemExtensionCallback()
+                        .onSessionConfigurationReceived(uwbSession.getParams().toBundle());
+            } catch (RemoteException e) {
+                Log.e(TAG, "Failed to send vendor notification", e);
+            }
+        }
+        return status;
     }
 
     public synchronized void initSession(AttributionSource attributionSource,
@@ -856,12 +875,11 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
 
 
             int status = UwbUciConstants.STATUS_CODE_FAILED;
-            int timeoutMs;
+            int timeoutMs = IUwbAdapter.RANGING_SESSION_START_THRESHOLD_MS;
             if (uwbSession.getProtocolName().equals(PROTOCOL_NAME)) {
                 // TODO (b/235714647): Temporary workaround to 2x ranging interval.
-                timeoutMs = uwbSession.getCurrentFiraRangingIntervalMs() * 2;
-            } else {
-                timeoutMs = IUwbAdapter.RANGING_SESSION_START_THRESHOLD_MS;
+                int minTimeoutNecessary = uwbSession.getCurrentFiraRangingIntervalMs() * 2;
+                timeoutMs = timeoutMs > minTimeoutNecessary ? timeoutMs : minTimeoutNecessary;
             }
             try {
                 status = mUwbInjector.runTaskOnSingleThreadExecutor(stopRangingTask, timeoutMs);
