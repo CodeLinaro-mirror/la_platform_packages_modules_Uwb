@@ -293,7 +293,8 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
     private int setAppConfigurations(UwbSession uwbSession) {
         int status = mConfigurationManager.setAppConfigurations(uwbSession.getSessionId(),
                 uwbSession.getParams(), uwbSession.getChipId());
-        if (mUwbInjector.getUwbServiceCore().isOemExtensionCbRegistered()) {
+        if (status == UwbUciConstants.STATUS_CODE_OK
+                && mUwbInjector.getUwbServiceCore().isOemExtensionCbRegistered()) {
             try {
                 status = mUwbInjector.getUwbServiceCore().getOemExtensionCallback()
                         .onSessionConfigurationReceived(uwbSession.getParams().toBundle());
@@ -948,6 +949,11 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
                                     // Set to 0's for the UCI stack.
                                     subSessionIdList = new int[dstAddressListSize];
                                 }
+                                int messageControl =
+                                        rangingReconfigureParams.getMessageControl() == null
+                                        ? -1 : rangingReconfigureParams.getMessageControl();
+                                int[] subsessionKeyList =
+                                        rangingReconfigureParams.getSubSessionKeyList();
 
                                 status = mNativeUwbManager.controllerMulticastListUpdate(
                                         uwbSession.getSessionId(),
@@ -955,6 +961,8 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
                                         subSessionIdList.length,
                                         ArrayUtils.toPrimitive(dstAddressList),
                                         subSessionIdList,
+                                        messageControl,
+                                        subsessionKeyList,
                                         uwbSession.getChipId());
                                 if (status != UwbUciConstants.STATUS_CODE_OK) {
                                     Log.e(TAG, "Unable to update controller multicast list.");
@@ -1081,7 +1089,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
         public static final long RANGING_RESULT_ERROR_NO_TIMEOUT = 0;
         private static final String RANGING_RESULT_ERROR_STREAK_TIMER_TAG =
                 "UwbSessionRangingResultError";
-        private static final long NON_PRIVILEGED_BG_APP_TIMEOUT_MS = 300000;
+        private static final long NON_PRIVILEGED_BG_APP_TIMEOUT_MS = 120_000;
         @VisibleForTesting
         public static final String NON_PRIVILEGED_BG_APP_TIMER_TAG =
                 "UwbSessionNonPrivilegedBgAppError";
