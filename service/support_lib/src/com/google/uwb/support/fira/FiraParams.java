@@ -148,12 +148,24 @@ public abstract class FiraParams extends Params {
             value = {
                 RANGING_DEVICE_ROLE_RESPONDER,
                 RANGING_DEVICE_ROLE_INITIATOR,
+                RANGING_DEVICE_ROLE_ADVERTISER,
+                RANGING_DEVICE_ROLE_OBSERVER,
+                RANGING_DEVICE_DT_ANCHOR,
+                RANGING_DEVICE_DT_TAG,
             })
     public @interface RangingDeviceRole {}
 
     public static final int RANGING_DEVICE_ROLE_RESPONDER = 0;
 
     public static final int RANGING_DEVICE_ROLE_INITIATOR = 1;
+
+    public static final int RANGING_DEVICE_ROLE_ADVERTISER = 5;
+
+    public static final int RANGING_DEVICE_ROLE_OBSERVER = 6;
+
+    public static final int RANGING_DEVICE_DT_ANCHOR = 7;
+
+    public static final int RANGING_DEVICE_DT_TAG = 8;
 
     /** Ranging Round Usage */
     @IntDef(
@@ -162,6 +174,8 @@ public abstract class FiraParams extends Params {
                 RANGING_ROUND_USAGE_DS_TWR_DEFERRED_MODE,
                 RANGING_ROUND_USAGE_SS_TWR_NON_DEFERRED_MODE,
                 RANGING_ROUND_USAGE_DS_TWR_NON_DEFERRED_MODE,
+                RANGING_ROUND_USAGE_OWR_AOA_MEASUREMENT,
+                RANGING_ROUND_USAGE_DL_TDOA,
             })
     public @interface RangingRoundUsage {}
 
@@ -176,6 +190,12 @@ public abstract class FiraParams extends Params {
 
     /** Double-sided two-way ranging, non-deferred */
     public static final int RANGING_ROUND_USAGE_DS_TWR_NON_DEFERRED_MODE = 4;
+
+    /** Downlink Time Difference of Arrival */
+    public static final int RANGING_ROUND_USAGE_DL_TDOA = 5;
+
+    /** OWR for AoA measurement */
+    public static final int RANGING_ROUND_USAGE_OWR_AOA_MEASUREMENT = 6;
 
     /** Multi-Node mode */
     @IntDef(

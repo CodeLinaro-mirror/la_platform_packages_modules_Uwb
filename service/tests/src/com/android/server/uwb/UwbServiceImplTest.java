@@ -47,6 +47,7 @@ import android.content.Intent;
 import android.os.IBinder;
 import android.os.PersistableBundle;
 import android.os.Process;
+import android.os.UserManager;
 import android.platform.test.annotations.Presubmit;
 import android.provider.Settings;
 import android.test.suitebuilder.annotation.SmallTest;
@@ -72,6 +73,7 @@ import com.google.uwb.support.profile.UuidBundleWrapper;
 import org.junit.Before;
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.Answers;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Captor;
 import org.mockito.Mock;
@@ -103,11 +105,13 @@ public class UwbServiceImplTest {
     @Mock private NativeUwbManager mNativeUwbManager;
     @Mock private UwbMultichipData mUwbMultichipData;
     @Mock private ProfileManager mProfileManager;
+    @Mock(answer = Answers.RETURNS_DEEP_STUBS) private UserManager mUserManager;
     @Captor private ArgumentCaptor<IUwbRangingCallbacks> mRangingCbCaptor;
     @Captor private ArgumentCaptor<IUwbRangingCallbacks> mRangingCbCaptor2;
     @Captor private ArgumentCaptor<IBinder.DeathRecipient> mClientDeathCaptor;
     @Captor private ArgumentCaptor<IBinder.DeathRecipient> mUwbServiceCoreDeathCaptor;
     @Captor private ArgumentCaptor<BroadcastReceiver> mApmModeBroadcastReceiver;
+    @Captor private ArgumentCaptor<BroadcastReceiver> mUserRestrictionReceiver;
 
     private UwbServiceImpl mUwbServiceImpl;
 
@@ -122,12 +126,17 @@ public class UwbServiceImplTest {
         when(mUwbInjector.getMultichipData()).thenReturn(mUwbMultichipData);
         when(mUwbInjector.getSettingsInt(Settings.Global.AIRPLANE_MODE_ON, 0)).thenReturn(0);
         when(mUwbInjector.getNativeUwbManager()).thenReturn(mNativeUwbManager);
+        when(mUwbInjector.getUserManager()).thenReturn(mUserManager);
+        when(mUserManager.getUserRestrictions().getBoolean(anyString())).thenReturn(false);
 
         mUwbServiceImpl = new UwbServiceImpl(mContext, mUwbInjector);
 
         verify(mContext).registerReceiver(
                 mApmModeBroadcastReceiver.capture(),
                 argThat(i -> i.getAction(0).equals(Intent.ACTION_AIRPLANE_MODE_CHANGED)));
+        verify(mContext).registerReceiver(
+                mUserRestrictionReceiver.capture(),
+                argThat(i -> i.getAction(0).equals(UserManager.ACTION_USER_RESTRICTIONS_CHANGED)));
     }
 
     @Test
@@ -356,6 +365,23 @@ public class UwbServiceImplTest {
     }
 
     @Test
+    public void testUserRestrictionChanged() throws Exception {
+        mUwbServiceImpl.setEnabled(true);
+
+        // User restriction changes to disallow UWB
+        when(mUserManager.getUserRestrictions().getBoolean(anyString())).thenReturn(true);
+        mUserRestrictionReceiver.getValue().onReceive(
+                mContext, new Intent(UserManager.ACTION_USER_RESTRICTIONS_CHANGED));
+        verify(mUwbServiceCore).setEnabled(false);
+
+        // User restriction changes to allow UWB
+        when(mUserManager.getUserRestrictions().getBoolean(anyString())).thenReturn(true);
+        mUserRestrictionReceiver.getValue().onReceive(
+                mContext, new Intent(UserManager.ACTION_USER_RESTRICTIONS_CHANGED));
+        verify(mUwbServiceCore, times(1)).setEnabled(true);
+    }
+
+    @Test
     public void testToggleFromRootedShellWhenApmModeOn() throws Exception {
         BinderUtil.setUid(Process.ROOT_UID);
         when(mUwbInjector.getSettingsInt(Settings.Global.AIRPLANE_MODE_ON, 0)).thenReturn(1);
@@ -574,11 +600,26 @@ public class UwbServiceImplTest {
         final SessionHandle sessionHandle = mock(SessionHandle.class);
         final UwbAddress mUwbAddress = mock(UwbAddress.class);
         final PersistableBundle parameters = new PersistableBundle();
+        final byte[] data = new byte[] {1, 3, 5, 7, 11, 13};
 
+        mUwbServiceImpl.sendData(sessionHandle, mUwbAddress, parameters, data);
+        verify(mUwbServiceCore).sendData(sessionHandle, mUwbAddress, parameters, data);
+    }
+
+    @Test
+    public void testThrowSecurityExceptionWhenSendDataWithoutUwbPrivilegedPermission()
+            throws Exception {
+        final SessionHandle sessionHandle = mock(SessionHandle.class);
+        final UwbAddress mUwbAddress = mock(UwbAddress.class);
+        final PersistableBundle parameters = new PersistableBundle();
+        final byte[] data = new byte[] {1, 3, 5, 7, 11, 13};
+
+        doThrow(new SecurityException()).when(mContext).enforceCallingOrSelfPermission(
+                eq(UWB_PRIVILEGED), any());
         try {
-            mUwbServiceImpl.sendData(sessionHandle, mUwbAddress, parameters, null);
+            mUwbServiceImpl.sendData(sessionHandle, mUwbAddress, parameters, data);
             fail();
-        } catch (IllegalStateException e) { /* pass */ }
+        } catch (SecurityException e) { /* pass */ }
     }
 
     @Test
