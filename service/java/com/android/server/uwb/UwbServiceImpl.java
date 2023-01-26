@@ -314,6 +314,17 @@ public class UwbServiceImpl extends IUwbAdapter.Stub {
         mUwbServiceCore.sendData(sessionHandle, remoteDeviceAddress, params, data);
     }
 
+    // TODO: Add @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE) after ag/19901449
+    @Override
+    public void onRangingRoundsUpdateDtTag(SessionHandle sessionHandle,
+            PersistableBundle parameters) throws RemoteException {
+        if (!SdkLevel.isAtLeastU()) {
+            throw new UnsupportedOperationException();
+        }
+        enforceUwbPrivilegedPermission();
+        mUwbServiceCore.rangingRoundsUpdateDtTag(sessionHandle, parameters);
+    }
+
     @Override
     public synchronized int getAdapterState() throws RemoteException {
         return mUwbServiceCore.getAdapterState();
@@ -452,8 +463,14 @@ public class UwbServiceImpl extends IUwbAdapter.Stub {
         if (!SdkLevel.isAtLeastU()) {
             return false; // older platforms did not have a uwb user restriction.
         }
-        return mUwbInjector.getUserManager().getUserRestrictions().getBoolean(
-                UserManager.DISALLOW_ULTRA_WIDEBAND_RADIO);
+
+        final long ident = Binder.clearCallingIdentity();
+        try {
+            return mUwbInjector.getUserManager().getUserRestrictions().getBoolean(
+                    UserManager.DISALLOW_ULTRA_WIDEBAND_RADIO);
+        } finally {
+            Binder.restoreCallingIdentity(ident);
+        }
     }
 
     /** Returns true if UWB is enabled - based on UWB, APM toggle and user restriction */
