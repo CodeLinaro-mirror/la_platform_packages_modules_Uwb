@@ -21,6 +21,7 @@ import static android.Manifest.permission.UWB_RANGING;
 import static android.uwb.UwbManager.AdapterStateCallback.STATE_DISABLED;
 import static android.uwb.UwbManager.AdapterStateCallback.STATE_ENABLED_ACTIVE;
 import static android.uwb.UwbManager.AdapterStateCallback.STATE_ENABLED_INACTIVE;
+import static android.uwb.UwbManager.MESSAGE_TYPE_COMMAND;
 
 import static androidx.test.platform.app.InstrumentationRegistry.getInstrumentation;
 
@@ -1179,6 +1180,41 @@ public class UwbManagerTest {
         }
     }
 
+    @Test
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    public void testSendVendorUciMessageWithMessageType() throws Exception {
+        Assume.assumeTrue(SdkLevel.isAtLeastU());
+        UiAutomation uiAutomation = getInstrumentation().getUiAutomation();
+        CountDownLatch rspCountDownLatch = new CountDownLatch(1);
+        CountDownLatch ntfCountDownLatch = new CountDownLatch(1);
+        UwbVendorUciCallback cb =
+                new UwbVendorUciCallback(rspCountDownLatch, ntfCountDownLatch);
+        try {
+            // Needs UWB_PRIVILEGED & UWB_RANGING permission which is held by shell.
+            uiAutomation.adoptShellPermissionIdentity();
+            mUwbManager.registerUwbVendorUciCallback(
+                    Executors.newSingleThreadExecutor(), cb);
+
+            // Send random payload with a vendor gid.
+            byte[] payload = new byte[100];
+            new Random().nextBytes(payload);
+            int gid = 9;
+            int oid = 1;
+            mUwbManager.sendVendorUciMessage(MESSAGE_TYPE_COMMAND, gid, oid, payload);
+
+            // Wait for response.
+            assertThat(rspCountDownLatch.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(cb.gid).isEqualTo(gid);
+            assertThat(cb.oid).isEqualTo(oid);
+            assertThat(cb.payload).isNotEmpty();
+        } catch (SecurityException e) {
+            /* pass */
+        } finally {
+            mUwbManager.unregisterUwbVendorUciCallback(cb);
+            uiAutomation.dropShellPermissionIdentity();
+        }
+    }
+
     private class UwbOemExtensionCallback implements UwbManager.UwbOemExtensionCallback {
         public PersistableBundle mSessionChangeNtf;
         public PersistableBundle mDeviceStatusNtf;
@@ -1217,6 +1253,12 @@ public class UwbManagerTest {
             onRangingReportReceivedCalled = true;
             mRangingReport = rangingReport;
             return mRangingReport;
+        }
+
+        @Override
+        public boolean onCheckPointedTarget(
+                @NonNull PersistableBundle pointedTargetBundle) {
+            return true;
         }
     }
 
@@ -1303,6 +1345,8 @@ public class UwbManagerTest {
                     .fromBundle(reportMetadataBundle);
             assertEquals(reportMetadata.getSessionId(), sessionId);
             assertThat(reportMetadata.getRawNtfData()).isNotEmpty();
+
+            // TODO(b/263799939) Add test for onCheckPointedTarget
 
             // Check the UWB state.
             assertThat(mUwbManager.getAdapterState()).isEqualTo(STATE_ENABLED_ACTIVE);
