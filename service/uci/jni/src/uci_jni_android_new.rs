@@ -40,7 +40,8 @@ use uwb_core::params::{
     SessionUpdateActiveRoundsDtTagResponse, SetAppConfigResponse,
 };
 use uwb_uci_packets::{
-    AppConfigTlvType, CapTlv, Controlee, PowerStats, ResetConfig, SessionState, SessionType,
+    AppConfigTlvType, CapTlv, Controlee, Controlee_V2_0_16_Byte_Version,
+    Controlee_V2_0_32_Byte_Version, Controlees, PowerStats, ResetConfig, SessionState, SessionType,
     StatusCode, UpdateMulticastListAction,
 };
 
@@ -516,7 +517,7 @@ fn native_get_caps_info(env: JNIEnv, obj: JObject, chip_id: JString) -> Result<V
 
 /// Update multicast list on a single UWB device. Return value defined by uci_packets.pdl
 #[no_mangle]
-pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeControllerMulticastListUpdateV1(
+pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeControllerMulticastListUpdate(
     env: JNIEnv,
     obj: JObject,
     session_id: jint,
@@ -524,6 +525,7 @@ pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeCo
     no_of_controlee: jbyte,
     addresses: jshortArray,
     sub_session_ids: jintArray,
+    sub_session_keys: jbyteArray,
     chip_id: JString,
 ) -> jbyte {
     debug!("{}: enter", function_name!());
@@ -536,6 +538,7 @@ pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeCo
             no_of_controlee,
             addresses,
             sub_session_ids,
+            sub_session_keys,
             chip_id,
         ),
         function_name!(),
@@ -552,6 +555,7 @@ fn native_controller_multicast_list_update(
     no_of_controlee: jbyte,
     addresses: jshortArray,
     sub_session_ids: jintArray,
+    sub_session_keys: jbyteArray,
     chip_id: JString,
 ) -> Result<()> {
     let uci_manager = Dispatcher::get_uci_manager(env, obj, chip_id)?;
@@ -578,9 +582,43 @@ fn native_controller_multicast_list_update(
     {
         return Err(Error::BadParameters);
     }
-    let controlee_list = zip(address_list, sub_session_id_list)
-        .map(|(a, s)| Controlee { short_address: a as u16, subsession_id: s as u32 })
-        .collect::<Vec<Controlee>>();
+    let sub_session_key_list =
+        env.convert_byte_array(sub_session_keys).map_err(|_| Error::ForeignFunctionInterface)?;
+    let controlee_list = match UpdateMulticastListAction::from_u8(action as u8)
+        .ok_or(Error::BadParameters)?
+    {
+        UpdateMulticastListAction::AddControlee | UpdateMulticastListAction::RemoveControlee => {
+            Controlees::NoSessionKey(
+                zip(address_list, sub_session_id_list)
+                    .map(|(a, s)| Controlee { short_address: a as u16, subsession_id: s as u32 })
+                    .collect::<Vec<Controlee>>(),
+            )
+        }
+        UpdateMulticastListAction::AddControleeWithShortSubSessionKey => {
+            Controlees::ShortSessionKey(
+                zip(zip(address_list, sub_session_id_list), sub_session_key_list.chunks(16))
+                    .map(|((address, id), key)| {
+                        Ok(Controlee_V2_0_16_Byte_Version {
+                            short_address: address as u16,
+                            subsession_id: id as u32,
+                            subsession_key: key.try_into().map_err(|_| Error::BadParameters)?,
+                        })
+                    })
+                    .collect::<Result<Vec<Controlee_V2_0_16_Byte_Version>>>()?,
+            )
+        }
+        UpdateMulticastListAction::AddControleeWithLongSubSessionKey => Controlees::LongSessionKey(
+            zip(zip(address_list, sub_session_id_list), sub_session_key_list.chunks(32))
+                .map(|((address, id), key)| {
+                    Ok(Controlee_V2_0_32_Byte_Version {
+                        short_address: address as u16,
+                        subsession_id: id as u32,
+                        subsession_key: key.try_into().map_err(|_| Error::BadParameters)?,
+                    })
+                })
+                .collect::<Result<Vec<Controlee_V2_0_32_Byte_Version>>>()?,
+        ),
+    };
     uci_manager.session_update_controller_multicast_list(
         session_id as u32,
         UpdateMulticastListAction::from_u8(action as u8).ok_or(Error::BadParameters)?,
@@ -708,6 +746,7 @@ fn create_ranging_round_status(
 pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeSendRawVendorCmd(
     env: JNIEnv,
     obj: JObject,
+    mt: jint,
     gid: jint,
     oid: jint,
     payload_jarray: jbyteArray,
@@ -715,7 +754,7 @@ pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeSe
 ) -> jobject {
     debug!("{}: enter", function_name!());
     match option_result_helper(
-        native_send_raw_vendor_cmd(env, obj, gid, oid, payload_jarray, chip_id),
+        native_send_raw_vendor_cmd(env, obj, mt, gid, oid, payload_jarray, chip_id),
         function_name!(),
     ) {
         // Note: unwrap() here is not desirable, but unavoidable given non-null object is returned
@@ -733,6 +772,7 @@ pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeSe
 fn native_send_raw_vendor_cmd(
     env: JNIEnv,
     obj: JObject,
+    mt: jint,
     gid: jint,
     oid: jint,
     payload_jarray: jbyteArray,
@@ -741,7 +781,7 @@ fn native_send_raw_vendor_cmd(
     let uci_manager = Dispatcher::get_uci_manager(env, obj, chip_id)?;
     let payload =
         env.convert_byte_array(payload_jarray).map_err(|_| Error::ForeignFunctionInterface)?;
-    uci_manager.raw_uci_cmd(gid as u32, oid as u32, payload)
+    uci_manager.raw_uci_cmd(mt as u32, gid as u32, oid as u32, payload)
 }
 
 fn create_power_stats(power_stats: PowerStats, env: JNIEnv) -> Result<jobject> {
@@ -912,5 +952,88 @@ fn native_dispatcher_destroy(env: JNIEnv, obj: JObject) -> Result<()> {
         Dispatcher::destroy_dispatcher()
     } else {
         Err(Error::BadParameters)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use tokio::runtime::Builder;
+    use uwb_core::uci::mock_uci_manager::MockUciManager;
+    use uwb_core::uci::uci_manager_sync::{
+        NotificationManager, NotificationManagerBuilder, UciManagerSync,
+    };
+    use uwb_core::uci::{CoreNotification, DataRcvNotification, SessionNotification};
+
+    struct NullNotificationManager {}
+    impl NotificationManager for NullNotificationManager {
+        fn on_core_notification(&mut self, _core_notification: CoreNotification) -> Result<()> {
+            Ok(())
+        }
+        fn on_session_notification(
+            &mut self,
+            _session_notification: SessionNotification,
+        ) -> Result<()> {
+            Ok(())
+        }
+        fn on_vendor_notification(&mut self, _vendor_notification: RawUciMessage) -> Result<()> {
+            Ok(())
+        }
+        fn on_data_rcv_notification(&mut self, _data_rcv_notf: DataRcvNotification) -> Result<()> {
+            Ok(())
+        }
+    }
+
+    struct NullNotificationManagerBuilder {}
+
+    impl NullNotificationManagerBuilder {
+        fn new() -> Self {
+            Self {}
+        }
+    }
+
+    impl NotificationManagerBuilder for NullNotificationManagerBuilder {
+        type NotificationManager = NullNotificationManager;
+
+        fn build(self) -> Option<Self::NotificationManager> {
+            Some(NullNotificationManager {})
+        }
+    }
+
+    /// Checks validity of the function_name! macro.
+    #[test]
+    fn test_function_name() {
+        assert_eq!(function_name!(), "test_function_name");
+    }
+
+    /// Checks native_set_app_configurations by mocking non-jni logic.
+    #[test]
+    fn test_native_set_app_configurations() {
+        // Constructs mock UciManagerSync.
+        let test_rt = Builder::new_multi_thread().enable_all().build().unwrap();
+        let mut uci_manager_impl = MockUciManager::new();
+        uci_manager_impl.expect_session_set_app_config(
+            42, // Session id
+            vec![
+                AppConfigTlv::new(AppConfigTlvType::DeviceType, vec![1]),
+                AppConfigTlv::new(AppConfigTlvType::RangingRoundUsage, vec![1]),
+            ],
+            vec![],
+            Ok(SetAppConfigResponse { status: StatusCode::UciStatusOk, config_status: vec![] }),
+        );
+        let uci_manager_sync = UciManagerSync::new_mock(
+            uci_manager_impl,
+            test_rt.handle().to_owned(),
+            NullNotificationManagerBuilder::new(),
+        )
+        .unwrap();
+
+        let app_config_byte_array: Vec<u8> = vec![
+            0, 1, 1, // DeviceType: controller
+            1, 1, 1, // RangingRoundUsage: DS_TWR
+        ];
+        let tlvs = parse_app_config_tlv_vec(2, &app_config_byte_array).unwrap();
+        assert!(uci_manager_sync.session_set_app_config(42, tlvs).is_ok());
     }
 }
