@@ -217,9 +217,9 @@ public class NativeUwbManager {
      * @param chipId      : Identifier of UWB chip for multi-HAL devices
      * @return : {@link UwbUciConstants}  Status code
      */
-    public byte resetDevice(byte resetConfig, String chipId) {
+    public byte deviceReset(byte resetConfig, String chipId) {
         synchronized (mNativeLock) {
-            return nativeResetDevice(resetConfig, chipId);
+            return nativeDeviceReset(resetConfig, chipId);
         }
     }
 
@@ -381,9 +381,10 @@ public class NativeUwbManager {
     }
 
     @NonNull
-    public UwbVendorUciResponse sendRawVendorCmd(int gid, int oid, byte[] payload, String chipId) {
+    public UwbVendorUciResponse sendRawVendorCmd(int mt, int gid, int oid, byte[] payload,
+            String chipId) {
         synchronized (mNativeLock) {
-            return nativeSendRawVendorCmd(gid, oid, payload, chipId);
+            return nativeSendRawVendorCmd(mt, gid, oid, payload, chipId);
         }
     }
 
@@ -402,9 +403,10 @@ public class NativeUwbManager {
      * Send payload data to a remote device in a UWB ranging session.
      */
     public byte sendData(
-            int sessionId, byte[] address, byte destEndPoint, int sequenceNum, byte[] appData) {
+            int sessionId, byte[] address, byte destEndPoint, byte sequenceNum, byte[] appData,
+            String chipId) {
         synchronized (mNativeLock) {
-            return nativeSendData(sessionId, address, destEndPoint, sequenceNum, appData);
+            return nativeSendData(sessionId, address, destEndPoint, sequenceNum, appData, chipId);
         }
     }
 
@@ -426,9 +428,21 @@ public class NativeUwbManager {
         }
     }
 
-    // TODO(b/259487023): no native implementation
+    /**
+     * Queries the max Application data size for the UWB session.
+     *
+     * @param sessionId : Session of the UWB session for which current max data size to be queried
+     * @param chipId    : Identifier of UWB chip for multi-HAL devices
+     * @return : Max application data size that can be sent by UWBS.
+     */
+    public int queryDataSize(int sessionId, String chipId) {
+        synchronized (mNativeLock) {
+            return nativeQueryDataSize(sessionId, chipId);
+        }
+    }
+
     private native byte nativeSendData(int sessionId, byte[] address, byte destEndPoint,
-            int sequenceNum, byte[] appData);
+            byte sequenceNum, byte[] appData, String chipId);
 
     private native long nativeDispatcherNew(Object[] chipIds);
 
@@ -446,8 +460,7 @@ public class NativeUwbManager {
 
     private native int nativeGetMaxSessionNumber();
 
-    // TODO(b/259487023): no native implementation
-    private native byte nativeResetDevice(byte resetConfig, String chipId);
+    private native byte nativeDeviceReset(byte resetConfig, String chipId);
 
     private native byte nativeSessionInit(int sessionId, byte sessionType, String chipId);
 
@@ -477,9 +490,11 @@ public class NativeUwbManager {
 
     private native boolean nativeSetLogMode(String logMode);
 
-    private native UwbVendorUciResponse nativeSendRawVendorCmd(int gid, int oid, byte[] payload,
-            String chipId);
+    private native UwbVendorUciResponse nativeSendRawVendorCmd(int mt, int gid, int oid,
+            byte[] payload, String chipId);
 
     private native DtTagUpdateRangingRoundsStatus nativeSessionUpdateActiveRoundsDtTag(
             int sessionId, int noOfActiveRangingRounds, byte[] rangingRoundIndexes, String chipId);
+
+    private native short nativeQueryDataSize(int sessionId, String chipId);
 }

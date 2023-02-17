@@ -33,7 +33,8 @@ import java.util.List;
 @RequiresApi(api = VERSION_CODES.S)
 final class Conversions {
 
-    private static RangingMeasurement createMeasurement(double value, double confidence) {
+    private static RangingMeasurement createMeasurement(double value, double confidence,
+            boolean valid) {
         @RangingMeasurement.Confidence int confidenceLevel;
         if (confidence > 0.9) {
             confidenceLevel = RangingMeasurement.CONFIDENCE_HIGH;
@@ -42,20 +43,47 @@ final class Conversions {
         } else {
             confidenceLevel = RangingMeasurement.CONFIDENCE_LOW;
         }
-        return new RangingMeasurement(confidenceLevel, (float) value);
+        return new RangingMeasurement(confidenceLevel, (float) value, valid);
     }
 
     /** Convert system API's {@link android.uwb.RangingMeasurement} to {@link RangingPosition} */
     @Nullable
     static RangingPosition convertToPosition(android.uwb.RangingMeasurement measurement) {
-        DistanceMeasurement distanceMeasurement = measurement.getDistanceMeasurement();
-        if (distanceMeasurement == null) {
-            return null;
+        RangingMeasurement distance = null;
+        DlTDoAMeasurement dlTdoaMeasurement = null;
+        if (com.google.uwb.support.dltdoa.DlTDoAMeasurement.isDlTDoAMeasurement(
+                measurement.getRangingMeasurementMetadata())) {
+            com.google.uwb.support.dltdoa.DlTDoAMeasurement
+                    dlTDoAMeasurement = com.google.uwb.support.dltdoa.DlTDoAMeasurement.fromBundle(
+                    measurement.getRangingMeasurementMetadata());
+            dlTdoaMeasurement = new DlTDoAMeasurement(
+                    dlTDoAMeasurement.getMessageType(),
+                    dlTDoAMeasurement.getMessageControl(),
+                    dlTDoAMeasurement.getBlockIndex(),
+                    dlTDoAMeasurement.getRoundIndex(),
+                    dlTDoAMeasurement.getNLoS(),
+                    dlTDoAMeasurement.getTxTimestamp(),
+                    dlTDoAMeasurement.getRxTimestamp(),
+                    dlTDoAMeasurement.getAnchorCfo(),
+                    dlTDoAMeasurement.getCfo(),
+                    dlTDoAMeasurement.getInitiatorReplyTime(),
+                    dlTDoAMeasurement.getResponderReplyTime(),
+                    dlTDoAMeasurement.getInitiatorResponderTof(),
+                    dlTDoAMeasurement.getAnchorLocation(),
+                    dlTDoAMeasurement.getActiveRangingRounds()
+            );
+            // No distance measurement for DL-TDoa, make it invalid.
+            distance = createMeasurement(0.0, 0.0, false);
+        } else {
+            DistanceMeasurement distanceMeasurement = measurement.getDistanceMeasurement();
+            if (distanceMeasurement == null) {
+                return null;
+            }
+            distance = createMeasurement(
+                    distanceMeasurement.getMeters(),
+                    distanceMeasurement.getConfidenceLevel(),
+                    true);
         }
-        RangingMeasurement distance =
-                createMeasurement(
-                        distanceMeasurement.getMeters(), distanceMeasurement.getConfidenceLevel());
-
         AngleOfArrivalMeasurement aoaMeasurement = measurement.getAngleOfArrivalMeasurement();
 
         RangingMeasurement azimuth = null;
@@ -66,14 +94,16 @@ final class Conversions {
                 azimuth =
                         createMeasurement(
                                 Math.toDegrees(azimuthMeasurement.getRadians()),
-                                azimuthMeasurement.getConfidenceLevel());
+                                azimuthMeasurement.getConfidenceLevel(),
+                                true);
             }
             AngleMeasurement altitudeMeasurement = aoaMeasurement.getAltitude();
             if (altitudeMeasurement != null) {
                 altitude =
                         createMeasurement(
                                 Math.toDegrees(altitudeMeasurement.getRadians()),
-                                altitudeMeasurement.getConfidenceLevel());
+                                altitudeMeasurement.getConfidenceLevel(),
+                                true);
             }
         }
         if (Build.VERSION.SDK_INT >= VERSION_CODES.TIRAMISU) {
@@ -81,6 +111,7 @@ final class Conversions {
                     distance,
                     azimuth,
                     altitude,
+                    dlTdoaMeasurement,
                     measurement.getElapsedRealtimeNanos(),
                     measurement.getRssiDbm());
         }
@@ -125,5 +156,6 @@ final class Conversions {
         return list;
     }
 
-    private Conversions() {}
+    private Conversions() {
+    }
 }

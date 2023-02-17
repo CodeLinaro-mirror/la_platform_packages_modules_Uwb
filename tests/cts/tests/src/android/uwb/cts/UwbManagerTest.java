@@ -21,6 +21,7 @@ import static android.Manifest.permission.UWB_RANGING;
 import static android.uwb.UwbManager.AdapterStateCallback.STATE_DISABLED;
 import static android.uwb.UwbManager.AdapterStateCallback.STATE_ENABLED_ACTIVE;
 import static android.uwb.UwbManager.AdapterStateCallback.STATE_ENABLED_INACTIVE;
+import static android.uwb.UwbManager.MESSAGE_TYPE_COMMAND;
 
 import static androidx.test.platform.app.InstrumentationRegistry.getInstrumentation;
 
@@ -47,6 +48,7 @@ import android.platform.test.annotations.AppModeFull;
 import android.util.Log;
 import android.uwb.RangingReport;
 import android.uwb.RangingSession;
+import android.uwb.UwbActivityEnergyInfo;
 import android.uwb.UwbAddress;
 import android.uwb.UwbManager;
 
@@ -877,6 +879,7 @@ public class UwbManagerTest {
         FiraOpenSessionParams firaOpenSessionParams = new FiraOpenSessionParams.Builder()
                 .setProtocolVersion(new FiraProtocolVersion(1, 1))
                 .setSessionId(1)
+                .setSessionType(FiraParams.SESSION_TYPE_RANGING)
                 .setStsConfig(FiraParams.STS_CONFIG_STATIC)
                 .setVendorId(new byte[]{0x5, 0x6})
                 .setStaticStsIV(new byte[]{0x5, 0x6, 0x9, 0xa, 0x4, 0x6})
@@ -1179,6 +1182,41 @@ public class UwbManagerTest {
         }
     }
 
+    @Test
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    public void testSendVendorUciMessageWithMessageType() throws Exception {
+        Assume.assumeTrue(SdkLevel.isAtLeastU());
+        UiAutomation uiAutomation = getInstrumentation().getUiAutomation();
+        CountDownLatch rspCountDownLatch = new CountDownLatch(1);
+        CountDownLatch ntfCountDownLatch = new CountDownLatch(1);
+        UwbVendorUciCallback cb =
+                new UwbVendorUciCallback(rspCountDownLatch, ntfCountDownLatch);
+        try {
+            // Needs UWB_PRIVILEGED & UWB_RANGING permission which is held by shell.
+            uiAutomation.adoptShellPermissionIdentity();
+            mUwbManager.registerUwbVendorUciCallback(
+                    Executors.newSingleThreadExecutor(), cb);
+
+            // Send random payload with a vendor gid.
+            byte[] payload = new byte[100];
+            new Random().nextBytes(payload);
+            int gid = 9;
+            int oid = 1;
+            mUwbManager.sendVendorUciMessage(MESSAGE_TYPE_COMMAND, gid, oid, payload);
+
+            // Wait for response.
+            assertThat(rspCountDownLatch.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(cb.gid).isEqualTo(gid);
+            assertThat(cb.oid).isEqualTo(oid);
+            assertThat(cb.payload).isNotEmpty();
+        } catch (SecurityException e) {
+            /* pass */
+        } finally {
+            mUwbManager.unregisterUwbVendorUciCallback(cb);
+            uiAutomation.dropShellPermissionIdentity();
+        }
+    }
+
     private class UwbOemExtensionCallback implements UwbManager.UwbOemExtensionCallback {
         public PersistableBundle mSessionChangeNtf;
         public PersistableBundle mDeviceStatusNtf;
@@ -1388,5 +1426,80 @@ public class UwbManagerTest {
             /* pass */
             fail();
         }
+    }
+
+    private static class OnUwbActivityEnergyInfoListener implements
+            UwbManager.OnUwbActivityEnergyInfoListener {
+        private final CountDownLatch mCountDownLatch;
+        public UwbActivityEnergyInfo mPowerStats;
+        public boolean mIsListenerInvoked = false;
+
+        OnUwbActivityEnergyInfoListener(@NonNull CountDownLatch countDownLatch) {
+            mCountDownLatch = countDownLatch;
+        }
+
+        @Override
+        public void onUwbActivityEnergyInfo(UwbActivityEnergyInfo info) {
+            mIsListenerInvoked = true;
+            mPowerStats = info;
+            mCountDownLatch.countDown();
+        }
+    }
+
+    @Test
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    public void testGetUwbActivityEnergyInfoAsync() throws Exception {
+        UiAutomation uiAutomation = getInstrumentation().getUiAutomation();
+        CountDownLatch countDownLatch = new CountDownLatch(1);
+        OnUwbActivityEnergyInfoListener listener =
+                new OnUwbActivityEnergyInfoListener(countDownLatch);
+        try {
+            uiAutomation.adoptShellPermissionIdentity();
+            mUwbManager.getUwbActivityEnergyInfoAsync(Executors.newSingleThreadExecutor(),
+                    listener);
+            assertThat(countDownLatch.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(listener.mIsListenerInvoked).isTrue();
+            if (listener.mPowerStats != null) {
+                assertThat(listener.mPowerStats.getControllerIdleDurationMillis() >= 0)
+                        .isTrue();
+                assertThat(listener.mPowerStats.getControllerWakeCount() >= 0).isTrue();
+            }
+        } catch (SecurityException e) {
+            /* pass */
+        } finally {
+            uiAutomation.dropShellPermissionIdentity();
+        }
+    }
+
+    @Test
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    public void testGetUwbActivityEnergyInfoAsyncWithoutUwbPrivileged() throws Exception {
+        CountDownLatch countDownLatch = new CountDownLatch(1);
+        OnUwbActivityEnergyInfoListener listener =
+                new OnUwbActivityEnergyInfoListener(countDownLatch);
+        try {
+            mUwbManager.getUwbActivityEnergyInfoAsync(Executors.newSingleThreadExecutor(),
+                    listener);
+            // should fail if the call was successful without UWB_PRIVILEGED permission.
+            fail();
+        } catch (SecurityException e) {
+            /* pass */
+            Log.i(TAG, "Failed with expected security exception: " + e);
+        }
+    }
+
+    @Test
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    public void testGetUwbActivityEnergyInfoAsyncWithBadParams() throws Exception {
+        CountDownLatch countDownLatch = new CountDownLatch(1);
+        OnUwbActivityEnergyInfoListener listener =
+                new OnUwbActivityEnergyInfoListener(countDownLatch);
+        // null Executor
+        assertThrows(NullPointerException.class,
+                () -> mUwbManager.getUwbActivityEnergyInfoAsync(null, listener));
+        // null listener
+        assertThrows(NullPointerException.class,
+                () -> mUwbManager.getUwbActivityEnergyInfoAsync(Executors.newSingleThreadExecutor(),
+                        null));
     }
 }

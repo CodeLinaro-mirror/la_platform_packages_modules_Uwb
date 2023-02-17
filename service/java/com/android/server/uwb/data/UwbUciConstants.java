@@ -15,10 +15,10 @@
  */
 package com.android.server.uwb.data;
 
-import static android.hardware.uwb.fira_android.UwbVendorSessionInitSessionType.CCC;
 import static android.hardware.uwb.fira_android.UwbVendorStatusCodes.STATUS_ERROR_CCC_LIFECYCLE;
 import static android.hardware.uwb.fira_android.UwbVendorStatusCodes.STATUS_ERROR_CCC_SE_BUSY;
 
+import com.google.uwb.support.ccc.CccParams;
 import com.google.uwb.support.fira.FiraParams;
 
 public class UwbUciConstants {
@@ -35,10 +35,12 @@ public class UwbUciConstants {
     /**
      * Table 13: Control Messages to Initialize UWB session
      */
-    public static final byte SESSION_TYPE_RANGING = 0x00;
-    public static final byte SESSION_TYPE_DATA_TRANSFER = 0x01;
-    public static final byte SESSION_TYPE_CCC = (byte) CCC;
-    public static final byte SESSION_TYPE_DEVICE_TEST_MODE = (byte) 0xD0;
+    public static final byte SESSION_TYPE_RANGING = FiraParams.SESSION_TYPE_RANGING;
+    public static final byte SESSION_TYPE_DATA_TRANSFER =
+            FiraParams.SESSION_TYPE_RANGING_AND_IN_BAND_DATA;
+    public static final byte SESSION_TYPE_CCC = (byte) CccParams.SESSION_TYPE_CCC;
+    public static final byte SESSION_TYPE_DEVICE_TEST_MODE =
+            (byte) FiraParams.SESSION_TYPE_DEVICE_TEST_MODE;
 
     /**
      * Table 14: Control Messages to De-Initialize UWB session - SESSION_STATUS_NTF
@@ -232,4 +234,10 @@ public class UwbUciConstants {
     public static final byte UWB_DESTINATION_END_POINT_UWBS = 0x00;
     public static final byte UWB_DESTINATION_END_POINT_HOST = 0x01;
     public static final byte UWB_DESTINATION_END_POINT_SECURE_ELEMENT = 0x02;
+
+    /**
+     * FiRa Major versions
+     */
+    public static final int FIRA_VERSION_MAJOR_1 = 1;
+    public static final int FIRA_VERSION_MAJOR_2 = 2;
 }

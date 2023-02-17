@@ -769,6 +769,25 @@ public final class RangingSession implements AutoCloseable {
         }
     }
 
+    /**
+     * Query max application data size which can be sent by UWBS in one ranging round.
+     *
+     * @return max application data size
+     */
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    @RequiresPermission(Manifest.permission.UWB_PRIVILEGED)
+    public int queryDataSize() {
+        if (mState != State.ACTIVE) {
+            throw new IllegalStateException();
+        }
+
+        Log.v(mTag, "QueryDataSize - sessionHandle: " + mSessionHandle);
+        try {
+            return mAdapter.queryDataSize(mSessionHandle);
+        } catch (RemoteException e) {
+            throw e.rethrowFromSystemServer();
+        }
+    }
 
     /**
      * @hide
@@ -1120,6 +1139,21 @@ public final class RangingSession implements AutoCloseable {
             mExecutor.execute(runnable);
         } finally {
             Binder.restoreCallingIdentity(identity);
+        }
+    }
+
+    /**
+     * Updates the UWB filter engine's pose information. This requires that the call to
+     * {@link UwbManager#openRangingSession} indicated an application pose source.
+     *
+     * @param parameters Parameters representing the session to update, and the pose information.
+     */
+    @RequiresPermission(Manifest.permission.UWB_PRIVILEGED)
+    public void updatePose(@NonNull PersistableBundle parameters) {
+        try {
+            mAdapter.updatePose(mSessionHandle, parameters);
+        } catch (RemoteException e) {
+            throw e.rethrowFromSystemServer();
         }
     }
 }
