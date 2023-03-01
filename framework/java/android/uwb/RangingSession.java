@@ -182,7 +182,6 @@ public final class RangingSession implements AutoCloseable {
 
         /**
          * Indicate insufficient slots per ranging round.
-         * @hide
          */
         int REASON_INSUFFICIENT_SLOTS_PER_RR = 14;
 
@@ -434,7 +433,6 @@ public final class RangingSession implements AutoCloseable {
          * Invoked when a response/status is received for active ranging rounds update.
          *
          * @param parameters bundle of ranging rounds update status
-         * {@link com.google.uwb.support.dltdoa.DlTDoARangingRoundsUpdateStatus}
          */
         @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
         default void onRangingRoundsUpdateDtTagStatus(@NonNull PersistableBundle parameters) {}
@@ -755,18 +753,17 @@ public final class RangingSession implements AutoCloseable {
      * {@link RangingSession.Callback#onRangingRoundsUpdateDtTagStatus(PersistableBundle)}
      * is invoked.
      * @param params Parameters to configure active ranging rounds
-     * {@link com.google.uwb.support.dltdoa.DlTDoARangingRoundsUpdate}
      */
     @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
     @RequiresPermission(Manifest.permission.UWB_PRIVILEGED)
-    public void onRangingRoundsUpdateDtTag(@NonNull PersistableBundle params) {
+    public void updateRangingRoundsDtTag(@NonNull PersistableBundle params) {
         if (mState != State.ACTIVE) {
             throw new IllegalStateException();
         }
 
         Log.v(mTag, "onRangingRoundsUpdateDtTag - sessionHandle: " + mSessionHandle);
         try {
-            mAdapter.onRangingRoundsUpdateDtTag(mSessionHandle, params);
+            mAdapter.updateRangingRoundsDtTag(mSessionHandle, params);
         } catch (RemoteException e) {
             throw e.rethrowFromSystemServer();
         }

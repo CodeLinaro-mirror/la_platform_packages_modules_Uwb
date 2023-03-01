@@ -43,6 +43,7 @@ import com.android.internal.annotations.GuardedBy;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.util.List;
+import java.util.Objects;
 import java.util.concurrent.Executor;
 
 /**
@@ -303,7 +304,7 @@ public final class UwbManager {
          * @param payload containing vendor Uci message payload.
          */
         void onVendorUciResponse(
-                @IntRange(from = 9, to = 15) int gid, int oid, @NonNull byte[] payload);
+                @IntRange(from = 0, to = 15) int gid, int oid, @NonNull byte[] payload);
 
         /**
          * Invoked when a vendor specific UCI notification is received.
@@ -347,21 +348,21 @@ public final class UwbManager {
     @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
     public interface UwbOemExtensionCallback {
         /**
-         * Invoked when session status changes
+         * Invoked when session status changes.
          *
          * @param sessionStatusBundle session related info
          */
         void onSessionStatusNotificationReceived(@NonNull PersistableBundle sessionStatusBundle);
 
         /**
-         * Invoked when DeviceStatusNotification is received from UCI
+         * Invoked when DeviceStatusNotification is received from UCI.
          *
          * @param deviceStatusBundle device state
          */
         void onDeviceStatusNotificationReceived(@NonNull PersistableBundle deviceStatusBundle);
 
         /**
-         * Invoked when session configuration is complete
+         * Invoked when session configuration is complete.
          *
          * @param openSessionBundle Session Params
          * @return Error code
@@ -370,13 +371,21 @@ public final class UwbManager {
                 @NonNull PersistableBundle openSessionBundle);
 
         /**
-         * Invoked when ranging report is generated
+         * Invoked when ranging report is generated.
          *
          * @param rangingReport ranging report generated
          * @return Oem modified ranging report
          */
         @NonNull RangingReport onRangingReportReceived(
                 @NonNull RangingReport rangingReport);
+
+        /**
+         * Invoked to check pointed target decision by Oem.
+         *
+         * @param pointedTargetBundle pointed target params
+         * @return Oem pointed status
+         */
+        boolean onCheckPointedTarget(@NonNull PersistableBundle pointedTargetBundle);
     }
 
     /**
@@ -961,6 +970,31 @@ public final class UwbManager {
     @interface SendVendorUciStatus {}
 
     /**
+     * Message Type for UCI Command.
+     */
+    public static final int MESSAGE_TYPE_COMMAND = 1;
+    /**
+     * Message Type value reserved for testing.
+     */
+    public static final int MESSAGE_TYPE_TEST_1 = 4;
+
+    /**
+     * Message Type value reserved for testing.
+     */
+    public static final int MESSAGE_TYPE_TEST_2 = 5;
+
+    /**
+     * @hide
+     */
+    @Retention(RetentionPolicy.SOURCE)
+    @IntDef(value = {
+            MESSAGE_TYPE_COMMAND,
+            MESSAGE_TYPE_TEST_1,
+            MESSAGE_TYPE_TEST_2,
+    })
+    @interface MessageType {}
+
+    /**
      * Send Vendor specific Uci Messages.
      *
      * The format of the UCI messages are defined in the UCI specification. The platform is
@@ -974,9 +1008,37 @@ public final class UwbManager {
     @NonNull
     @RequiresPermission(permission.UWB_PRIVILEGED)
     public @SendVendorUciStatus int sendVendorUciMessage(
-            @IntRange(from = 9, to = 15) int gid, int oid, @NonNull byte[] payload) {
+            @IntRange(from = 0, to = 15) int gid, int oid, @NonNull byte[] payload) {
         try {
-            return mUwbAdapter.sendVendorUciMessage(gid, oid, payload);
+            return mUwbAdapter.sendVendorUciMessage(MESSAGE_TYPE_COMMAND, gid, oid, payload);
+        } catch (RemoteException e) {
+            throw e.rethrowFromSystemServer();
+        }
+    }
+
+    /**
+     * Send Vendor specific Uci Messages with custom message type.
+     *
+     * The format of the UCI messages are defined in the UCI specification. The platform is
+     * responsible for fragmenting the payload if necessary.
+     *
+     * Note that mt (message type) is added at the beginning of method parameters as it is more
+     * distinctive than other parameters and was requested from vendor.
+     *
+     * @param mt Message Type of the command
+     * @param gid Group ID of the command. This needs to be one of the vendor reserved GIDs from
+     *            the UCI specification
+     * @param oid Opcode ID of the command. This is left to the OEM / vendor to decide
+     * @param payload containing vendor Uci message payload
+     */
+    @NonNull
+    @RequiresApi(Build.VERSION_CODES.UPSIDE_DOWN_CAKE)
+    @RequiresPermission(permission.UWB_PRIVILEGED)
+    public @SendVendorUciStatus int sendVendorUciMessage(@MessageType int mt,
+            @IntRange(from = 0, to = 15) int gid, int oid, @NonNull byte[] payload) {
+        Objects.requireNonNull(payload, "Payload must not be null");
+        try {
+            return mUwbAdapter.sendVendorUciMessage(mt, gid, oid, payload);
         } catch (RemoteException e) {
             throw e.rethrowFromSystemServer();
         }

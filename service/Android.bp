@@ -53,6 +53,7 @@ java_library {
     },
     libs: [
         "framework-annotations-lib",
+        "framework-configinfrastructure",
         "framework-uwb-pre-jarjar",
         "ServiceUwbResources",
         "framework-statsd.stubs.module_lib",
@@ -77,6 +78,8 @@ java_library {
         "uwb-config-proto",
         "modules-utils-statemachine",
         "modules-utils-build",
+        "cbor-java",
+        "bouncycastle-uwb",
     ],
 
     apex_available: [
