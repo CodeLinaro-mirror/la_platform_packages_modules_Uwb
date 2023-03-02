@@ -452,8 +452,9 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
                 return;
             }
         }
-        if (isExistedSession(sessionId)) {
-            Log.i(TAG, "Duplicated sessionId");
+        if (isExistedSession(sessionHandle) || isExistedSession(sessionId)) {
+            Log.i(TAG, "Duplicated session. SessionHandle: " + sessionHandle + ", SessionId: "
+                    + sessionId);
             rangingCallbacks.onRangingOpenFailed(sessionHandle, RangingChangeReason.BAD_PARAMETERS,
                     UwbSessionNotificationHelper.convertUciStatusToParam(protocolName,
                             UwbUciConstants.STATUS_CODE_ERROR_SESSION_DUPLICATE));
@@ -722,7 +723,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
     }
 
     public synchronized void handleOnDeInit(UwbSession uwbSession) {
-        if (!isExistedSession(uwbSession.getSessionId())) {
+        if (!isExistedSession(uwbSession.getSessionHandle())) {
             Log.i(TAG, "onDeinit - Ignoring already deleted session "
                     + uwbSession.getSessionId());
             return;
@@ -1592,7 +1593,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
         //   the data (there can be multiple advertisers in the same UWB session).
         // - The inner key (SequenceNumber) is used to ensure we don't store duplicate packets,
         //   and notify them to the higher layers in-order.
-        // TODO(b/246678053): Change the type of SequenceNumber from Long to Integer everywhere.
+        // TODO(b/270068278): Change the type of SequenceNumber from Long to Integer everywhere.
         private final ConcurrentHashMap<Long, SortedMap<Long, ReceivedDataInfo>>
                 mReceivedDataInfoMap;
         private IPoseSource mPoseSource;
@@ -2006,6 +2007,8 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification 
             if (mPoseSource instanceof ApplicationPoseSource) {
                 ApplicationPoseSource aps = (ApplicationPoseSource) mPoseSource;
                 aps.applyPose(updateParams.getPoseInfo());
+            } else {
+                throw new IllegalStateException("Session not configured for application poses.");
             }
         }
 
