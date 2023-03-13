@@ -1,5 +1,5 @@
 /*
- * Copyright (C) 2022 The Android Open Source Project
+ * Copyright (C) 2023 The Android Open Source Project
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -33,7 +33,7 @@ import java.util.Objects;
 
 /**
  * Consumes raw UWB values and outputs filtered UWB values. See the {@link UwbFilterEngine.Builder}
- *  for how it is configured.
+ * for how it is configured.
  */
 public class UwbFilterEngine implements AutoCloseable {
     public static final boolean ENABLE_BIG_LOG = false;
@@ -43,8 +43,8 @@ public class UwbFilterEngine implements AutoCloseable {
 
     /**
      * The last UWB reading, after priming or filtering, depending on which facilities
-     *  are available.  If computation fails or is not possible (ie - filter or primer is not
-     *  configured), the computation function will return this.
+     * are available.  If computation fails or is not possible (ie - filter or primer is not
+     * configured), the computation function will return this.
      */
     @Nullable private SphericalVector mLastInputState;
 
@@ -53,8 +53,7 @@ public class UwbFilterEngine implements AutoCloseable {
     private UwbFilterEngine(
             @NonNull List<IPrimer> primers,
             @Nullable IPoseSource poseSource,
-            @Nullable IPositionFilter filter
-    ) {
+            @Nullable IPositionFilter filter) {
         this.mPrimers = primers;
         this.mPoseSource = poseSource;
         this.mFilter = filter;
@@ -88,15 +87,21 @@ public class UwbFilterEngine implements AutoCloseable {
                         .append(position);
             }
         }
-        if (!position.isComplete()) {
-            // Primers did not fully prime the position vector.
-            // This is not okay unless the triangulation filter is implemented to produce
-            //  these missing values.
+        if (position.isComplete() || prediction == null) {
+            mLastInputState = position.vector;
+        } else {
+            // Primers did not fully prime the position vector. This can happen when elevation is
+            //  missing and there is no primer for an estimate, or if there was a bad UWB reading.
+            // Fill in with predictions.
+            mLastInputState = SphericalVector.fromRadians(
+                    position.hasAzimuth ? position.vector.azimuth : prediction.azimuth,
+                    position.hasElevation ? position.vector.elevation : prediction.elevation,
+                    position.hasDistance ? position.vector.distance : prediction.distance
+            );
         }
-        mLastInputState = position.vector;
         if (mFilter != null) {
             mFilter.updatePose(mPoseSource, instant);
-            mFilter.add(position.vector, instant);
+            mFilter.add(mLastInputState, instant);
             if (bigLog != null) {
                 bigLog.append(" : filtered=")
                         .append(mFilter.compute());
@@ -117,10 +122,10 @@ public class UwbFilterEngine implements AutoCloseable {
         return compute(Instant.now());
     }
 
-    /** Computes the most probable UWB location as of the given instant.
-     *
+    /**
+     * Computes the most probable UWB location as of the given instant.
      * @param instant The time for which to compute the UWB location. This should be at or after
-     *               the most recent UWB sample.
+     * the most recent UWB sample.
      * @return A SphericalVector representing the most likely UWB location.
      */
     @Nullable
@@ -167,7 +172,7 @@ public class UwbFilterEngine implements AutoCloseable {
 
         /**
          * Sets the filter this UWB filter engine will use. If not provided, no filtering will
-         *  occur.
+         * occur.
          * @param filter The position filter to use.
          * @return This builder.
          */
@@ -178,7 +183,7 @@ public class UwbFilterEngine implements AutoCloseable {
 
         /**
          * Sets the pose source the UWB filter engine will use. If not set, no pose processing
-         *  will occur.
+         * will occur.
          * @param poseSource Any pose source.
          * @return This builder.
          */
@@ -189,7 +194,7 @@ public class UwbFilterEngine implements AutoCloseable {
 
         /**
          * Adds a primer to the list of primers the engine will use. The primers will execute
-         *  in the order in which {@link #addPrimer(IPrimer)} was called.
+         * in the order in which {@link #addPrimer(IPrimer)} was called.
          * @param primer The primer to add.
          * @return This builder.
          */

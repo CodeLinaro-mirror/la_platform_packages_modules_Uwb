@@ -17,6 +17,8 @@
 package com.android.server.uwb;
 
 
+import static com.android.server.uwb.UwbTestUtils.MAX_DATA_SIZE;
+
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.uwb.support.ccc.CccParams.CHAPS_PER_SLOT_3;
 import static com.google.uwb.support.ccc.CccParams.HOPPING_CONFIG_MODE_NONE;
@@ -31,6 +33,7 @@ import static com.google.uwb.support.fira.FiraParams.RANGE_DATA_NTF_CONFIG_ENABL
 import static com.google.uwb.support.fira.FiraParams.RANGING_DEVICE_ROLE_RESPONDER;
 import static com.google.uwb.support.fira.FiraParams.RANGING_DEVICE_TYPE_CONTROLLER;
 import static com.google.uwb.support.fira.FiraParams.RANGING_ROUND_USAGE_SS_TWR_DEFERRED_MODE;
+import static com.google.uwb.support.fira.FiraParams.SESSION_TYPE_RANGING;
 
 import static org.junit.Assert.fail;
 import static org.mockito.ArgumentMatchers.any;
@@ -105,7 +108,9 @@ import org.mockito.Mock;
 import org.mockito.Mockito;
 import org.mockito.MockitoAnnotations;
 import org.mockito.MockitoSession;
+import org.mockito.invocation.InvocationOnMock;
 import org.mockito.quality.Strictness;
+import org.mockito.stubbing.Answer;
 
 import java.util.Arrays;
 import java.util.List;
@@ -128,6 +133,7 @@ public class UwbServiceCoreTest {
     private static final String TEST_PACKAGE_NAME = "com.android.uwb";
     private static final String TEST_DEFAULT_CHIP_ID = "default";
     private static final String TEST_CHIP_ONE_CHIP_ID = "chipIdString1";
+
     private static final AttributionSource TEST_ATTRIBUTION_SOURCE =
             new AttributionSource.Builder(TEST_UID)
                     .setPackageName(TEST_PACKAGE_NAME)
@@ -136,6 +142,7 @@ public class UwbServiceCoreTest {
             new FiraOpenSessionParams.Builder()
                     .setProtocolVersion(FiraParams.PROTOCOL_VERSION_1_1)
                     .setSessionId(1)
+                    .setSessionType(SESSION_TYPE_RANGING)
                     .setDeviceType(RANGING_DEVICE_TYPE_CONTROLLER)
                     .setDeviceRole(RANGING_DEVICE_ROLE_RESPONDER)
                     .setDeviceAddress(UwbAddress.fromBytes(new byte[] { 0x4, 0x6}))
@@ -172,6 +179,7 @@ public class UwbServiceCoreTest {
     @Mock private UwbInjector mUwbInjector;
     @Mock DeviceConfigFacade mDeviceConfigFacade;
     @Mock private ProfileManager mProfileManager;
+    @Mock private PowerManager.WakeLock mUwbWakeLock;
     @Mock private Resources mResources;
 
     private TestLooper mTestLooper;
@@ -187,7 +195,7 @@ public class UwbServiceCoreTest {
         mTestLooper = new TestLooper();
         PowerManager powerManager = mock(PowerManager.class);
         when(powerManager.newWakeLock(anyInt(), anyString()))
-                .thenReturn(mock(PowerManager.WakeLock.class));
+                .thenReturn(mUwbWakeLock);
         when(mContext.getSystemService(PowerManager.class)).thenReturn(powerManager);
         when(mUwbInjector.getDeviceConfigFacade()).thenReturn(mDeviceConfigFacade);
         UwbMultichipData uwbMultichipData = setUpMultichipDataForOneChip();
@@ -386,6 +394,41 @@ public class UwbServiceCoreTest {
         verifyNoMoreInteractions(mNativeUwbManager, mUwbCountryCode, cb);
     }
 
+    // Test the UWB stack enable when the NativeUwbManager.doInitialize() is delayed such that the
+    // watchdog timer expiry happens.
+    @Test
+    public void testEnableWhenInitializeDelayed() throws Exception {
+        IUwbAdapterStateCallbacks cb = mock(IUwbAdapterStateCallbacks.class);
+        when(cb.asBinder()).thenReturn(mock(IBinder.class));
+        mUwbServiceCore.registerAdapterStateCallbacks(cb);
+        verify(cb).onAdapterStateChanged(UwbManager.AdapterStateCallback.STATE_DISABLED,
+                StateChangeReason.SYSTEM_BOOT);
+
+        // Setup doInitialize() to take long time, such that the WatchDog thread times out.
+        when(mNativeUwbManager.doInitialize()).thenAnswer(new Answer<Boolean>() {
+            public Boolean answer(InvocationOnMock invocation) throws Throwable {
+                // Return success but too late, so this result shouldn't matter.
+                Thread.sleep(UwbServiceCore.WATCHDOG_MS + 1000);
+                return true;
+            }
+        });
+        when(mUwbCountryCode.getCountryCode()).thenReturn("US");
+        when(mUwbCountryCode.setCountryCode(anyBoolean())).thenReturn(true);
+
+        // Setup the wakelock to be checked twice (once from the watchdog thread after expiry, and
+        // second time from handleEnable()).
+        when(mUwbWakeLock.isHeld()).thenReturn(true).thenReturn(false);
+
+        mUwbServiceCore.setEnabled(true);
+        mTestLooper.dispatchAll();
+
+        verify(mNativeUwbManager).doInitialize();
+        verify(mUwbWakeLock, times(1)).acquire();
+        verify(mUwbWakeLock, times(2)).isHeld();
+        verify(mUwbWakeLock, times(1)).release();
+        verify(cb).onAdapterStateChanged(UwbManager.AdapterStateCallback.STATE_ENABLED_INACTIVE,
+                StateChangeReason.SYSTEM_POLICY);
+    }
 
     @Test
     public void testDisable() throws Exception {
@@ -407,6 +450,47 @@ public class UwbServiceCoreTest {
                 StateChangeReason.SYSTEM_POLICY);
     }
 
+    // Test the UWB stack disable when the NativeUwbManager.doDeinitialize() is delayed such that
+    // the watchdog timer expiry happens.
+    @Test
+    public void testDisableWhenInitializeDelayed() throws Exception {
+        IUwbAdapterStateCallbacks cb = mock(IUwbAdapterStateCallbacks.class);
+        when(cb.asBinder()).thenReturn(mock(IBinder.class));
+        mUwbServiceCore.registerAdapterStateCallbacks(cb);
+        verify(cb).onAdapterStateChanged(UwbManager.AdapterStateCallback.STATE_DISABLED,
+                StateChangeReason.SYSTEM_BOOT);
+
+        // Enable first
+        enableUwbWithCountryCode();
+        verify(cb).onAdapterStateChanged(UwbManager.AdapterStateCallback.STATE_ENABLED_INACTIVE,
+                StateChangeReason.SYSTEM_POLICY);
+
+        clearInvocations(mUwbWakeLock);
+
+        // Setup doDeinitialize() to take long time, such that the WatchDog thread times out.
+        when(mNativeUwbManager.doDeinitialize()).thenAnswer(new Answer<Boolean>() {
+            public Boolean answer(InvocationOnMock invocation) throws Throwable {
+                // Return success but too late, so this result shouldn't matter.
+                Thread.sleep(UwbServiceCore.WATCHDOG_MS + 1000);
+                return true;
+            }
+        });
+
+        // Setup the wakelock to be checked twice (once from the watchdog thread after expiry, and
+        // second time from handleDisable()).
+        when(mUwbWakeLock.isHeld()).thenReturn(true).thenReturn(false);
+
+        // Disable UWB.
+        mUwbServiceCore.setEnabled(false);
+        mTestLooper.dispatchAll();
+
+        verify(mNativeUwbManager).doDeinitialize();
+        verify(mUwbWakeLock, times(1)).acquire();
+        verify(mUwbWakeLock, times(2)).isHeld();
+        verify(mUwbWakeLock, times(1)).release();
+        verify(cb).onAdapterStateChanged(UwbManager.AdapterStateCallback.STATE_DISABLED,
+                StateChangeReason.SYSTEM_POLICY);
+    }
 
     @Test
     public void testDisableWhenAlreadyDisabled() throws Exception {
@@ -474,9 +558,7 @@ public class UwbServiceCoreTest {
 
         verify(mNativeUwbManager).doInitialize();
         verify(mUwbCountryCode).setCountryCode(anyBoolean());
-        // TODO(b/244443764): This currently results in two onAdapterStateChanged() calls, due to
-        // both the enableInternal() and onCountryCode() callback enqueuing a notify message.
-        verify(cb, times(2)).onAdapterStateChanged(
+        verify(cb).onAdapterStateChanged(
                 UwbManager.AdapterStateCallback.STATE_ENABLED_INACTIVE,
                 StateChangeReason.SYSTEM_POLICY);
 
@@ -547,7 +629,8 @@ public class UwbServiceCoreTest {
 
         verify(mUwbSessionManager).initSession(
                 eq(attributionSource),
-                eq(sessionHandle), eq(params.getSessionId()), eq(FiraParams.PROTOCOL_NAME),
+                eq(sessionHandle), eq(params.getSessionId()), eq((byte) params.getSessionType()),
+                eq(FiraParams.PROTOCOL_NAME),
                 argThat(p -> ((FiraOpenSessionParams) p).getSessionId() == params.getSessionId()),
                 eq(cb), eq(TEST_DEFAULT_CHIP_ID));
 
@@ -566,7 +649,8 @@ public class UwbServiceCoreTest {
 
         verify(mUwbSessionManager).initSession(
                 eq(attributionSource),
-                eq(sessionHandle), eq(params.getSessionId()), eq(CccParams.PROTOCOL_NAME),
+                eq(sessionHandle), eq(params.getSessionId()), eq((byte) params.getSessionType()),
+                eq(CccParams.PROTOCOL_NAME),
                 argThat(p -> ((CccOpenRangingParams) p).getSessionId() == params.getSessionId()),
                 eq(cb), eq(TEST_DEFAULT_CHIP_ID));
     }
@@ -880,6 +964,17 @@ public class UwbServiceCoreTest {
         assertThat(mUwbServiceCore.sendVendorUciMessage(MESSAGE_TYPE_TEST_1, 0, 0,
                 new byte[0], TEST_DEFAULT_CHIP_ID))
                 .isEqualTo(UwbUciConstants.STATUS_CODE_FAILED);
+    }
+
+    @Test
+    public void testQueryDataSize() throws Exception {
+        enableUwbWithCountryCode();
+
+        SessionHandle sessionHandle = mock(SessionHandle.class);
+
+        when(mUwbSessionManager.queryDataSize(any())).thenReturn(MAX_DATA_SIZE);
+        mUwbServiceCore.queryDataSize(sessionHandle);
+        verify(mUwbSessionManager).queryDataSize(eq(sessionHandle));
     }
 
     @Test
