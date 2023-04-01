@@ -29,6 +29,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
+import static org.mockito.Mockito.doNothing;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
@@ -46,6 +47,7 @@ import com.android.modules.utils.build.SdkLevel;
 
 import org.junit.Test;
 import org.junit.runner.RunWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.invocation.InvocationOnMock;
 import org.mockito.stubbing.Answer;
 
@@ -423,10 +425,10 @@ public class RangingSessionTest {
         IUwbAdapter adapter = mock(IUwbAdapter.class);
         RangingSession session = new RangingSession(EXECUTOR, callback, adapter, handle);
 
-        when(adapter.queryDataSize(handle)).thenReturn(MAX_DATA_SIZE);
+        when(adapter.queryMaxDataSizeBytes(handle)).thenReturn(MAX_DATA_SIZE);
 
         session.onRangingStarted(PARAMS);
-        assertThat(session.queryDataSize()).isEqualTo(MAX_DATA_SIZE);
+        assertThat(session.queryMaxDataSizeBytes()).isEqualTo(MAX_DATA_SIZE);
     }
 
     @Test
@@ -492,6 +494,28 @@ public class RangingSessionTest {
         session.onRangingRoundsUpdateDtTagStatus(params);
 
         verify(callback, times(1)).onRangingRoundsUpdateDtTagStatus(params);
+    }
+
+    @Test
+    public void testPoseUpdate() throws RemoteException {
+        assumeTrue(SdkLevel.isAtLeastU()); // Test should only run on U+ devices.
+        SessionHandle handle = new SessionHandle(HANDLE_ID, ATTRIBUTION_SOURCE, PID);
+        RangingSession.Callback callback = mock(RangingSession.Callback.class);
+        IUwbAdapter adapter = mock(IUwbAdapter.Stub.class);
+        doNothing().when(adapter).updatePose(any(), any());
+        RangingSession session = new RangingSession(EXECUTOR, callback, adapter, handle);
+        assertFalse(session.isOpen());
+
+        session.onRangingOpened();
+        session.updatePose(PARAMS);
+
+        ArgumentCaptor<SessionHandle> shCaptor = ArgumentCaptor.forClass(SessionHandle.class);
+        ArgumentCaptor<PersistableBundle> bundleCaptor = ArgumentCaptor.forClass(
+                PersistableBundle.class);
+
+        verify(adapter, times(1))
+                .updatePose(shCaptor.capture(), bundleCaptor.capture());
+        assertEquals(handle.getId(), shCaptor.getValue().getId());
     }
 
     private void verifyOpenState(RangingSession session, boolean expected) {
