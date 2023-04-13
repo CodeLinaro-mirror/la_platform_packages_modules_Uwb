@@ -22,7 +22,6 @@ import android.util.Log;
 
 import androidx.core.uwb.backend.IUwb;
 import androidx.core.uwb.backend.IUwbClient;
-import androidx.core.uwb.backend.impl.internal.UwbFeatureFlags;
 import androidx.core.uwb.backend.impl.internal.UwbServiceImpl;
 
 /** Uwb service entry point of the backend. */
@@ -32,8 +31,7 @@ public class UwbService extends Service {
     @Override
     public void onCreate() {
         super.onCreate();
-        UwbFeatureFlags uwbFeatureFlags = new UwbFeatureFlags.Builder().build();
-        mUwbServiceImpl = new UwbServiceImpl(this, uwbFeatureFlags);
+        mUwbServiceImpl = new UwbServiceImpl(this);
     }
 
     @Override
