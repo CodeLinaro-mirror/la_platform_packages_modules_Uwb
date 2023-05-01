@@ -16,10 +16,16 @@
 
 package androidx.core.uwb.backend.impl.internal;
 
+import static com.google.uwb.support.fira.FiraParams.RANGE_DATA_NTF_CONFIG_DISABLE;
+import static com.google.uwb.support.fira.FiraParams.RANGE_DATA_NTF_CONFIG_ENABLE;
+import static com.google.uwb.support.fira.FiraParams.RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_EDGE_TRIG;
+import static com.google.uwb.support.fira.FiraParams.RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_LEVEL_TRIG;
+
 import android.annotation.IntDef;
 import android.util.ArrayMap;
 
 import com.google.common.collect.ImmutableList;
+import com.google.uwb.support.fira.FiraParams;
 
 import java.util.Map;
 
@@ -145,19 +151,70 @@ public final class Utils {
     /** Can't start ranging because the UWB_RANGING permission is not granted. */
     public static final int MISSING_PERMISSION_UWB_RANGING = 4;
 
+    /** Supported Range Data Notification Config */
+    @androidx.annotation.IntDef(
+            value = {
+                    RANGE_DATA_NTF_DISABLE,
+                    RANGE_DATA_NTF_ENABLE,
+                    RANGE_DATA_NTF_ENABLE_PROXIMITY_LEVEL_TRIG,
+                    RANGE_DATA_NTF_ENABLE_PROXIMITY_EDGE_TRIG,
+            })
+    public @interface RangeDataNtfConfig {}
+
+    public static final int RANGE_DATA_NTF_DISABLE = 0;
+    public static final int RANGE_DATA_NTF_ENABLE = 1;
+    public static final int RANGE_DATA_NTF_ENABLE_PROXIMITY_LEVEL_TRIG = 2;
+    public static final int RANGE_DATA_NTF_ENABLE_PROXIMITY_EDGE_TRIG = 3;
+
+    public static final ImmutableList<Integer> SUPPORTED_NTF_CONFIG =
+            ImmutableList.of(0, 1, 2, 3);
+
+    /** Convert Fira range data Ntf config to Utils range data ntf config.*/
+    public static @Utils.RangeDataNtfConfig int convertFromFiraNtfConfig(
+            @FiraParams.RangeDataNtfConfig int rangeDataConfig) {
+        switch (rangeDataConfig) {
+            case RANGE_DATA_NTF_CONFIG_DISABLE:
+                return RANGE_DATA_NTF_DISABLE;
+            case RANGE_DATA_NTF_CONFIG_ENABLE:
+                return RANGE_DATA_NTF_ENABLE;
+            case RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_LEVEL_TRIG:
+                return RANGE_DATA_NTF_ENABLE_PROXIMITY_LEVEL_TRIG;
+            case RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_EDGE_TRIG :
+                return RANGE_DATA_NTF_ENABLE_PROXIMITY_EDGE_TRIG;
+            default:
+                return RANGE_DATA_NTF_ENABLE;
+        }
+    }
+    /** Convert Utils range data Ntf config to Fira range data ntf config.*/
+    public static @FiraParams.RangeDataNtfConfig int convertToFiraNtfConfig(
+            @Utils.RangeDataNtfConfig int rangeDataConfig) {
+        switch (rangeDataConfig) {
+            case RANGE_DATA_NTF_DISABLE:
+                return RANGE_DATA_NTF_CONFIG_DISABLE;
+            case RANGE_DATA_NTF_ENABLE:
+                return RANGE_DATA_NTF_CONFIG_ENABLE;
+            case RANGE_DATA_NTF_ENABLE_PROXIMITY_LEVEL_TRIG:
+                return RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_LEVEL_TRIG;
+            case RANGE_DATA_NTF_ENABLE_PROXIMITY_EDGE_TRIG :
+                return RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_EDGE_TRIG;
+            default:
+                return RANGE_DATA_NTF_CONFIG_ENABLE;
+        }
+    }
+
     /**
      * Unusual failures happened in UWB system callback, such as stopping ranging or removing a
      * known controlee failed.
      */
-    public static final int UWB_SYSTEM_CALLBACK_FAILURE = 42005;
+    public static final int UWB_SYSTEM_CALLBACK_FAILURE = 5;
 
     static {
         setRangingTimingParams(
                 CONFIG_UNICAST_DS_TWR,
                 new RangingTimingParams(
                         /* rangingIntervalNormal= */ 240,
-                        /* rangingIntervalFast= */ 48,
-                        /* rangingIntervalInfrequent= */ 2400,
+                        /* rangingIntervalFast= */ 240,
+                        /* rangingIntervalInfrequent= */ 4000,
                         /* slotPerRangingRound= */ 6,
                         /* slotDurationRstu= */ 2400,
                         /* initiationTimeMs= */ 0,
@@ -167,8 +224,8 @@ public final class Utils {
                 CONFIG_ID_2,
                 new RangingTimingParams(
                         /* rangingIntervalNormal= */ 200,
-                        /* rangingIntervalFast= */ 40,
-                        /* rangingIntervalInfrequent= */ 2000,
+                        /* rangingIntervalFast= */ 200,
+                        /* rangingIntervalInfrequent= */ 4000,
                         /* slotPerRangingRound= */ 20,
                         /* slotDurationRstu= */ 2400,
                         /* initiationTimeMs= */ 0,
@@ -178,8 +235,8 @@ public final class Utils {
                 CONFIG_ID_3,
                 new RangingTimingParams(
                         /* rangingIntervalNormal= */ 200,
-                        /* rangingIntervalFast= */ 40,
-                        /* rangingIntervalInfrequent= */ 2000,
+                        /* rangingIntervalFast= */ 200,
+                        /* rangingIntervalInfrequent= */4000,
                         /* slotPerRangingRound= */ 20,
                         /* slotDurationRstu= */ 2400,
                         /* initiationTimeMs= */ 0,
@@ -189,8 +246,8 @@ public final class Utils {
                 CONFIG_ID_4,
                 new RangingTimingParams(
                         /* rangingIntervalNormal= */ 240,
-                        /* rangingIntervalFast= */ 48,
-                        /* rangingIntervalInfrequent= */ 2400,
+                        /* rangingIntervalFast= */ 240,
+                        /* rangingIntervalInfrequent= */ 4000,
                         /* slotPerRangingRound= */ 6,
                         /* slotDurationRstu= */ 2400,
                         /* initiationTimeMs= */ 0,
@@ -200,8 +257,8 @@ public final class Utils {
                 CONFIG_ID_5,
                 new RangingTimingParams(
                         /* rangingIntervalNormal= */ 200,
-                        /* rangingIntervalFast= */ 40,
-                        /* rangingIntervalInfrequent= */ 2000,
+                        /* rangingIntervalFast= */ 200,
+                        /* rangingIntervalInfrequent= */ 4000,
                         /* slotPerRangingRound= */ 20,
                         /* slotDurationRstu= */ 2400,
                         /* initiationTimeMs= */ 0,
@@ -211,8 +268,8 @@ public final class Utils {
                 CONFIG_ID_6,
                 new RangingTimingParams(
                         /* rangingIntervalNormal= */ 200,
-                        /* rangingIntervalFast= */ 40,
-                        /* rangingIntervalInfrequent= */ 2000,
+                        /* rangingIntervalFast= */ 200,
+                        /* rangingIntervalInfrequent= */ 4000,
                         /* slotPerRangingRound= */ 20,
                         /* slotDurationRstu= */ 2400,
                         /* initiationTimeMs= */ 0,
@@ -222,8 +279,8 @@ public final class Utils {
                 CONFIG_ID_7,
                 new RangingTimingParams(
                         /* rangingIntervalNormal= */ 200,
-                        /* rangingIntervalFast= */ 40,
-                        /* rangingIntervalInfrequent= */ 2000,
+                        /* rangingIntervalFast= */ 200,
+                        /* rangingIntervalInfrequent= */ 4000,
                         /* slotPerRangingRound= */ 20,
                         /* slotDurationRstu= */ 2400,
                         /* initiationTimeMs= */ 0,
@@ -233,8 +290,8 @@ public final class Utils {
                 CONFIG_ID_8,
                 new RangingTimingParams(
                         /* rangingIntervalNormal= */ 200,
-                        /* rangingIntervalFast= */ 40,
-                        /* rangingIntervalInfrequent= */ 2000,
+                        /* rangingIntervalFast= */ 200,
+                        /* rangingIntervalInfrequent= */ 4000,
                         /* slotPerRangingRound= */ 20,
                         /* slotDurationRstu= */ 2400,
                         /* initiationTimeMs= */ 0,

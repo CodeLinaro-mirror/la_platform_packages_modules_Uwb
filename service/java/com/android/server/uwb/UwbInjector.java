@@ -28,6 +28,8 @@ import android.content.AttributionSource;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.database.ContentObserver;
+import android.net.Uri;
 import android.os.Binder;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -139,7 +141,8 @@ public class UwbInjector {
                 new UwbConfigurationManager(mNativeUwbManager);
         UwbSessionNotificationManager uwbSessionNotificationManager =
                 new UwbSessionNotificationManager(this);
-        UwbAdvertiseManager uwbAdvertiseManager = new UwbAdvertiseManager(this);
+        UwbAdvertiseManager uwbAdvertiseManager = new UwbAdvertiseManager(this,
+                mDeviceConfigFacade);
         mUwbSessionManager =
                 new UwbSessionManager(uwbConfigurationManager, mNativeUwbManager, mUwbMetrics,
                         uwbAdvertiseManager, uwbSessionNotificationManager, this,
@@ -266,15 +269,41 @@ public class UwbInjector {
      *
      * @throws Settings.SettingNotFoundException
      */
-    public int getSettingsInt(@NonNull String key) throws Settings.SettingNotFoundException {
+    public int getGlobalSettingsInt(@NonNull String key) throws Settings.SettingNotFoundException {
         return Settings.Global.getInt(mContext.getContentResolver(), key);
     }
 
     /**
      * Get integer value from Settings.
      */
-    public int getSettingsInt(@NonNull String key, int defValue) {
+    public int getGlobalSettingsInt(@NonNull String key, int defValue) {
         return Settings.Global.getInt(mContext.getContentResolver(), key, defValue);
+    }
+
+    /**
+     * Get string value from Settings.
+     */
+    @Nullable
+    public String getGlobalSettingsString(@NonNull String key) {
+        return Settings.Global.getString(mContext.getContentResolver(), key);
+    }
+
+    /**
+     * Helper method for classes to register a ContentObserver
+     * {@see ContentResolver#registerContentObserver(Uri,boolean,ContentObserver)}.
+     */
+    public void registerContentObserver(Uri uri, boolean notifyForDescendants,
+            ContentObserver contentObserver) {
+        mContext.getContentResolver().registerContentObserver(uri, notifyForDescendants,
+                contentObserver);
+    }
+
+    /**
+     * Helper method for classes to unregister a ContentObserver
+     * {@see ContentResolver#unregisterContentObserver(ContentObserver)}.
+     */
+    public void unregisterContentObserver(ContentObserver contentObserver) {
+        mContext.getContentResolver().unregisterContentObserver(contentObserver);
     }
 
     /**
@@ -481,7 +510,7 @@ public class UwbInjector {
         try {
             // Keep our ref counts accurate because isEnableFilters can change at runtime.
             --mPoseSourceRefCount;
-            if (mPoseSourceRefCount <= 0) {
+            if (mPoseSourceRefCount <= 0 && mDefaultPoseSource != null) {
                 mDefaultPoseSource.close();
                 mDefaultPoseSource = null;
             }

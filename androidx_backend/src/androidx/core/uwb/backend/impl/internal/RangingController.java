@@ -54,8 +54,8 @@ public class RangingController extends RangingDevice {
 
     @Nullable private RangingSessionCallback mRangingSessionCallback;
 
-    RangingController(
-            UwbManager manager, Executor executor, OpAsyncCallbackRunner opAsyncCallbackRunner) {
+    RangingController(UwbManager manager, Executor executor,
+            OpAsyncCallbackRunner<Boolean> opAsyncCallbackRunner) {
         super(manager, executor, opAsyncCallbackRunner);
     }
 
@@ -101,6 +101,11 @@ public class RangingController extends RangingDevice {
         UwbComplexChannel availableChannel = new UwbComplexChannel(UWB_CHANNEL_9, preambleIndex);
         Log.i(TAG, String.format("set complexChannel to %s", availableChannel));
         return availableChannel;
+    }
+
+    @Override
+    protected int hashSessionId(RangingParameters rangingParameters) {
+        return calculateHashedSessionId(getLocalAddress(), getComplexChannel());
     }
 
     @Override
@@ -175,25 +180,22 @@ public class RangingController extends RangingDevice {
                                         subSessionKeyInfo)
                                 .toBundle());
 
+        RangingSessionCallback callback = mRangingSessionCallback;
         if (success) {
-            if (mRangingSessionCallback != null) {
+            if (callback != null) {
                 runOnBackendCallbackThread(
-                        () -> {
-                            requireNonNull(mRangingSessionCallback);
-                            mRangingSessionCallback.onRangingInitialized(
-                                    UwbDevice.createForAddress(controleeAddress.toBytes()));
-                        });
+                        () ->
+                            callback.onRangingInitialized(
+                                    UwbDevice.createForAddress(controleeAddress.toBytes())));
             }
             mDynamicallyAddedPeers.add(controleeAddress);
         } else {
-            if (mRangingSessionCallback != null) {
+            if (callback != null) {
                 runOnBackendCallbackThread(
-                        () -> {
-                            requireNonNull(mRangingSessionCallback);
-                            mRangingSessionCallback.onRangingSuspended(
+                        () ->
+                            callback.onRangingSuspended(
                                     UwbDevice.createForAddress(controleeAddress.toBytes()),
-                                    REASON_FAILED_TO_START);
-                        });
+                                    REASON_FAILED_TO_START));
             }
         }
 
@@ -235,14 +237,13 @@ public class RangingController extends RangingDevice {
             return UWB_SYSTEM_CALLBACK_FAILURE;
         }
 
-        if (mRangingSessionCallback != null) {
+        RangingSessionCallback callback = mRangingSessionCallback;
+        if (callback != null) {
             runOnBackendCallbackThread(
-                    () -> {
-                        requireNonNull(mRangingSessionCallback);
-                        mRangingSessionCallback.onRangingSuspended(
+                    () ->
+                        callback.onRangingSuspended(
                                 UwbDevice.createForAddress(controleeAddress.toBytes()),
-                                REASON_STOP_RANGING_CALLED);
-                    });
+                                REASON_STOP_RANGING_CALLED));
         }
         mDynamicallyAddedPeers.remove(controleeAddress);
         return STATUS_OK;
