@@ -115,8 +115,6 @@ public class FiraEncoder extends TlvEncoder {
                         (byte) params.getInBandTerminationAttemptCount())
                 .putByte(ConfigParam.BPRF_PHR_DATA_RATE,
                         (byte) params.getBprfPhrDataRate())
-                .putByte(ConfigParam.MAX_NUMBER_OF_MEASUREMENTS,
-                        (byte) params.getMaxNumberOfMeasurements())
                 .putByte(ConfigParam.STS_LENGTH, (byte) params.getStsLength());
         if (params.getDeviceRole() != FiraParams.RANGING_DEVICE_UT_TAG) {
             tlvBufferBuilder.putInt(ConfigParam.RANGING_INTERVAL, params.getRangingIntervalMs());
@@ -129,11 +127,11 @@ public class FiraEncoder extends TlvEncoder {
         if (params.getProtocolVersion().getMajor() >= 2) {
             tlvBufferBuilder
                  // Initiation time Changed from 4 byte field to 8 byte field in version 2.
-                .putLong(ConfigParam.UWB_INITIATION_TIME, params.getInitiationTimeMs())
+                .putLong(ConfigParam.UWB_INITIATION_TIME, params.getInitiationTime())
                 .putByte(ConfigParam.LINK_LAYER_MODE,  (byte) params.getLinkLayerMode());
         } else {
             tlvBufferBuilder.putInt(ConfigParam.UWB_INITIATION_TIME,
-                    Math.toIntExact(params.getInitiationTimeMs()));
+                    Math.toIntExact(params.getInitiationTime()));
         }
         if ((stsConfig == FiraParams.STS_CONFIG_DYNAMIC_FOR_CONTROLEE_INDIVIDUAL_KEY)
                 && (deviceType == FiraParams.RANGING_DEVICE_TYPE_CONTROLEE)) {
