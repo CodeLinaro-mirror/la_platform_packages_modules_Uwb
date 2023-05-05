@@ -1,6 +1,5 @@
 """Tests for Uwb Ranging APIs."""
 
-import dataclasses
 import logging
 import random
 import sys
@@ -80,9 +79,7 @@ class RangingTest(uwb_base_test.UwbBaseTest):
     self.initiator_addr, self.responder_addr = self.device_addresses
     self.new_responder_addr = [4, 5]
     self.p_sts_sub_session_id = 11
-    self.p_sts_sub_session_key = dataclasses.field(
-      default_factory=lambda: [8, 7, 6, 5, 4, 3, 2, 1, 1, 2, 3, 4, 5, 6, 7, 8]
-    )
+    self.p_sts_sub_session_key = [8, 7, 6, 5, 4, 3, 2, 1, 1, 2, 3, 4, 5, 6, 7, 8]
     self.block_stride_length = random.randint(1, 10)
 
     # abort class if uwb is disabled
@@ -592,7 +589,7 @@ class RangingTest(uwb_base_test.UwbBaseTest):
       )
       self._verify_one_to_one_ranging_reconfigured_controlee_params(
           self.initiator, self.responder, initiator_params, responder_params,
-          self.new_responder_addr, self.p_sts_sub_session_id, self.p_sts_sub_session_key)
+          self.new_responder_addr, self.p_sts_sub_session_id, list(self.p_sts_sub_session_key))
 
 
   def test_ranging_nearby_share_profile_add_remove_controlee(self):
@@ -650,7 +647,7 @@ class RangingTest(uwb_base_test.UwbBaseTest):
       )
       self._verify_one_to_one_ranging_add_remove_controlee(
           self.initiator, self.responder, initiator_params, responder_params,
-          self.new_responder_addr, self.p_sts_sub_session_id, self.p_sts_sub_session_key)
+          self.new_responder_addr, self.p_sts_sub_session_id, list(self.p_sts_sub_session_key))
 
 
   def test_open_ranging_with_same_session_id_nearby_share(self):
@@ -1502,7 +1499,7 @@ class RangingTest(uwb_base_test.UwbBaseTest):
     # Reboot responder and ensure peer is no longer seen in ranging reports
     def reboot_responder():
         self.responder.ad.reboot()
-        uwb_test_utils.initialize_uwb_country_code_if_not_set(self.responder.ad.adb)
+        uwb_test_utils.initialize_uwb_country_code_if_not_set(self.responder.ad)
 
     # create a thread to reboot the responder and not block the main test.
     thread = Thread(target=reboot_responder)
@@ -1520,7 +1517,7 @@ class RangingTest(uwb_base_test.UwbBaseTest):
     try:
         self.initiator.verify_callback_received("Stopped", timeout=60*2)
     except TimeoutError:
-       asserts.fail("Should receive ranging reports when the app is in foreground")
+       asserts.fail("Should receive ranging stop when peer is no longer present")
     # Ensure the responder is back after reboot.
     thread.join()
 
