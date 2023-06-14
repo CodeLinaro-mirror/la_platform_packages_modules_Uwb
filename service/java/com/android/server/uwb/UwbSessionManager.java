@@ -51,6 +51,7 @@ import android.os.Looper;
 import android.os.Message;
 import android.os.PersistableBundle;
 import android.os.RemoteException;
+import android.os.Trace;
 import android.util.Log;
 import android.util.Pair;
 import android.uwb.IUwbAdapter;
@@ -61,6 +62,7 @@ import android.uwb.UwbAddress;
 
 import androidx.annotation.VisibleForTesting;
 
+import com.android.modules.utils.build.SdkLevel;
 import com.android.server.uwb.advertisement.UwbAdvertiseManager;
 import com.android.server.uwb.correction.UwbFilterEngine;
 import com.android.server.uwb.correction.pose.ApplicationPoseSource;
@@ -73,6 +75,7 @@ import com.android.server.uwb.data.UwbTwoWayMeasurement;
 import com.android.server.uwb.data.UwbUciConstants;
 import com.android.server.uwb.jni.INativeUwbManager;
 import com.android.server.uwb.jni.NativeUwbManager;
+import com.android.server.uwb.params.TlvUtil;
 import com.android.server.uwb.proto.UwbStatsLog;
 import com.android.server.uwb.util.ArrayUtils;
 import com.android.server.uwb.util.DataTypeConversionUtil;
@@ -264,6 +267,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
 
     @Override
     public void onRangeDataNotificationReceived(UwbRangingData rangingData) {
+        Trace.beginSection("UWB#onRangeDataNotificationReceived");
         long sessionId = rangingData.getSessionId();
         UwbSession uwbSession = getUwbSession((int) sessionId);
         if (uwbSession != null) {
@@ -282,6 +286,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
         } else {
             Log.i(TAG, "Session is not initialized or Ranging Data is Null");
         }
+        Trace.endSection();
     }
 
     /* Notification of received data over UWB to Application*/
@@ -1224,6 +1229,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
         }
 
         private void handleOpenRanging(UwbSession uwbSession) {
+            Trace.beginSection("UWB#handleOpenRanging");
             // TODO(b/211445008): Consolidate to a single uwb thread.
             FutureTask<Integer> initSessionTask = new FutureTask<>(
                     () -> {
@@ -1285,9 +1291,11 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                 removeSession(uwbSession);
             }
             Log.i(TAG, "sessionInit() : finish - sessionId : " + uwbSession.getSessionId());
+            Trace.endSection();
         }
 
         private void handleStartRanging(UwbSession uwbSession) {
+            Trace.beginSection("UWB#handleStartRanging");
             // TODO(b/211445008): Consolidate to a single uwb thread.
             FutureTask<Integer> startRangingTask = new FutureTask<>(
                     () -> {
@@ -1357,9 +1365,11 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                 e.printStackTrace();
             }
             mUwbMetrics.longRangingStartEvent(uwbSession, status);
+            Trace.endSection();
         }
 
         private void handleStopRanging(UwbSession uwbSession, boolean triggeredBySystemPolicy) {
+            Trace.beginSection("UWB#handleStopRanging");
             // TODO(b/211445008): Consolidate to a single uwb thread.
             FutureTask<Integer> stopRangingTask = new FutureTask<>(
                     () -> {
@@ -1414,6 +1424,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
             // Reset all UWB session timers when the session is stopped.
             uwbSession.stopTimers();
             removeAdvertiserData(uwbSession);
+            Trace.endSection();
         }
 
         private void handleReconfigure(UwbSession uwbSession, @Nullable Params param,
@@ -1424,6 +1435,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                         uwbSession, UwbUciConstants.STATUS_CODE_INVALID_PARAM);
                 return;
             }
+            Trace.beginSection("UWB#handleReconfigure");
             FiraRangingReconfigureParams rangingReconfigureParams =
                     (FiraRangingReconfigureParams) param;
             // TODO(b/211445008): Consolidate to a single uwb thread.
@@ -1445,7 +1457,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                                 int dstAddressListSize = addrList.length;
                                 List<byte[]> dstAddressList = new ArrayList<>();
                                 for (UwbAddress address : addrList) {
-                                    dstAddressList.add(address.toBytes());
+                                    dstAddressList.add(getComputedMacAddress(address));
                                 }
                                 int[] subSessionIdList;
                                 if (!ArrayUtils.isEmpty(
@@ -1551,6 +1563,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                     mSessionNotificationManager.onRangingReconfigureFailed(uwbSession, status);
                 }
             }
+            Trace.endSection();
         }
 
         private boolean isMulticastActionAdd(Integer action) {
@@ -1560,6 +1573,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
         }
 
         private void handleDeInitWithReason(UwbSession uwbSession, int reason) {
+            Trace.beginSection("UWB#handleDeInitWithReason");
             // TODO(b/211445008): Consolidate to a single uwb thread.
             FutureTask<Integer> deInitTask = new FutureTask<>(
                     (Callable<Integer>) () -> {
@@ -1595,6 +1609,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
             uwbSession.stopTimers();
             removeSession(uwbSession);
             Log.i(TAG, "deinit finish : status :" + status);
+            Trace.endSection();
         }
 
         private void handleSendData(SendDataInfo sendDataInfo) {
@@ -2461,5 +2476,12 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                         .collect(Collectors.toList());
         pw.println("Non Privileged Fira Session Ids: " + nonPrivilegedSessionIds);
         pw.println("---- Dump of UwbSessionManager ----");
+    }
+
+    private static byte[] getComputedMacAddress(UwbAddress address) {
+        if (!SdkLevel.isAtLeastU()) {
+            return TlvUtil.getReverseBytes(address.toBytes());
+        }
+        return address.toBytes();
     }
 }
