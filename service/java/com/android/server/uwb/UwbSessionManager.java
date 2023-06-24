@@ -292,8 +292,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
     /* Notification of received data over UWB to Application*/
     @Override
     public void onDataReceived(
-            long sessionId, int status, long sequenceNum,
-            byte[] address, int sourceEndPoint, int destEndPoint, byte[] data) {
+            long sessionId, int status, long sequenceNum, byte[] address, byte[] data) {
         Log.d(TAG, "onDataReceived(): Received data packet - "
                 + "Address: " + UwbUtil.toHexString(address)
                 + ", Data: " + UwbUtil.toHexString(data)
@@ -334,8 +333,6 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
         info.status = status;
         info.sequenceNum = sequenceNum;
         info.address = longAddress;
-        info.sourceEndPoint = sourceEndPoint;
-        info.destEndPoint = destEndPoint;
         info.payload = data;
 
         uwbSession.addReceivedDataInfo(info);
@@ -400,8 +397,6 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
         public int status;
         public long sequenceNum;
         public long address;
-        public int sourceEndPoint;
-        public int destEndPoint;
         public byte[] payload;
     }
 
@@ -1667,15 +1662,14 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                     }
 
                     // Get the UCI sequence number for this data packet, and store it.
-                    byte sequenceNum = uwbSession.getAndIncrementDataSndSequenceNumber();
+                    short sequenceNum = uwbSession.getAndIncrementDataSndSequenceNumber();
                     uwbSession.addSendDataInfo(sequenceNum, sendDataInfo);
 
                     sendDataStatus = mNativeUwbManager.sendData(
                             uwbSession.getSessionId(),
                             DataTypeConversionUtil.convertShortMacAddressBytesToExtended(
                                     sendDataInfo.remoteDeviceAddress.toBytes()),
-                            UwbUciConstants.UWB_DESTINATION_END_POINT_HOST, sequenceNum,
-                            sendDataInfo.data, uwbSession.getChipId());
+                            sequenceNum, sendDataInfo.data, uwbSession.getChipId());
                     mUwbMetrics.logDataTx(uwbSession, sendDataStatus);
                     if (sendDataStatus != STATUS_CODE_OK) {
                         Log.e(TAG, "MSG_SESSION_SEND_DATA error status: " + sendDataStatus
@@ -1807,7 +1801,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
         private IPoseSource mPoseSource;
 
         // Store the UCI sequence number for the next Data packet (to be sent to UWBS).
-        private byte mDataSndSequenceNumber;
+        private short mDataSndSequenceNumber;
         // Store a Map<SequenceNumber, SendDataInfo>, for every Data packet (sent to UWBS). It's
         // used when the corresponding DataTransferStatusNtf is received (from UWBS).
         private final ConcurrentHashMap<Long, SendDataInfo> mSendDataInfoMap;
@@ -1998,7 +1992,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
         /**
          * Get (and increment) the UCI sequence number for the next Data packet to be sent to UWBS.
          */
-        public byte getAndIncrementDataSndSequenceNumber() {
+        public short getAndIncrementDataSndSequenceNumber() {
             return mDataSndSequenceNumber++;
         }
 

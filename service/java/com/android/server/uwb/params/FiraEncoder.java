@@ -137,7 +137,9 @@ public class FiraEncoder extends TlvEncoder {
                 tlvBufferBuilder.putLong(ConfigParam.UWB_INITIATION_TIME,
                         params.getInitiationTime());
             }
-            tlvBufferBuilder.putByte(ConfigParam.LINK_LAYER_MODE, (byte) params.getLinkLayerMode());
+            tlvBufferBuilder.putByte(ConfigParam.LINK_LAYER_MODE, (byte) params.getLinkLayerMode())
+                    .putByte(ConfigParam.APPLICATION_DATA_ENDPOINT,
+                            (byte) params.getApplicationDataEndpoint());
         } else {
             if (deviceRole != FiraParams.RANGING_DEVICE_DT_TAG) {
                 tlvBufferBuilder.putInt(ConfigParam.UWB_INITIATION_TIME,
