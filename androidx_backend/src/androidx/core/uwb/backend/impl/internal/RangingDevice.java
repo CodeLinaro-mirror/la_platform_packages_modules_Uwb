@@ -30,7 +30,6 @@ import static com.google.uwb.support.fira.FiraParams.RANGING_DEVICE_DT_TAG;
 
 import static java.util.Objects.requireNonNull;
 
-import android.annotation.WorkerThread;
 import android.os.PersistableBundle;
 import android.util.Log;
 import android.uwb.RangingMeasurement;
@@ -40,6 +39,7 @@ import android.uwb.UwbManager;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.WorkerThread;
 
 import com.google.common.hash.Hashing;
 import com.google.uwb.support.dltdoa.DlTDoARangingRoundsUpdate;
@@ -169,7 +169,10 @@ public abstract class RangingDevice {
                             rangingParameters.getComplexChannel(),
                             rangingParameters.getPeerAddresses(),
                             rangingParameters.getRangingUpdateRate(),
-                            rangingParameters.getUwbRangeDataNtfConfig());
+                            rangingParameters.getUwbRangeDataNtfConfig(),
+                            rangingParameters.getSlotDuration(),
+                            rangingParameters.getRangingInterval(),
+                            rangingParameters.isAoaDisabled());
         } else {
             mRangingParameters = rangingParameters;
         }
