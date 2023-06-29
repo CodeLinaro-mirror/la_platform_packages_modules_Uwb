@@ -715,6 +715,7 @@ public class UwbShellCommand extends BasicShellCommandHandler {
         CccStartRangingParams cccStartRangingParams = new CccStartRangingParams.Builder()
                 .setSessionId(cccOpenRangingParams.getSessionId())
                 .setRanMultiplier(cccOpenRangingParams.getRanMultiplier())
+                .setInitiationTimeMs(cccOpenRangingParams.getInitiationTimeMs())
                 .build();
         startRangingSession(
                 cccOpenRangingParams, cccStartRangingParams, cccOpenRangingParams.getSessionId(),
@@ -1064,7 +1065,7 @@ public class UwbShellCommand extends BasicShellCommandHandler {
                     return 0;
                 }
                 case "enable-diagnostics-notification": {
-                    int diagramFrameReportsFlags = 0;
+                    byte diagramFrameReportsFlags = 0;
                     String option = getNextOption();
                     while (option != null) {
                         if (option.equals("-r")) {
@@ -1082,7 +1083,7 @@ public class UwbShellCommand extends BasicShellCommandHandler {
                     return 0;
                 }
                 case "disable-diagnostics-notification": {
-                    mUwbServiceCore.enableDiagnostics(false, 0);
+                    mUwbServiceCore.enableDiagnostics(false, (byte) 0);
                     return 0;
                 }
                 case "take-bugreport": {
