@@ -23,13 +23,13 @@ import static androidx.core.uwb.backend.impl.internal.Utils.INVALID_API_CALL;
 import static androidx.core.uwb.backend.impl.internal.Utils.RANGING_ALREADY_STARTED;
 import static androidx.core.uwb.backend.impl.internal.Utils.STATUS_OK;
 import static androidx.core.uwb.backend.impl.internal.Utils.TAG;
+import static androidx.core.uwb.backend.impl.internal.Utils.UWB_RECONFIGURATION_FAILURE;
 import static androidx.core.uwb.backend.impl.internal.Utils.UWB_SYSTEM_CALLBACK_FAILURE;
 
 import static com.google.uwb.support.fira.FiraParams.RANGING_DEVICE_DT_TAG;
 
 import static java.util.Objects.requireNonNull;
 
-import android.annotation.WorkerThread;
 import android.os.PersistableBundle;
 import android.util.Log;
 import android.uwb.RangingMeasurement;
@@ -39,6 +39,7 @@ import android.uwb.UwbManager;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
+import androidx.annotation.WorkerThread;
 
 import com.google.common.hash.Hashing;
 import com.google.uwb.support.dltdoa.DlTDoARangingRoundsUpdate;
@@ -168,7 +169,10 @@ public abstract class RangingDevice {
                             rangingParameters.getComplexChannel(),
                             rangingParameters.getPeerAddresses(),
                             rangingParameters.getRangingUpdateRate(),
-                            rangingParameters.getUwbRangeDataNtfConfig());
+                            rangingParameters.getUwbRangeDataNtfConfig(),
+                            rangingParameters.getSlotDuration(),
+                            rangingParameters.getRangingInterval(),
+                            rangingParameters.isAoaDisabled());
         } else {
             mRangingParameters = rangingParameters;
         }
@@ -343,6 +347,7 @@ public abstract class RangingDevice {
                             () -> onRangingDataReceived(rangingReport, callback));
                 }
             }
+
             @WorkerThread
             @Override
             public void onRangingRoundsUpdateDtTagStatus(PersistableBundle params) {
@@ -432,17 +437,18 @@ public abstract class RangingDevice {
                     new DlTDoARangingRoundsUpdate.Builder()
                             .setSessionId(openSessionParams.getSessionId())
                             .setNoOfRangingRounds(1)
-                            .setRangingRoundIndexes(new byte[] {0})
+                            .setRangingRoundIndexes(new byte[]{0})
                             .build();
             success =
-                mOpAsyncCallbackRunner.execOperation(
-                    () -> mRangingSession.updateRangingRoundsDtTag(rangingRounds.toBundle()),
+                    mOpAsyncCallbackRunner.execOperation(
+                            () -> mRangingSession.updateRangingRoundsDtTag(
+                                    rangingRounds.toBundle()),
                             "Update ranging rounds for Dt Tag");
         }
 
         success =
-            mOpAsyncCallbackRunner.execOperation(
-                () -> mRangingSession.start(new PersistableBundle()), "Start ranging");
+                mOpAsyncCallbackRunner.execOperation(
+                        () -> mRangingSession.start(new PersistableBundle()), "Start ranging");
 
         result = mOpAsyncCallbackRunner.getResult();
         requireNonNull(mBackendCallbackExecutor);
@@ -498,6 +504,32 @@ public abstract class RangingDevice {
                         () -> mRangingSession.reconfigure(bundle), "Reconfigure Ranging");
         Boolean result = mOpAsyncCallbackRunner.getResult();
         return success && result != null && result;
+    }
+
+
+    /**
+     * Reconfigures range data notification for an ongoing session.
+     *
+     * @return STATUS_OK if reconfigure was successful.
+     * @return UWB_RECONFIGURATION_FAILURE if reconfigure failed.
+     * @return INVALID_API_CALL if ranging session is not active.
+     */
+    public synchronized int reconfigureRangeDataNtfConfig(UwbRangeDataNtfConfig config) {
+        if (!isAlive()) {
+            Log.w(TAG, "Attempt to set range data notification while session is not active.");
+            return INVALID_API_CALL;
+        }
+
+        boolean success =
+                reconfigureRanging(
+                        ConfigurationManager.createReconfigureParamsRangeDataNtf(
+                                config).toBundle());
+
+        if (!success) {
+            Log.w(TAG, "Reconfiguring range data notification config failed.");
+            return UWB_RECONFIGURATION_FAILURE;
+        }
+        return STATUS_OK;
     }
 
     /** Notifies that a ranging round failed. We collect this info for Analytics only. */

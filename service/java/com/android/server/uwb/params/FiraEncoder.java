@@ -137,6 +137,10 @@ public class FiraEncoder extends TlvEncoder {
                         params.getInitiationTime());
             }
             tlvBufferBuilder.putByte(ConfigParam.LINK_LAYER_MODE, (byte) params.getLinkLayerMode())
+                    .putByte(ConfigParam.DATA_REPETITION_COUNT,
+                            (byte) params.getDataRepetitionCount())
+                    .putByte(ConfigParam.SESSION_DATA_TRANSFER_STATUS_NTF_CONFIG,
+                            params.getSessionDataTransferStatusNtfConfig() ? (byte) 1 : (byte) 0)
                     .putByte(ConfigParam.APPLICATION_DATA_ENDPOINT,
                             (byte) params.getApplicationDataEndpoint());
         } else {
@@ -333,12 +337,18 @@ public class FiraEncoder extends TlvEncoder {
         // b2 : Ranging Control Phase
         rangingRoundControl |= (byte) (params.hasRangingControlPhase() ? 0x04 : 0x00);
 
+        // b6 : Measurement Report Message
+        if (params.getScheduledMode() == FiraParams.CONTENTION_BASED_RANGING) {
+            if (params.getMeasurementReportPhase() == FiraParams.MEASUREMENT_REPORT_PHASE_SET) {
+                rangingRoundControl |= (byte) 0x40;
+            }
+        }
+
         // b7 : Measurement Report Message
         if (params.getMeasurementReportType()
                 == FiraParams.MEASUREMENT_REPORT_TYPE_RESPONDER_TO_INITIATOR) {
-            rangingRoundControl |= 0x80;
+            rangingRoundControl |= (byte) 0x80;
         }
-
         return rangingRoundControl;
     }
 
