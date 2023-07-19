@@ -216,7 +216,7 @@ public final class Utils {
     )
     public @interface RangingInterval {}
 
-    public static final int FREQUENT_RANGING_INTERVAL = 100;
+    public static final int FREQUENT_RANGING_INTERVAL = 120;
     public static final int AUTOMATIC = 200;
     public static final int INFREQUENT_RANGING_INTERVAL = 600;
 
@@ -246,7 +246,7 @@ public final class Utils {
                 new RangingTimingParams(
                         /* rangingIntervalNormal= */ 240,
                         /* rangingIntervalFast= */ 240,
-                        /* rangingIntervalInfrequent= */ 4000,
+                        /* rangingIntervalInfrequent= */ 4800,
                         /* slotPerRangingRound= */ 6,
                         /* slotDurationRstu= */ 2400,
                         /* initiationTimeMs= */ 0,
@@ -279,7 +279,7 @@ public final class Utils {
                 new RangingTimingParams(
                         /* rangingIntervalNormal= */ 240,
                         /* rangingIntervalFast= */ 240,
-                        /* rangingIntervalInfrequent= */ 4000,
+                        /* rangingIntervalInfrequent= */ 4800,
                         /* slotPerRangingRound= */ 6,
                         /* slotDurationRstu= */ 2400,
                         /* initiationTimeMs= */ 0,
