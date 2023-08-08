@@ -68,6 +68,7 @@ import com.android.server.uwb.correction.UwbFilterEngine;
 import com.android.server.uwb.correction.pose.ApplicationPoseSource;
 import com.android.server.uwb.correction.pose.IPoseSource;
 import com.android.server.uwb.data.DtTagUpdateRangingRoundsStatus;
+import com.android.server.uwb.data.UwbDlTDoAMeasurement;
 import com.android.server.uwb.data.UwbMulticastListUpdateStatus;
 import com.android.server.uwb.data.UwbOwrAoaMeasurement;
 import com.android.server.uwb.data.UwbRangingData;
@@ -261,6 +262,13 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
             if (measure.getRangingStatus() == UwbUciConstants.STATUS_CODE_OK) {
                 return false;
             }
+        } else if (rangingData.getRangingMeasuresType()
+                == UwbUciConstants.RANGING_MEASUREMENT_TYPE_DL_TDOA) {
+            for (UwbDlTDoAMeasurement measure : rangingData.getUwbDlTDoAMeasurements()) {
+                if (measure.getStatus() == STATUS_CODE_OK) {
+                    return false;
+                }
+            }
         }
         return true;
     }
@@ -341,11 +349,12 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
     /* Notification of data send status */
     @Override
     public void onDataSendStatus(
-            long sessionId, int dataTransferStatus, long sequenceNum) {
+            long sessionId, int dataTransferStatus, long sequenceNum, int txCount) {
         Log.d(TAG, "onDataSendStatus(): Received data send status - "
                 + ", sessionId: " + sessionId
                 + ", status: " + dataTransferStatus
-                + ", sequenceNum: " + sequenceNum);
+                + ", sequenceNum: " + sequenceNum
+                + ", txCount: " + txCount);
 
         UwbSession uwbSession = getUwbSession((int) sessionId);
         if (uwbSession == null) {
@@ -370,12 +379,15 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
         } else {
             mSessionNotificationManager.onDataSendFailed(
                     uwbSession, sendDataInfo.remoteDeviceAddress, dataTransferStatus,
-                    sendDataInfo.params);
+                     sendDataInfo.params);
+            uwbSession.removeSendDataInfo(sequenceNum);
         }
-        // TODO(b/274711916): When Data Repetition during Data Packet Tx flow is implemented
-        // change here to remove the sendDataInfo only after all the copies of the packet have
-        // been sent.
-        uwbSession.removeSendDataInfo(sequenceNum);
+        // when transmission count equals to data repetition count, SendDataInfo will be removed for
+        // the particular sequence number
+        if (txCount >= (uwbSession.getDataRepetitionCount() + 1)
+                && dataTransferStatus == UwbUciConstants.STATUS_CODE_DATA_TRANSFER_OK) {
+            uwbSession.removeSendDataInfo(sequenceNum);
+        }
     }
 
     /** Updates pose information if the session is using an ApplicationPoseSource */
@@ -1801,6 +1813,8 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
         private final ConcurrentHashMap<Long, SortedMap<Long, ReceivedDataInfo>>
                 mReceivedDataInfoMap;
         private IPoseSource mPoseSource;
+        // Application data repetition count
+        private int mDataRepetitionCount;
 
         // Store the UCI sequence number for the next Data packet (to be sent to UWBS).
         private short mDataSndSequenceNumber;
@@ -1866,8 +1880,10 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                     mParams = firaParams.toBuilder().setSessionPriority(
                             mStackSessionPriority).build();
                 }
+                this.mDataRepetitionCount = firaParams.getDataRepetitionCount();
             } else {
                 this.mRangingRoundUsage = -1;
+                this.mDataRepetitionCount = 0;
             }
 
             this.mReceivedDataInfoMap = new ConcurrentHashMap<>();
@@ -2094,6 +2110,9 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
             return this.mParams;
         }
 
+        public int getDataRepetitionCount() {
+            return mDataRepetitionCount;
+        }
         public void updateCccParamsOnStart(CccStartRangingParams rangingStartParams) {
             // Need to update the RAN multiplier and initiation time
             // from the CccStartRangingParams for CCC session.

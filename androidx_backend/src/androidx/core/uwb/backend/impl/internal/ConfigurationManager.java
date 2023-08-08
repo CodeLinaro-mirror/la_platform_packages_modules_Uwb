@@ -29,11 +29,14 @@ import static androidx.core.uwb.backend.impl.internal.Utils.STATIC_STS_SESSION_K
 import static androidx.core.uwb.backend.impl.internal.Utils.VENDOR_ID_SIZE;
 import static androidx.core.uwb.backend.impl.internal.Utils.getRangingTimingParams;
 
+import static com.google.uwb.support.fira.FiraParams.AOA_RESULT_REQUEST_MODE_NO_AOA_REPORT;
 import static com.google.uwb.support.fira.FiraParams.HOPPING_MODE_FIRA_HOPPING_ENABLE;
 import static com.google.uwb.support.fira.FiraParams.MAC_ADDRESS_MODE_2_BYTES;
 import static com.google.uwb.support.fira.FiraParams.MULTI_NODE_MODE_ONE_TO_MANY;
 import static com.google.uwb.support.fira.FiraParams.MULTI_NODE_MODE_UNICAST;
 import static com.google.uwb.support.fira.FiraParams.PROTOCOL_VERSION_1_1;
+import static com.google.uwb.support.fira.FiraParams.RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_EDGE_TRIG;
+import static com.google.uwb.support.fira.FiraParams.RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_LEVEL_TRIG;
 import static com.google.uwb.support.fira.FiraParams.RANGING_DEVICE_DT_TAG;
 import static com.google.uwb.support.fira.FiraParams.RANGING_DEVICE_ROLE_INITIATOR;
 import static com.google.uwb.support.fira.FiraParams.RANGING_DEVICE_ROLE_RESPONDER;
@@ -160,7 +163,7 @@ public final class ConfigurationManager {
 
                     @Override
                     public int getAoaResultRequestMode() {
-                        return FiraParams.AOA_RESULT_REQUEST_MODE_NO_AOA_REPORT;
+                        return AOA_RESULT_REQUEST_MODE_NO_AOA_REPORT;
                     }
 
                     @Override
@@ -267,7 +270,7 @@ public final class ConfigurationManager {
 
                     @Override
                     public int getAoaResultRequestMode() {
-                        return FiraParams.AOA_RESULT_REQUEST_MODE_NO_AOA_REPORT;
+                        return AOA_RESULT_REQUEST_MODE_NO_AOA_REPORT;
                     }
 
                     @Override
@@ -375,7 +378,7 @@ public final class ConfigurationManager {
 
                     @Override
                     public int getAoaResultRequestMode() {
-                        return FiraParams.AOA_RESULT_REQUEST_MODE_NO_AOA_REPORT;
+                        return AOA_RESULT_REQUEST_MODE_NO_AOA_REPORT;
                     }
 
                     @Override
@@ -440,16 +443,17 @@ public final class ConfigurationManager {
                         .setSessionId(rangingParameters.getSessionId())
                         .setDeviceAddress(Conversions.convertUwbAddress(localAddress,
                                 featureFlags.isReversedByteOrderFiraParams()))
-                        .setAoaResultRequest(configuration.getAoaResultRequestMode())
+                        .setAoaResultRequest(rangingParameters.isAoaDisabled()
+                                ? AOA_RESULT_REQUEST_MODE_NO_AOA_REPORT :
+                                configuration.getAoaResultRequestMode())
                         .setChannelNumber(rangingParameters.getComplexChannel().getChannel())
                         .setPreambleCodeIndex(
                                 rangingParameters.getComplexChannel().getPreambleIndex())
                         .setInitiationTime(timingParams.getInitiationTimeMs())
-                        .setSlotDurationRstu(timingParams.getSlotDurationRstu())
+                        .setSlotDurationRstu(
+                                Utils.convertMsToRstu(rangingParameters.getSlotDuration()))
                         .setSlotsPerRangingRound(timingParams.getSlotPerRangingRound())
-                        .setRangingIntervalMs(
-                                timingParams.getRangingInterval(
-                                        rangingParameters.getRangingUpdateRate()))
+                        .setRangingIntervalMs(rangingParameters.getRangingInterval())
                         .setRangeDataNtfConfig(
                                 Utils.convertToFiraNtfConfig(
                                         rangingParameters
@@ -524,6 +528,31 @@ public final class ConfigurationManager {
         if (configuration.getStsConfig()
                 == FiraParams.STS_CONFIG_DYNAMIC_FOR_CONTROLEE_INDIVIDUAL_KEY) {
             builder.setSubSessionIdList(subSessionIdList).setSubSessionKeyList(subSessionKey);
+        }
+        return builder.build();
+    }
+
+    /** Creates a {@link FiraRangingReconfigureParams} with block striding set. */
+    public static FiraRangingReconfigureParams createReconfigureParamsBlockStriding(
+            int blockStridingLength) {
+        return new FiraRangingReconfigureParams.Builder()
+                .setBlockStrideLength(blockStridingLength)
+                .build();
+    }
+
+    /** Creates a {@link FiraRangingReconfigureParams} with range data notification configured. */
+    public static FiraRangingReconfigureParams createReconfigureParamsRangeDataNtf(
+            UwbRangeDataNtfConfig rangeDataNtfConfig) {
+        int configType = Utils.convertToFiraNtfConfig(
+                rangeDataNtfConfig.getRangeDataNtfConfigType());
+        FiraRangingReconfigureParams.Builder builder =
+                new FiraRangingReconfigureParams.Builder().setRangeDataNtfConfig(configType);
+
+        if (configType == RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_LEVEL_TRIG
+                || configType == RANGE_DATA_NTF_CONFIG_ENABLE_PROXIMITY_EDGE_TRIG) {
+            builder
+                    .setRangeDataProximityNear(rangeDataNtfConfig.getNtfProximityNear())
+                    .setRangeDataProximityFar(rangeDataNtfConfig.getNtfProximityFar());
         }
         return builder.build();
     }
