@@ -24,6 +24,7 @@ import com.android.server.uwb.UwbInjector;
 import com.android.server.uwb.data.DtTagUpdateRangingRoundsStatus;
 import com.android.server.uwb.data.UwbConfigStatusData;
 import com.android.server.uwb.data.UwbMulticastListUpdateStatus;
+import com.android.server.uwb.data.UwbRadarData;
 import com.android.server.uwb.data.UwbRangingData;
 import com.android.server.uwb.data.UwbTlvData;
 import com.android.server.uwb.data.UwbUciConstants;
@@ -104,6 +105,14 @@ public class NativeUwbManager {
             UwbMulticastListUpdateStatus multicastListUpdateData) {
         Log.d(TAG, "onMulticastListUpdateNotificationReceived : " + multicastListUpdateData);
         mSessionListener.onMulticastListUpdateNotificationReceived(multicastListUpdateData);
+    }
+
+    /**
+     * Radar data message callback invoked via the JNI
+     */
+    public void onRadarDataMessageReceived(UwbRadarData radarData) {
+        Log.d(TAG, "onRadarDataMessageReceived : " + radarData);
+        mSessionListener.onRadarDataMessageReceived(radarData);
     }
 
     /**
@@ -264,7 +273,7 @@ public class NativeUwbManager {
     }
 
     /**
-     * set APP Configuration Parameters for the requested UWB session
+     * Set APP Configuration Parameters for the requested UWB session
      *
      * @param noOfParams        : The number (n) of APP Configuration Parameters
      * @param appConfigParamLen : The length of APP Configuration Parameters
@@ -276,6 +285,23 @@ public class NativeUwbManager {
             int appConfigParamLen, byte[] appConfigParams, String chipId) {
         synchronized (mNativeLock) {
             return nativeSetAppConfigurations(sessionId, noOfParams, appConfigParamLen,
+                    appConfigParams, chipId);
+        }
+    }
+
+    /**
+     * Set radar APP Configuration Parameters for the requested UWB radar session
+     *
+     * @param noOfParams        : The number (n) of APP Configuration Parameters
+     * @param appConfigParamLen : The length of APP Configuration Parameters
+     * @param appConfigParams   : APP Configuration Parameter
+     * @param chipId            : Identifier of UWB chip for multi-HAL devices
+     * @return : {@link UwbConfigStatusData} : Contains statuses for all cfg_id
+     */
+    public UwbConfigStatusData setRadarAppConfigurations(int sessionId, int noOfParams,
+            int appConfigParamLen, byte[] appConfigParams, String chipId) {
+        synchronized (mNativeLock) {
+            return nativeSetRadarAppConfigurations(sessionId, noOfParams, appConfigParamLen,
                     appConfigParams, chipId);
         }
     }
@@ -455,6 +481,25 @@ public class NativeUwbManager {
         }
     }
 
+    /**
+     * Sets the Hybrid UWB Session Configuration
+     *
+     * @param sessionId : Primary session ID
+     * @param numberOfPhases : Number of secondary sessions
+     * @param updateTime : Absolute time in UWBS Time domain
+     * @param phaseList : list of secondary sessions which have been previously initialized and
+     *                  configured
+     * @param chipId : Identifier of UWB chip for multi-HAL devices
+     * @return Byte representing the status of the operation
+     */
+    public byte setHybridSessionConfiguration(int sessionId, int numberOfPhases, byte[] updateTime,
+            byte[] phaseList, String chipId) {
+        synchronized (mNativeLock) {
+            return nativeSetHybridSessionConfigurations(sessionId, numberOfPhases, updateTime,
+                phaseList, chipId);
+        }
+    }
+
     private native byte nativeSendData(int sessionId, byte[] address,
             short sequenceNum, byte[] appData, String chipId);
 
@@ -492,6 +537,9 @@ public class NativeUwbManager {
     private native UwbTlvData nativeGetAppConfigurations(int sessionId, int noOfParams,
             int appConfigParamLen, byte[] appConfigParams, String chipId);
 
+    private native UwbConfigStatusData nativeSetRadarAppConfigurations(int sessionId,
+            int noOfParams, int appConfigParamLen, byte[] appConfigParams, String chipId);
+
     private native UwbTlvData nativeGetCapsInfo(String chipId);
 
     private native byte nativeControllerMulticastListUpdate(int sessionId, byte action,
@@ -513,4 +561,7 @@ public class NativeUwbManager {
     private native long nativeQueryUwbTimestamp(String chipId);
 
     private native int nativeGetSessionToken(int sessionId, String chipId);
+
+    private native byte nativeSetHybridSessionConfigurations(int sessionId, int noOfPhases,
+            byte[] updateTime, byte[] phaseList, String chipId);
 }

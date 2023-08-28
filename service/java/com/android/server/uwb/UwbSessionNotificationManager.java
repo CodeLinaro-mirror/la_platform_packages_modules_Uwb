@@ -33,6 +33,8 @@ import com.android.modules.utils.build.SdkLevel;
 import com.android.server.uwb.UwbSessionManager.UwbSession;
 import com.android.server.uwb.data.UwbDlTDoAMeasurement;
 import com.android.server.uwb.data.UwbOwrAoaMeasurement;
+import com.android.server.uwb.data.UwbRadarData;
+import com.android.server.uwb.data.UwbRadarSweepData;
 import com.android.server.uwb.data.UwbRangingData;
 import com.android.server.uwb.data.UwbTwoWayMeasurement;
 import com.android.server.uwb.data.UwbUciConstants;
@@ -46,6 +48,9 @@ import com.google.uwb.support.dltdoa.DlTDoAMeasurement;
 import com.google.uwb.support.fira.FiraOpenSessionParams;
 import com.google.uwb.support.fira.FiraParams;
 import com.google.uwb.support.oemextension.RangingReportMetadata;
+import com.google.uwb.support.radar.RadarData;
+import com.google.uwb.support.radar.RadarParams;
+import com.google.uwb.support.radar.RadarSweepData;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -303,6 +308,62 @@ public class UwbSessionNotificationManager {
         }
     }
 
+    public void onRangingPaused(UwbSession uwbSession) {
+        SessionHandle sessionHandle = uwbSession.getSessionHandle();
+        IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
+        try {
+            uwbRangingCallbacks.onRangingPaused(sessionHandle, new PersistableBundle());
+            Log.i(TAG, "IUwbRangingCallbacks - onRangingPaused");
+        } catch (Exception e) {
+            Log.e(TAG, "IUwbRangingCallbacks - onRangingPaused: Failed");
+            e.printStackTrace();
+        }
+    }
+
+    public void onRangingPauseFailed(UwbSession uwbSession, int status) {
+        SessionHandle sessionHandle = uwbSession.getSessionHandle();
+        IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
+        try {
+            uwbRangingCallbacks.onRangingPauseFailed(sessionHandle,
+                    UwbSessionNotificationHelper.convertUciStatusToApiReasonCode(
+                            status),
+                    UwbSessionNotificationHelper.convertUciStatusToParam(
+                            uwbSession.getProtocolName(), status));
+            Log.i(TAG, "IUwbRangingCallbacks - onRangingPauseFailed");
+        } catch (Exception e) {
+            Log.e(TAG, "IUwbRangingCallbacks - onRangingPauseFailed : Failed");
+            e.printStackTrace();
+        }
+    }
+
+    public void onRangingResumed(UwbSession uwbSession) {
+        SessionHandle sessionHandle = uwbSession.getSessionHandle();
+        IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
+        try {
+            uwbRangingCallbacks.onRangingResumed(sessionHandle, new PersistableBundle());
+            Log.i(TAG, "IUwbRangingCallbacks - onRangingResumed");
+        } catch (Exception e) {
+            Log.e(TAG, "IUwbRangingCallbacks - onRangingResumed: Failed");
+            e.printStackTrace();
+        }
+    }
+
+    public void onRangingResumeFailed(UwbSession uwbSession, int status) {
+        SessionHandle sessionHandle = uwbSession.getSessionHandle();
+        IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
+        try {
+            uwbRangingCallbacks.onRangingResumeFailed(sessionHandle,
+                    UwbSessionNotificationHelper.convertUciStatusToApiReasonCode(
+                            status),
+                    UwbSessionNotificationHelper.convertUciStatusToParam(
+                            uwbSession.getProtocolName(), status));
+            Log.i(TAG, "IUwbRangingCallbacks - onRangingResumeFailed");
+        } catch (Exception e) {
+            Log.e(TAG, "IUwbRangingCallbacks - onRangingResumeFailed : Failed");
+            e.printStackTrace();
+        }
+    }
+
     public void onRangingClosed(UwbSession uwbSession, int status) {
         SessionHandle sessionHandle = uwbSession.getSessionHandle();
         IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
@@ -408,6 +469,55 @@ public class UwbSessionNotificationManager {
             Log.e(TAG, "IUwbRangingCallbacks - onRangingRoundsUpdateDtTagStatus : Failed");
             e.printStackTrace();
         }
+    }
+
+    /** Notify about new radar data message. */
+    public void onRadarDataMessageReceived(UwbSession uwbSession, UwbRadarData radarData) {
+        SessionHandle sessionHandle = uwbSession.getSessionHandle();
+        IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
+        boolean permissionGranted =
+                mUwbInjector.checkUwbRangingPermissionForDataDelivery(
+                        uwbSession.getAttributionSource(), "uwb radar data");
+        if (!permissionGranted) {
+            Log.e(
+                    TAG,
+                    "Not delivering uwb radar data because of permission denial" + sessionHandle);
+            return;
+        }
+        PersistableBundle radarDataBundle = getRadarData(radarData).toBundle();
+        try {
+            // TODO: Add radar specific @SystemApi
+            // Temporary workaround to avoid adding a new @SystemApi for the short-term.
+            uwbRangingCallbacks.onDataReceived(
+                    sessionHandle, null, radarDataBundle, new byte[] {});
+            Log.i(TAG, "IUwbRangingCallbacks - onDataReceived with radar data");
+        } catch (Exception e) {
+            Log.e(TAG, "IUwbRangingCallbacks - onDataReceived with radar data: Failed");
+            e.printStackTrace();
+        }
+    }
+
+    /** Helper function to convert UwbRadarData to RadarData. */
+    private static RadarData getRadarData(@NonNull UwbRadarData radarData) {
+        RadarData.Builder radarDataBuilder =
+                new RadarData.Builder()
+                        .setStatusCode(radarData.statusCode)
+                        .setRadarDataType(radarData.radarDataType)
+                        .setSamplesPerSweep(radarData.samplesPerSweep)
+                        .setBitsPerSample(radarData.bitsPerSample)
+                        .setSweepOffset(radarData.sweepOffset);
+        if (radarData.radarDataType == RadarParams.RADAR_DATA_TYPE_RADAR_SWEEP_SAMPLES) {
+            for (UwbRadarSweepData sweepData : radarData.radarSweepData) {
+                radarDataBuilder.addSweepData(
+                        new RadarSweepData.Builder()
+                                .setSequenceNumber(sweepData.sequenceNumber)
+                                .setTimestamp(sweepData.timestamp)
+                                .setVendorSpecificData(sweepData.vendorSpecificData)
+                                .setSampleData(sweepData.sampleData)
+                                .build());
+            }
+        }
+        return radarDataBuilder.build();
     }
 
     private static RangingReport getRangingReport(
