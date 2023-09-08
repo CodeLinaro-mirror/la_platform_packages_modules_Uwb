@@ -127,6 +127,7 @@ public class UwbServiceCore implements INativeUwbManager.DeviceNotification,
     private IUwbOemExtensionCallback mOemExtensionCallback = null;
     private final Handler mHandler;
     private GenericSpecificationParams mCachedSpecificationParams;
+    private boolean mNeedCachedSpecParamsUpdate = true;
     private final Set<InitializationFailureListener> mListeners = new ArraySet<>();
 
     public UwbServiceCore(Context uwbApplicationContext, NativeUwbManager nativeUwbManager,
@@ -274,8 +275,8 @@ public class UwbServiceCore implements INativeUwbManager.DeviceNotification,
         Log.i(TAG, "updateDeviceState(): deviceState = " + getDeviceStateString(deviceState)
                 + ", current internal adapter state = " + getInternalAdapterState());
 
-        oemExtensionDeviceStatusUpdate(deviceState, chipId);
         updateState(getAdapterStateFromDeviceState(deviceState), chipId);
+        oemExtensionDeviceStatusUpdate(deviceState, chipId);
     }
 
     void oemExtensionDeviceStatusUpdate(int deviceState, String chipId) {
@@ -371,7 +372,7 @@ public class UwbServiceCore implements INativeUwbManager.DeviceNotification,
                 countryCode,
                 Optional.empty());
         Log.d(TAG, "Resetting cached specifications");
-        mCachedSpecificationParams = null;
+        mNeedCachedSpecParamsUpdate = true;
     }
 
     public void registerAdapterStateCallbacks(IUwbAdapterStateCallbacks adapterStateCallbacks)
@@ -421,9 +422,12 @@ public class UwbServiceCore implements INativeUwbManager.DeviceNotification,
      * Get cached specification params
      */
     public GenericSpecificationParams getCachedSpecificationParams(String chipId) {
-        if (mCachedSpecificationParams != null) return mCachedSpecificationParams;
+        if (mCachedSpecificationParams != null && !mNeedCachedSpecParamsUpdate) {
+            return mCachedSpecificationParams;
+        }
         // If nothing in cache, populate it.
         getSpecificationInfo(chipId);
+        mNeedCachedSpecParamsUpdate = false;
         return mCachedSpecificationParams;
     }
 
@@ -907,7 +911,14 @@ public class UwbServiceCore implements INativeUwbManager.DeviceNotification,
                     if (!mNativeUwbManager.doInitialize()) {
                         Log.e(TAG, "Error enabling UWB");
                         mUwbMetrics.incrementDeviceInitFailureCount();
-                        takBugReportAfterDeviceError("UWB Bugreport: error enabling UWB");
+
+                        // Capture a bug report only if the Listener list is empty. This acts as a
+                        // proxy for this being the second initialization attempt, since currently
+                        // there is only one listener (UwbServiceImpl), which is removed after the
+                        // first retry attempt.
+                        if (mListeners.isEmpty()) {
+                            takBugReportAfterDeviceError("UWB Bugreport: error enabling UWB");
+                        }
                         for (String chipId : mUwbInjector.getMultichipData().getChipIds()) {
                             updateState(AdapterStateCallback.STATE_DISABLED, chipId);
                         }
