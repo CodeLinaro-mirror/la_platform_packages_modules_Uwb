@@ -29,8 +29,8 @@ import static com.google.uwb.support.ccc.CccParams.UWB_CONFIG_0;
 import static org.mockito.Mockito.when;
 
 import android.platform.test.annotations.Presubmit;
-import android.test.suitebuilder.annotation.SmallTest;
 
+import androidx.test.filters.SmallTest;
 import androidx.test.runner.AndroidJUnit4;
 
 import com.android.server.uwb.DeviceConfigFacade;
@@ -89,12 +89,30 @@ public class CccDecoderTest {
                     + "a90401000000"
                     + "aa020509";
 
+    private static final String TEST_CCC_SPECIFICATION_TLV_DATA_STRING_UWBS_MAX_PPM =
+            "a00111"
+                    + "a10400000082"
+                    + "a20168"
+                    + "a30103"
+                    + "a4020102"
+                    + "a50100"
+                    + "a60112"
+                    + "a7040a000000"
+                    + "a80401000000"
+                    + "a90401000000"
+                    + "ab02012f";
+
     private static final byte[] TEST_CCC_SPECIFICATION_TLV_DATA =
             UwbUtil.getByteArray(TEST_CCC_SPECIFICATION_TLV_DATA_STRING);
 
     private static final byte[] TEST_CCC_SPECIFICATION_TLV_DATA_PRIORITIZED_CHANNELS =
             UwbUtil.getByteArray(TEST_CCC_SPECIFICATION_TLV_DATA_STRING_PRIORITIZED_CHANNELS);
+    private static final byte[] TEST_CCC_SPECIFICATION_TLV_DATA_UWBS_MAX_PPM =
+            UwbUtil.getByteArray(TEST_CCC_SPECIFICATION_TLV_DATA_STRING_UWBS_MAX_PPM);
+
     public static final int TEST_CCC_SPECIFICATION_TLV_NUM_PARAMS = 10;
+    public static final int TEST_CCC_SPECIFICATION_TLV_DATA_UWBS_MAX_PPM_NUM_PARAMS = 11;
+
     @Mock
     private UwbInjector mUwbInjector;
     @Mock
@@ -199,6 +217,19 @@ public class CccDecoderTest {
                 new TlvDecoderBuffer(
                         TEST_CCC_SPECIFICATION_TLV_DATA_PRIORITIZED_CHANNELS,
                         TEST_CCC_SPECIFICATION_TLV_NUM_PARAMS);
+        assertThat(tlvDecoderBuffer.parse()).isTrue();
+
+        CccSpecificationParams cccSpecificationParams = mCccDecoder.getParams(
+                tlvDecoderBuffer, CccSpecificationParams.class, CccParams.PROTOCOL_VERSION_1_0);
+        verifyCccSpecification(cccSpecificationParams);
+    }
+
+    @Test
+    public void testGetCccSpecificationWithUwbsMaxPPM() throws Exception {
+        TlvDecoderBuffer tlvDecoderBuffer =
+                new TlvDecoderBuffer(
+                        TEST_CCC_SPECIFICATION_TLV_DATA_UWBS_MAX_PPM,
+                        TEST_CCC_SPECIFICATION_TLV_DATA_UWBS_MAX_PPM_NUM_PARAMS);
         assertThat(tlvDecoderBuffer.parse()).isTrue();
 
         CccSpecificationParams cccSpecificationParams = mCccDecoder.getParams(
