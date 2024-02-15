@@ -452,6 +452,9 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                 && state == UwbUciConstants.UWB_SESSION_STATE_IDLE
                 && reasonCode != REASON_STATE_CHANGE_WITH_SESSION_MANAGEMENT_COMMANDS)) {
             Log.d(TAG, "Session status NTF is received due to in-band session state change");
+            synchronized (uwbSession.getWaitObj()) {
+                uwbSession.getWaitObj().blockingNotify();
+            }
         } else {
             synchronized (uwbSession.getWaitObj()) {
                 uwbSession.getWaitObj().blockingNotify();
