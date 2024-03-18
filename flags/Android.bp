@@ -15,12 +15,14 @@
 //
 
 package {
+    default_team: "trendy_team_fwk_uwb",
     default_applicable_licenses: ["Android-Apache-2.0"],
 }
 
 aconfig_declarations {
     name: "uwb_aconfig_flags",
     package: "com.android.uwb.flags",
+    container: "com.android.uwb",
     srcs: ["uwb_flags.aconfig"],
 }
 

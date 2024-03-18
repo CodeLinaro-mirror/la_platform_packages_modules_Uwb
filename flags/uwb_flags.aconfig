@@ -1,4 +1,5 @@
 package: "com.android.uwb.flags"
+container: "com.android.uwb"
 
 flag {
     name: "query_timestamp_micros"
@@ -47,4 +48,11 @@ flag {
     namespace: "uwb"
     description: "Implement CR-423: Remove Interval-based scheduling for Fira 2.0+ devices"
     bug: "285984664"
+}
+
+flag {
+    name: "hw_state"
+    namespace: "uwb"
+    description: "This flag enables the new hardware state APIs"
+    bug: "322372275"
 }

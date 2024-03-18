@@ -94,6 +94,12 @@ import com.android.server.uwb.multichip.MultichipConfigFileCreator;
 import com.android.server.uwb.pm.ProfileManager;
 import com.android.uwb.resources.R;
 
+import com.google.uwb.support.aliro.AliroOpenRangingParams;
+import com.google.uwb.support.aliro.AliroParams;
+import com.google.uwb.support.aliro.AliroProtocolVersion;
+import com.google.uwb.support.aliro.AliroPulseShapeCombo;
+import com.google.uwb.support.aliro.AliroSpecificationParams;
+import com.google.uwb.support.aliro.AliroStartRangingParams;
 import com.google.uwb.support.ccc.CccOpenRangingParams;
 import com.google.uwb.support.ccc.CccParams;
 import com.google.uwb.support.ccc.CccProtocolVersion;
@@ -168,6 +174,24 @@ public class UwbServiceCoreTest {
                     .setRangingRoundUsage(RANGING_ROUND_USAGE_SS_TWR_DEFERRED_MODE)
                     .setVendorId(new byte[]{0x5, 0x78})
                     .setStaticStsIV(new byte[]{0x1a, 0x55, 0x77, 0x47, 0x7e, 0x7d});
+    @VisibleForTesting
+    private static final AliroOpenRangingParams.Builder TEST_ALIRO_OPEN_RANGING_PARAMS =
+            new AliroOpenRangingParams.Builder()
+                    .setProtocolVersion(AliroParams.PROTOCOL_VERSION_1_0)
+                    .setUwbConfig(AliroParams.UWB_CONFIG_0)
+                    .setPulseShapeCombo(
+                            new AliroPulseShapeCombo(
+                                    PULSE_SHAPE_SYMMETRICAL_ROOT_RAISED_COSINE,
+                                    PULSE_SHAPE_SYMMETRICAL_ROOT_RAISED_COSINE))
+                    .setSessionId(1)
+                    .setRanMultiplier(4)
+                    .setChannel(AliroParams.UWB_CHANNEL_9)
+                    .setNumChapsPerSlot(AliroParams.CHAPS_PER_SLOT_3)
+                    .setNumResponderNodes(1)
+                    .setNumSlotsPerRound(AliroParams.SLOTS_PER_ROUND_6)
+                    .setSyncCodeIndex(1)
+                    .setHoppingConfigMode(AliroParams.HOPPING_CONFIG_MODE_NONE)
+                    .setHoppingSequence(AliroParams.HOPPING_SEQUENCE_DEFAULT);
     @VisibleForTesting
     private static final CccOpenRangingParams.Builder TEST_CCC_OPEN_RANGING_PARAMS =
             new CccOpenRangingParams.Builder()
@@ -247,6 +271,7 @@ public class UwbServiceCoreTest {
         when(mUwbInjector.getMultichipData()).thenReturn(uwbMultichipData);
         when(mDeviceConfigFacade.getBugReportMinIntervalMs())
                 .thenReturn(DeviceConfigFacade.DEFAULT_BUG_REPORT_MIN_INTERVAL_MS);
+        when(mDeviceConfigFacade.isHwIdleTurnOffEnabled()).thenReturn(false);
         when(mUwbInjector.getProfileManager()).thenReturn(mProfileManager);
         doAnswer(invocation -> {
             FutureTask t = invocation.getArgument(0);
@@ -433,6 +458,7 @@ public class UwbServiceCoreTest {
         mTestLooper.dispatchAll();
 
         verify(mNativeUwbManager).doInitialize();
+        verify(mUwbMetrics).logUwbStateChangeEvent(true, false, false);
         assertThat(mUwbServiceCore.getAdapterState()).isEqualTo(AdapterState.STATE_DISABLED);
         verify(initFailCb).onFailure();
         verify(mDeviceConfigFacade, never()).isDeviceErrorBugreportEnabled();
@@ -477,6 +503,7 @@ public class UwbServiceCoreTest {
         enableUwb(null);
 
         verify(mNativeUwbManager).doInitialize();
+        verify(mUwbMetrics).logUwbStateChangeEvent(true, true, false);
         verify(mUwbCountryCode).setCountryCode(true);
         verify(cb).onAdapterStateChanged(UwbManager.AdapterStateCallback.STATE_DISABLED,
                 StateChangeReason.SYSTEM_REGULATION);
@@ -530,6 +557,7 @@ public class UwbServiceCoreTest {
         // Verify that UWB adapter state is notified as DISABLED, and future calls to
         // getAdapterState() also return the state as DISABLED.
         verify(mNativeUwbManager).doInitialize();
+        verify(mUwbMetrics).logUwbStateChangeEvent(true, true, false);
         verify(mUwbCountryCode).setCountryCode(true);
         verify(cb).onAdapterStateChanged(UwbManager.AdapterStateCallback.STATE_DISABLED,
                 StateChangeReason.SYSTEM_REGULATION);
@@ -733,6 +761,7 @@ public class UwbServiceCoreTest {
         enableUwbWithCountryCodeChangedCallback();
 
         verify(mNativeUwbManager).doInitialize();
+        verify(mUwbMetrics).logUwbStateChangeEvent(true, true, false);
         verify(cb).onAdapterStateChanged(UwbManager.AdapterStateCallback.STATE_ENABLED_INACTIVE,
                 StateChangeReason.SYSTEM_POLICY);
         verifyNoMoreInteractions(cb);
@@ -745,6 +774,7 @@ public class UwbServiceCoreTest {
         disableUwb();
 
         verify(mNativeUwbManager).doDeinitialize();
+        verify(mUwbMetrics).logUwbStateChangeEvent(false, true, false);
         verify(cb).onAdapterStateChanged(UwbManager.AdapterStateCallback.STATE_DISABLED,
                 StateChangeReason.SYSTEM_POLICY);
         assertThat(mUwbServiceCore.getAdapterState()).isEqualTo(AdapterState.STATE_DISABLED);
@@ -1075,6 +1105,25 @@ public class UwbServiceCoreTest {
     }
 
     @Test
+    public void testOpenAliroRanging() throws Exception {
+        enableUwbWithCountryCodeChangedCallback();
+
+        SessionHandle sessionHandle = mock(SessionHandle.class);
+        IUwbRangingCallbacks cb = mock(IUwbRangingCallbacks.class);
+        AliroOpenRangingParams params = TEST_ALIRO_OPEN_RANGING_PARAMS.build();
+        AttributionSource attributionSource = TEST_ATTRIBUTION_SOURCE;
+        mUwbServiceCore.openRanging(
+                attributionSource, sessionHandle, cb, params.toBundle(), TEST_DEFAULT_CHIP_ID);
+
+        verify(mUwbSessionManager).initSession(
+                eq(attributionSource),
+                eq(sessionHandle), eq(params.getSessionId()), eq((byte) params.getSessionType()),
+                eq(AliroParams.PROTOCOL_NAME),
+                argThat(p -> ((AliroOpenRangingParams) p).getSessionId() == params.getSessionId()),
+                eq(cb), eq(TEST_DEFAULT_CHIP_ID));
+    }
+
+    @Test
     public void testOpenCccRanging() throws Exception {
         enableUwbWithCountryCodeChangedCallback();
 
@@ -1113,7 +1162,29 @@ public class UwbServiceCoreTest {
     }
 
     @Test
-    public void testOpenRangingWhenUwbDisabled() throws Exception {
+    public void testOpenAliroRangingWhenUwbDisabled() throws Exception {
+        SessionHandle sessionHandle = mock(SessionHandle.class);
+        IUwbRangingCallbacks cb = mock(IUwbRangingCallbacks.class);
+        AliroOpenRangingParams params = TEST_ALIRO_OPEN_RANGING_PARAMS.build();
+        AttributionSource attributionSource = TEST_ATTRIBUTION_SOURCE;
+
+        try {
+            mUwbServiceCore.openRanging(attributionSource,
+                    sessionHandle,
+                    cb,
+                    params.toBundle(),
+                    TEST_DEFAULT_CHIP_ID);
+            fail();
+        } catch (IllegalStateException e) {
+            // pass
+        }
+
+        // Should be ignored.
+        verifyNoMoreInteractions(mUwbSessionManager);
+    }
+
+    @Test
+    public void testOpenCccRangingWhenUwbDisabled() throws Exception {
         SessionHandle sessionHandle = mock(SessionHandle.class);
         IUwbRangingCallbacks cb = mock(IUwbRangingCallbacks.class);
         CccOpenRangingParams params = TEST_CCC_OPEN_RANGING_PARAMS.build();
@@ -1135,6 +1206,22 @@ public class UwbServiceCoreTest {
     }
 
     @Test
+    public void testStartAliroRanging() throws Exception {
+        enableUwbWithCountryCodeChangedCallback();
+
+        SessionHandle sessionHandle = mock(SessionHandle.class);
+        AliroStartRangingParams params = new AliroStartRangingParams.Builder()
+                .setRanMultiplier(6)
+                .setSessionId(1)
+                .build();
+        mUwbServiceCore.startRanging(sessionHandle, params.toBundle());
+
+        verify(mUwbSessionManager).startRanging(eq(sessionHandle),
+                argThat(p ->
+                        ((AliroStartRangingParams) p).getSessionId() == params.getSessionId()));
+    }
+
+    @Test
     public void testStartCccRanging() throws Exception {
         enableUwbWithCountryCodeChangedCallback();
 
@@ -1147,6 +1234,16 @@ public class UwbServiceCoreTest {
 
         verify(mUwbSessionManager).startRanging(eq(sessionHandle),
                 argThat(p -> ((CccStartRangingParams) p).getSessionId() == params.getSessionId()));
+    }
+
+    @Test
+    public void testStartAliroRangingWithNoStartParams() throws Exception {
+        enableUwbWithCountryCodeChangedCallback();
+
+        SessionHandle sessionHandle = mock(SessionHandle.class);
+        mUwbServiceCore.startRanging(sessionHandle, new PersistableBundle());
+
+        verify(mUwbSessionManager).startRanging(eq(sessionHandle), argThat(p -> (p == null)));
     }
 
     @Test
@@ -1193,7 +1290,7 @@ public class UwbServiceCoreTest {
     }
 
     @Test
-    public void testPauseRanging_incorrectParams() throws Exception {
+    public void testPauseRanging_incorrectProtocolInParams() throws Exception {
         enableUwbWithCountryCodeChangedCallback();
 
         SessionHandle sessionHandle = mock(SessionHandle.class);
@@ -1201,6 +1298,10 @@ public class UwbServiceCoreTest {
                 IllegalStateException.class,
                 () -> mUwbServiceCore.pause(
                         sessionHandle, TEST_CCC_OPEN_RANGING_PARAMS.build().toBundle()));
+        assertThrows(
+                IllegalStateException.class,
+                () -> mUwbServiceCore.pause(
+                        sessionHandle, TEST_ALIRO_OPEN_RANGING_PARAMS.build().toBundle()));
     }
 
     @Test
@@ -1233,7 +1334,7 @@ public class UwbServiceCoreTest {
     }
 
     @Test
-    public void testResumeRanging_incorrectParams() throws Exception {
+    public void testResumeRanging_incorrectProtocolInParams() throws Exception {
         enableUwbWithCountryCodeChangedCallback();
 
         SessionHandle sessionHandle = mock(SessionHandle.class);
@@ -1241,6 +1342,10 @@ public class UwbServiceCoreTest {
                 IllegalStateException.class,
                 () -> mUwbServiceCore.resume(
                         sessionHandle, TEST_CCC_OPEN_RANGING_PARAMS.build().toBundle()));
+        assertThrows(
+                IllegalStateException.class,
+                () -> mUwbServiceCore.resume(
+                        sessionHandle, TEST_ALIRO_OPEN_RANGING_PARAMS.build().toBundle()));
     }
 
     @Test
@@ -1462,11 +1567,13 @@ public class UwbServiceCoreTest {
                 .setSupportedChannels(supportedChannels)
                 .build();
         CccSpecificationParams cccSpecificationParams = getTestCccSpecificationParams();
+        AliroSpecificationParams aliroSpecificationParams = getTestAliroSpecificationParams();
 
         GenericSpecificationParams genericSpecificationParams =
                 new GenericSpecificationParams.Builder()
                         .setFiraSpecificationParams(firaSpecificationParams)
                         .setCccSpecificationParams(cccSpecificationParams)
+                        .setAliroSpecificationParams(aliroSpecificationParams)
                         .build();
         when(mUwbConfigurationManager.getCapsInfo(any(), any(), anyString(), any()))
                 .thenReturn(Pair.create(
@@ -1490,10 +1597,13 @@ public class UwbServiceCoreTest {
                 .setSupportedChannels(supportedChannels)
                 .build();
         CccSpecificationParams cccSpecificationParams = getTestCccSpecificationParams();
+        AliroSpecificationParams aliroSpecificationParams = getTestAliroSpecificationParams();
+
         GenericSpecificationParams genericSpecificationParams =
                 new GenericSpecificationParams.Builder()
                         .setFiraSpecificationParams(firaSpecificationParams)
                         .setCccSpecificationParams(cccSpecificationParams)
+                        .setAliroSpecificationParams(aliroSpecificationParams)
                         .build();
         when(mUwbConfigurationManager.getCapsInfo(any(), any(), anyString(), any()))
                 .thenReturn(Pair.create(
@@ -1751,6 +1861,19 @@ public class UwbServiceCoreTest {
     }
 
     @Test
+    public void testDeviceStateCallback_exeception() throws Exception {
+        when(mUwbInjector.getMultichipData())
+                .thenThrow(new IllegalStateException());
+        enableUwbWithCountryCodeChangedCallback();
+        try {
+             mUwbServiceCore.onDeviceStatusNotificationReceived(
+                     UwbUciConstants.DEVICE_STATE_ACTIVE, TEST_CHIP_ONE_CHIP_ID);
+        } catch (Exception e) {
+             fail("Unexpected exception "+ e);
+        }
+    }
+
+    @Test
     public void testRangingRoundsUpdateDtTag() throws Exception {
         enableUwbWithCountryCodeChangedCallback();
 
@@ -1772,7 +1895,7 @@ public class UwbServiceCoreTest {
         verify(mUwbSessionManager).setHybridSessionConfiguration(sessionHandle, bundle);
     }
 
-    public CccSpecificationParams getTestCccSpecificationParams() {
+    private CccSpecificationParams getTestCccSpecificationParams() {
         CccProtocolVersion[] protocolVersions =
                 new CccProtocolVersion[] {
                         new CccProtocolVersion(1, 0),
@@ -1807,6 +1930,7 @@ public class UwbServiceCoreTest {
                 new Integer[] {CccParams.HOPPING_SEQUENCE_AES, CccParams.HOPPING_SEQUENCE_DEFAULT};
 
         CccSpecificationParams.Builder paramsBuilder = new CccSpecificationParams.Builder();
+
         for (CccProtocolVersion p : protocolVersions) {
             paramsBuilder.addProtocolVersion(p);
         }
@@ -1816,6 +1940,79 @@ public class UwbServiceCoreTest {
         }
 
         for (CccPulseShapeCombo pulseShapeCombo : pulseShapeCombos) {
+            paramsBuilder.addPulseShapeCombo(pulseShapeCombo);
+        }
+
+        paramsBuilder.setRanMultiplier(ranMultiplier);
+
+        for (int chapsPerSlot : chapsPerSlots) {
+            paramsBuilder.addChapsPerSlot(chapsPerSlot);
+        }
+
+        for (int syncCode : syncCodes) {
+            paramsBuilder.addSyncCode(syncCode);
+        }
+
+        for (int channel : channels) {
+            paramsBuilder.addChannel(channel);
+        }
+
+        for (int hoppingConfigMode : hoppingConfigModes) {
+            paramsBuilder.addHoppingConfigMode(hoppingConfigMode);
+        }
+
+        for (int hoppingSequence : hoppingSequences) {
+            paramsBuilder.addHoppingSequence(hoppingSequence);
+        }
+        return paramsBuilder.build();
+    }
+
+    private AliroSpecificationParams getTestAliroSpecificationParams() {
+        AliroProtocolVersion[] protocolVersions =
+                new AliroProtocolVersion[] {
+                        new AliroProtocolVersion(1, 0),
+                        new AliroProtocolVersion(2, 0),
+                        new AliroProtocolVersion(2, 1)
+                };
+
+        Integer[] uwbConfigs = new Integer[] {AliroParams.UWB_CONFIG_0, AliroParams.UWB_CONFIG_1};
+        AliroPulseShapeCombo[] pulseShapeCombos =
+                new AliroPulseShapeCombo[] {
+                        new AliroPulseShapeCombo(
+                                AliroParams.PULSE_SHAPE_SYMMETRICAL_ROOT_RAISED_COSINE,
+                                AliroParams.PULSE_SHAPE_SYMMETRICAL_ROOT_RAISED_COSINE),
+                        new AliroPulseShapeCombo(
+                                AliroParams.PULSE_SHAPE_PRECURSOR_FREE,
+                                AliroParams.PULSE_SHAPE_PRECURSOR_FREE),
+                        new AliroPulseShapeCombo(
+                                AliroParams.PULSE_SHAPE_PRECURSOR_FREE_SPECIAL,
+                                AliroParams.PULSE_SHAPE_PRECURSOR_FREE_SPECIAL)
+                };
+        int ranMultiplier = 200;
+        Integer[] chapsPerSlots =
+                new Integer[] {AliroParams.CHAPS_PER_SLOT_4, AliroParams.CHAPS_PER_SLOT_12};
+        Integer[] syncCodes =
+                new Integer[] {10, 23};
+        Integer[] channels = new Integer[] {AliroParams.UWB_CHANNEL_5, AliroParams.UWB_CHANNEL_9};
+        Integer[] hoppingConfigModes =
+                new Integer[] {
+                        AliroParams.HOPPING_CONFIG_MODE_ADAPTIVE,
+                        AliroParams.HOPPING_CONFIG_MODE_CONTINUOUS };
+        Integer[] hoppingSequences =
+                new Integer[] {
+                        AliroParams.HOPPING_SEQUENCE_AES, AliroParams.HOPPING_SEQUENCE_DEFAULT};
+
+        AliroSpecificationParams.Builder paramsBuilder = new AliroSpecificationParams.Builder();
+
+        for (AliroProtocolVersion p : protocolVersions) {
+            paramsBuilder.addProtocolVersion(p);
+        }
+
+        for (int uwbConfig : uwbConfigs) {
+            paramsBuilder.addUwbConfig(uwbConfig);
+        }
+
+        for (AliroPulseShapeCombo pulseShapeCombo : pulseShapeCombos) {
             paramsBuilder.addPulseShapeCombo(pulseShapeCombo);
         }
 
