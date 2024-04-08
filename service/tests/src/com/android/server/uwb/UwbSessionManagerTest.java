@@ -55,6 +55,7 @@ import static com.android.server.uwb.data.UwbUciConstants.STATUS_CODE_DATA_TRANS
 import static com.android.server.uwb.data.UwbUciConstants.STATUS_CODE_DATA_TRANSFER_REPETITION_OK;
 
 import static com.google.common.truth.Truth.assertThat;
+import static com.google.uwb.support.fira.FiraParams.PARTICIPATION_AS_DEFINED_DEVICE_ROLE;
 import static com.google.uwb.support.fira.FiraParams.PROTOCOL_NAME;
 import static com.google.uwb.support.fira.FiraParams.RangeDataNtfConfigCapabilityFlag.HAS_RANGE_DATA_NTF_CONFIG_DISABLE;
 import static com.google.uwb.support.fira.FiraParams.RangeDataNtfConfigCapabilityFlag.HAS_RANGE_DATA_NTF_CONFIG_ENABLE;
@@ -136,7 +137,9 @@ import com.google.uwb.support.ccc.CccRangingStartedParams;
 import com.google.uwb.support.ccc.CccSpecificationParams;
 import com.google.uwb.support.ccc.CccStartRangingParams;
 import com.google.uwb.support.dltdoa.DlTDoARangingRoundsUpdate;
-import com.google.uwb.support.fira.FiraHybridSessionConfig;
+import com.google.uwb.support.fira.FiraDataTransferPhaseConfig;
+import com.google.uwb.support.fira.FiraHybridSessionControleeConfig;
+import com.google.uwb.support.fira.FiraHybridSessionControllerConfig;
 import com.google.uwb.support.fira.FiraOpenSessionParams;
 import com.google.uwb.support.fira.FiraParams;
 import com.google.uwb.support.fira.FiraProtocolVersion;
@@ -156,6 +159,7 @@ import org.mockito.MockitoAnnotations;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
 import java.util.EnumSet;
@@ -195,6 +199,9 @@ public class UwbSessionManagerTest {
     private static final short DATA_SEQUENCE_NUM_1 = 2;
     private static final int DATA_TRANSMISSION_COUNT = 1;
     private static final int DATA_TRANSMISSION_COUNT_3 = 3;
+    private static final int UWB_HUS_CONTROLLER_PHASE_LIST_SHORT_MAC_ADDRESS_SIZE = 11;
+    private static final int UWB_HUS_CONTROLLER_PHASE_LIST_EXTENDED_MAC_ADDRESS_SIZE = 17;
+    private static final int UWB_HUS_CONTROLEE_PHASE_LIST_SIZE = 5;
     private static final FiraProtocolVersion FIRA_VERSION_1_0 = new FiraProtocolVersion(1, 0);
     private static final FiraProtocolVersion FIRA_VERSION_1_1 = new FiraProtocolVersion(1, 1);
     private static final FiraProtocolVersion FIRA_VERSION_2_0 = new FiraProtocolVersion(2, 0);
@@ -261,6 +268,34 @@ public class UwbSessionManagerTest {
                 .setHoppingConfigMode(CccParams.HOPPING_CONFIG_MODE_NONE)
                 .setHoppingSequence(CccParams.HOPPING_SEQUENCE_DEFAULT)
                 .build();
+
+    private FiraHybridSessionControllerConfig mHybridControllerParams =
+            new FiraHybridSessionControllerConfig.Builder()
+                .setNumberOfPhases(2)
+                .setUpdateTime(new byte[8])
+                .setMacAddressMode((byte) 0)
+                .addPhaseList(
+                        new FiraHybridSessionControllerConfig.FiraHybridSessionPhaseList(
+                                SESSION_HANDLE.getId(), (short) 0x01, (short) 0x34,
+                                (byte) PARTICIPATION_AS_DEFINED_DEVICE_ROLE, UWB_DEST_ADDRESS))
+                .addPhaseList(
+                        new FiraHybridSessionControllerConfig.FiraHybridSessionPhaseList(
+                                SESSION_HANDLE_2.getId(), (short) 0x37, (short) 0x64,
+                                (byte) PARTICIPATION_AS_DEFINED_DEVICE_ROLE, UWB_DEST_ADDRESS_2))
+                .build();
+    private FiraHybridSessionControleeConfig mHybridControleeParams =
+            new FiraHybridSessionControleeConfig.Builder()
+                .setNumberOfPhases(2)
+                .addPhaseList(
+                        new FiraHybridSessionControleeConfig.FiraHybridSessionPhaseList(
+                                SESSION_HANDLE.getId(),
+                                (byte) PARTICIPATION_AS_DEFINED_DEVICE_ROLE))
+                .addPhaseList(
+                        new FiraHybridSessionControleeConfig.FiraHybridSessionPhaseList(
+                                SESSION_HANDLE_2.getId(),
+                                (byte) PARTICIPATION_AS_DEFINED_DEVICE_ROLE))
+                .build();
+
     private static final long UWBS_TIMESTAMP = 2000000L;
     private static final int HANDLE_ID = 12;
     private static final int MAX_RX_DATA_PACKETS_TO_STORE = 10;
@@ -1652,6 +1687,27 @@ public class UwbSessionManagerTest {
         return paramsBuilder.build();
     }
 
+    // setup uwbsession with give sessionType
+    private UwbSession setUpUwbSessionForExecutionWithSessionType(byte sessionType,
+            Params params) {
+        doReturn(0).when(mUwbSessionManager).getSessionCount();
+        doReturn(0L).when(mUwbSessionManager).getFiraSessionCount();
+        doReturn(false).when(mUwbSessionManager).isExistedSession(anyInt());
+        IUwbRangingCallbacks mockRangingCallbacks = mock(IUwbRangingCallbacks.class);
+        SessionHandle mockSessionHandle = mock(SessionHandle.class);
+        IBinder mockBinder = mock(IBinder.class);
+        UwbSession uwbSession = spy(
+                mUwbSessionManager.new UwbSession(ATTRIBUTION_SOURCE, mockSessionHandle,
+                        TEST_SESSION_ID, sessionType, params.getProtocolName(), params,
+                        mockRangingCallbacks, TEST_CHIP_ID));
+        doReturn(mockBinder).when(uwbSession).getBinder();
+        doReturn(uwbSession).when(mUwbSessionManager).createUwbSession(any(), any(), anyInt(),
+                anyByte(), anyString(), any(), any(), anyString());
+        doReturn(mock(WaitObj.class)).when(uwbSession).getWaitObj();
+
+        return uwbSession;
+    }
+
     private Params setupRadarParams() {
         return new RadarOpenSessionParams.Builder()
                         .setSessionId(22)
@@ -2438,6 +2494,12 @@ public class UwbSessionManagerTest {
         assertThat(mTestLooper.isIdle()).isFalse();
 
         return uwbSession;
+    }
+
+    private UwbSession prepareExistingUwbSessionWithSessionType(byte sessionType, Params params)
+                throws Exception {
+        UwbSession uwbSession = setUpUwbSessionForExecutionWithSessionType(sessionType, params);
+        return prepareExistingUwbSessionCommon(uwbSession);
     }
 
     @Test
@@ -3395,10 +3457,37 @@ public class UwbSessionManagerTest {
                 uwbSession.getSessionHandle(), uwbSession.getParams());
         mTestLooper.dispatchAll();
 
-        verify(mUwbSessionNotificationManager).onRangingStartFailed(
-                eq(uwbSession), eq(UwbUciConstants.STATUS_CODE_FAILED));
+        // In this scenario, there is no SESSION_STATUS_NTF received, so send an undefined
+        // reasonCode (-1).
+        verify(mUwbSessionNotificationManager).onRangingStartFailedWithUciReasonCode(
+                eq(uwbSession), eq(-1));
         verify(mUwbMetrics).longRangingStartEvent(
                 eq(uwbSession), eq(UwbUciConstants.STATUS_CODE_FAILED));
+    }
+
+    @Test
+    public void execStartRanging_sessionStateIdle_reasonSessionKeyNotFound() throws Exception {
+        UwbSession uwbSession = prepareExistingUwbSession();
+
+        // set up for start ranging - it fails and session_state stays at IDLE.
+        doReturn(UwbUciConstants.UWB_SESSION_STATE_IDLE).when(uwbSession).getSessionState();
+        when(mNativeUwbManager.startRanging(eq(TEST_SESSION_ID), anyString()))
+                .thenReturn((byte) UwbUciConstants.STATUS_CODE_OK);
+
+        // UWBS sends the SESSION_STATS_NTF with ReasonCode as REASON_ERROR_SESSION_KEY_NOT_FOUND.
+        mUwbSessionManager.onSessionStatusNotificationReceived(
+                TEST_SESSION_ID,
+                UwbUciConstants.UWB_SESSION_STATE_IDLE,
+                UwbUciConstants.REASON_ERROR_SESSION_KEY_NOT_FOUND);
+
+        mUwbSessionManager.startRanging(
+                uwbSession.getSessionHandle(), uwbSession.getParams());
+        mTestLooper.dispatchAll();
+
+        verify(mUwbSessionNotificationManager).onRangingStartFailedWithUciReasonCode(
+                eq(uwbSession), eq(UwbUciConstants.REASON_ERROR_SESSION_KEY_NOT_FOUND));
+        verify(mUwbMetrics).longRangingStartEvent(
+                eq(uwbSession), eq(UwbUciConstants.STATUS_CODE_ERROR_SESSION_NOT_EXIST));
     }
 
     private void doTest_sendData_success_validUwbSession(byte[] macAddress, int dataTransferStatus)
@@ -4422,6 +4511,237 @@ public class UwbSessionManagerTest {
     }
 
     @Test
+    public void testSetDataTransferPhaseConfig() throws Exception {
+        FiraOpenSessionParams params = new FiraOpenSessionParams.Builder()
+                .setDeviceAddress(UwbAddress.fromBytes(new byte[] {(byte) 0x01, (byte) 0x02 }))
+                .setVendorId(new byte[] { (byte) 0x00, (byte) 0x01 })
+                .setStaticStsIV(new byte[] { (byte) 0x01, (byte) 0x02, (byte) 0x03,
+                        (byte) 0x04, (byte) 0x05, (byte) 0x06 })
+                .setDestAddressList(Arrays.asList(
+                        UWB_DEST_ADDRESS))
+                .setProtocolVersion(new FiraProtocolVersion(1, 0))
+                .setSessionId(10)
+                .setSessionType(FiraParams.SESSION_TYPE_DATA_TRANSFER)
+                .setDeviceType(FiraParams.RANGING_DEVICE_TYPE_CONTROLLER)
+                .setDeviceRole(FiraParams.RANGING_DEVICE_ROLE_INITIATOR)
+                .setMultiNodeMode(FiraParams.MULTI_NODE_MODE_UNICAST)
+                .setRangingIntervalMs(TEST_RANGING_INTERVAL_MS)
+                .setDataRepetitionCount(0)
+                .build();
+        UwbSession uwbSession = prepareExistingUwbSessionWithSessionType(
+                (byte) FiraParams.SESSION_TYPE_DATA_TRANSFER, params);
+        byte dtpcmRepetition = 0;
+        byte dataTransferControl = 0;
+        byte dtpmlSize = 2;
+        byte[] slotBitmapBytes = new byte[] { 0x10, 0x20 };
+
+        List<FiraDataTransferPhaseConfig.FiraDataTransferPhaseManagementList>
+                    firaDataTransferPhaseManagementList =  new ArrayList<>();
+
+        ByteBuffer expectedMacAddressBuf = ByteBuffer.allocate(
+                UwbAddress.SHORT_ADDRESS_BYTE_LENGTH * dtpmlSize);
+
+        // Setup Phase #1
+        byte[] macAddressBytes = new byte[]{0x22, 0x11};
+        UwbAddress uwbAddress = UwbAddress.fromBytes(macAddressBytes);
+        expectedMacAddressBuf.put(getComputedMacAddress(macAddressBytes));
+        firaDataTransferPhaseManagementList.add(
+                new FiraDataTransferPhaseConfig.FiraDataTransferPhaseManagementList(
+                uwbAddress, new byte[] {(byte) 0x10}));
+
+        // Setup Phase #2
+        macAddressBytes = new byte[]{0x44, 0x33};
+        uwbAddress = UwbAddress.fromBytes(macAddressBytes);
+        expectedMacAddressBuf.put(getComputedMacAddress(macAddressBytes));
+        firaDataTransferPhaseManagementList.add(
+                new FiraDataTransferPhaseConfig.FiraDataTransferPhaseManagementList(
+                uwbAddress, new byte[] {(byte) 0x20}));
+
+        FiraDataTransferPhaseConfig firaDataTransferPhaseConfig =
+                new FiraDataTransferPhaseConfig.Builder()
+                   .setDtpcmRepetition((byte) dtpcmRepetition)
+                   .setMacAddressMode((byte) 0)
+                   .setSlotBitmapSize((byte) 0)
+                   .setDataTransferPhaseManagementList(firaDataTransferPhaseManagementList)
+                   .build();
+
+        byte[] expectedMacAddressBytes = expectedMacAddressBuf.array();
+        when(mNativeUwbManager.setDataTransferPhaseConfig(eq(TEST_SESSION_ID),
+                eq(dtpcmRepetition), eq(dataTransferControl), eq(dtpmlSize),
+                eq(expectedMacAddressBytes), eq(slotBitmapBytes), eq(TEST_CHIP_ID)))
+                .thenReturn((byte) UwbUciConstants.STATUS_CODE_OK);
+
+        mUwbSessionManager.setDataTransferPhaseConfig(
+                uwbSession.getSessionHandle(), firaDataTransferPhaseConfig.toBundle());
+        mTestLooper.dispatchNext();
+
+        verify(mNativeUwbManager).setDataTransferPhaseConfig(TEST_SESSION_ID,
+                dtpcmRepetition, dataTransferControl, dtpmlSize, expectedMacAddressBytes,
+                slotBitmapBytes, TEST_CHIP_ID);
+    }
+
+    @Test
+    public void testSetDataTransferPhaseConfigNonZeroslotBitMap() throws Exception {
+        FiraOpenSessionParams params = new FiraOpenSessionParams.Builder()
+                .setDeviceAddress(UwbAddress.fromBytes(new byte[] {(byte) 0x01, (byte) 0x02 }))
+                .setVendorId(new byte[] { (byte) 0x00, (byte) 0x01 })
+                .setStaticStsIV(new byte[] { (byte) 0x01, (byte) 0x02, (byte) 0x03,
+                        (byte) 0x04, (byte) 0x05, (byte) 0x06 })
+                .setDestAddressList(Arrays.asList(
+                        UWB_DEST_ADDRESS))
+                .setProtocolVersion(new FiraProtocolVersion(1, 0))
+                .setSessionId(10)
+                .setSessionType(FiraParams.SESSION_TYPE_RANGING_AND_IN_BAND_DATA)
+                .setDeviceType(FiraParams.RANGING_DEVICE_TYPE_CONTROLLER)
+                .setDeviceRole(FiraParams.RANGING_DEVICE_ROLE_INITIATOR)
+                .setMultiNodeMode(FiraParams.MULTI_NODE_MODE_UNICAST)
+                .setRangingIntervalMs(TEST_RANGING_INTERVAL_MS)
+                .setDataRepetitionCount(0)
+                .build();
+        UwbSession uwbSession = prepareExistingUwbSessionWithSessionType(
+                (byte) FiraParams.SESSION_TYPE_RANGING_AND_IN_BAND_DATA, params);
+        byte dtpcmRepetition = 0;
+        byte dataTransferControl = 4;
+        byte dtpmlSize = 2;
+        byte[] slotBitmapBytes = new byte[]
+                { 0x10, 0x20, 0x30, 0x40, 0x50, 0x60, 0x70, (byte) 0x80 };
+
+        List<FiraDataTransferPhaseConfig.FiraDataTransferPhaseManagementList>
+                    firaDataTransferPhaseManagementList =  new ArrayList<>();
+        ByteBuffer expectedMacAddressBuf = ByteBuffer.allocate(
+                UwbAddress.SHORT_ADDRESS_BYTE_LENGTH * dtpmlSize);
+
+        // Setup Phase #1
+        byte[] macAddressBytes = new byte[]{0x22, 0x11};
+        UwbAddress uwbAddress = UwbAddress.fromBytes(macAddressBytes);
+        expectedMacAddressBuf.put(getComputedMacAddress(macAddressBytes));
+        firaDataTransferPhaseManagementList.add(
+                new FiraDataTransferPhaseConfig.FiraDataTransferPhaseManagementList(
+                uwbAddress, new byte[] {0x10, 0x20, 0x30, 0x40}));
+
+        // Setup Phase #2
+        macAddressBytes = new byte[]{0x44, 0x33};
+        uwbAddress = UwbAddress.fromBytes(macAddressBytes);
+        expectedMacAddressBuf.put(getComputedMacAddress(macAddressBytes));
+        firaDataTransferPhaseManagementList.add(
+                new FiraDataTransferPhaseConfig.FiraDataTransferPhaseManagementList(
+                uwbAddress, new byte[] {0x50, 0x60, 0x70, (byte) 0x80}));
+
+        FiraDataTransferPhaseConfig firaDataTransferPhaseConfig =
+                new FiraDataTransferPhaseConfig.Builder()
+                   .setDtpcmRepetition((byte) dtpcmRepetition)
+                   .setMacAddressMode((byte) 0)
+                   .setSlotBitmapSize((byte) 2)
+                   .setDataTransferPhaseManagementList(firaDataTransferPhaseManagementList)
+                   .build();
+
+        byte[] expectedMacAddressBytes = expectedMacAddressBuf.array();
+        when(mNativeUwbManager.setDataTransferPhaseConfig(eq(TEST_SESSION_ID),
+                eq(dtpcmRepetition), eq(dataTransferControl), eq(dtpmlSize),
+                eq(expectedMacAddressBytes), eq(slotBitmapBytes), eq(TEST_CHIP_ID)))
+                .thenReturn((byte) UwbUciConstants.STATUS_CODE_OK);
+
+        mUwbSessionManager.setDataTransferPhaseConfig(
+                uwbSession.getSessionHandle(), firaDataTransferPhaseConfig.toBundle());
+        mTestLooper.dispatchNext();
+
+        verify(mNativeUwbManager).setDataTransferPhaseConfig(TEST_SESSION_ID,
+                dtpcmRepetition, dataTransferControl, dtpmlSize, expectedMacAddressBytes,
+                slotBitmapBytes, TEST_CHIP_ID);
+    }
+
+    @Test
+    public void testSetDataTransferPhaseConfigFailedDueToInvalidSessionType() throws Exception {
+        byte dtpcmRepetition = 0;
+        byte dataTransferControl = 0;
+        byte dtpmlSize = 2;
+        byte[] slotBitmapBytes = new byte[] { 0x10, 0x20 };
+        /** By default SESSION_TYPE_RANGING is used, so testcase is expected to
+         *  fail due to Invalid session type for data transfer phase config
+         */
+        UwbSession uwbSession = prepareExistingUwbSessionActive();
+
+        List<FiraDataTransferPhaseConfig.FiraDataTransferPhaseManagementList>
+                    firaDataTransferPhaseManagementList =  new ArrayList<>();
+        ByteBuffer expectedMacAddressBuf = ByteBuffer.allocate(
+                UwbAddress.SHORT_ADDRESS_BYTE_LENGTH * dtpmlSize);
+
+        // Setup Phase #1
+        byte[] macAddressBytes = new byte[]{0x22, 0x11};
+        UwbAddress uwbAddress = UwbAddress.fromBytes(macAddressBytes);
+        expectedMacAddressBuf.put(getComputedMacAddress(macAddressBytes));
+        firaDataTransferPhaseManagementList.add(
+                new FiraDataTransferPhaseConfig.FiraDataTransferPhaseManagementList(
+                uwbAddress, new byte[] {(byte) 0x10}));
+
+        // Setup Phase #2
+        macAddressBytes = new byte[]{0x44, 0x33};
+        uwbAddress = UwbAddress.fromBytes(macAddressBytes);
+        expectedMacAddressBuf.put(getComputedMacAddress(macAddressBytes));
+        firaDataTransferPhaseManagementList.add(
+                new FiraDataTransferPhaseConfig.FiraDataTransferPhaseManagementList(
+                uwbAddress, new byte[] {(byte) 0x20, 0x30})); //Invalid slot bit map
+
+        FiraDataTransferPhaseConfig firaDataTransferPhaseConfig =
+                new FiraDataTransferPhaseConfig.Builder()
+                   .setDtpcmRepetition((byte) dtpcmRepetition)
+                   .setMacAddressMode((byte) 0)
+                   .setSlotBitmapSize((byte) 1)
+                   .setDataTransferPhaseManagementList(firaDataTransferPhaseManagementList)
+                   .build();
+
+        mUwbSessionManager.setDataTransferPhaseConfig(
+                uwbSession.getSessionHandle(), firaDataTransferPhaseConfig.toBundle());
+        mTestLooper.dispatchNext();
+
+        byte[] expectedMacAddressBytes = expectedMacAddressBuf.array();
+        verify(mNativeUwbManager, never()).setDataTransferPhaseConfig(TEST_SESSION_ID,
+                dtpcmRepetition, dataTransferControl, dtpmlSize, expectedMacAddressBytes,
+                slotBitmapBytes, TEST_CHIP_ID);
+    }
+
+    @Test
+    public void testSetDataTransferPhaseConfigFailedDueToInvalidList() throws Exception {
+        UwbSession uwbSession = prepareExistingUwbSession();
+        byte dtpcmRepetition = 0;
+        byte dataTransferControl = 0;
+        byte dtpmlSize = 2;
+        byte[] slotBitmapBytes = new byte[] { 0x10, 0x20 };
+
+        List<FiraDataTransferPhaseConfig.FiraDataTransferPhaseManagementList>
+                    firaDataTransferPhaseManagementList = new ArrayList<>();
+        ByteBuffer expectedMacAddressBuf = ByteBuffer.allocate(
+                UwbAddress.SHORT_ADDRESS_BYTE_LENGTH);
+
+        // Setup Phase #1
+        byte[] macAddressBytes = new byte[]{0x22, 0x11};
+        UwbAddress uwbAddress = UwbAddress.fromBytes(macAddressBytes);
+        expectedMacAddressBuf.put(getComputedMacAddress(macAddressBytes));
+        firaDataTransferPhaseManagementList.add(
+                new FiraDataTransferPhaseConfig.FiraDataTransferPhaseManagementList(
+                uwbAddress, new byte[] {(byte) 0x10}));
+
+        // Size of dtpml-Size is 2 but only one set of configs are provided
+        FiraDataTransferPhaseConfig firaDataTransferPhaseConfig =
+                new FiraDataTransferPhaseConfig.Builder()
+                   .setDtpcmRepetition((byte) dtpcmRepetition)
+                   .setMacAddressMode((byte) 0)
+                   .setSlotBitmapSize((byte) 1)
+                   .setDataTransferPhaseManagementList(firaDataTransferPhaseManagementList)
+                   .build();
+
+        mUwbSessionManager.setDataTransferPhaseConfig(
+                uwbSession.getSessionHandle(), firaDataTransferPhaseConfig.toBundle());
+        mTestLooper.dispatchNext();
+
+        byte[] expectedMacAddressBytes = expectedMacAddressBuf.array();
+        verify(mNativeUwbManager, never()).setDataTransferPhaseConfig(TEST_SESSION_ID,
+                dtpcmRepetition, dataTransferControl, dtpmlSize, expectedMacAddressBytes,
+                slotBitmapBytes, TEST_CHIP_ID);
+    }
+
+
+    @Test
     public void testQueryDataSize() throws Exception {
         UwbSession uwbSession = prepareExistingUwbSession();
 
@@ -4480,53 +4800,400 @@ public class UwbSessionManagerTest {
 
 
     @Test
-    public void testSetHybridSessionConfiguration() throws Exception {
-        UwbSession uwbSession = prepareExistingUwbSession();
-        FiraHybridSessionConfig.Builder mockFiraBuilder =
-                mock(FiraHybridSessionConfig.Builder.class);
+    public void testsetHybridSessionControllerConfiguration_shortMacAddress() throws Exception {
+        FiraOpenSessionParams params = new FiraOpenSessionParams.Builder()
+                .setDeviceAddress(UwbAddress.fromBytes(new byte[] {(byte) 0x01, (byte) 0x02 }))
+                .setVendorId(new byte[] { (byte) 0x00, (byte) 0x01 })
+                .setStaticStsIV(new byte[] { (byte) 0x01, (byte) 0x02, (byte) 0x03,
+                        (byte) 0x04, (byte) 0x05, (byte) 0x06 })
+                .setDestAddressList(Arrays.asList(
+                        UWB_DEST_ADDRESS))
+                .setProtocolVersion(new FiraProtocolVersion(1, 0))
+                .setSessionId(10)
+                .setSessionType(FiraParams.SESSION_TYPE_IN_BAND_DATA_PHASE)
+                .setDeviceType(FiraParams.RANGING_DEVICE_TYPE_CONTROLLER)
+                .setDeviceRole(FiraParams.RANGING_DEVICE_ROLE_INITIATOR)
+                .setMultiNodeMode(FiraParams.MULTI_NODE_MODE_UNICAST)
+                .setRangingIntervalMs(TEST_RANGING_INTERVAL_MS)
+                .setScheduledMode(FiraParams.HYBRID_SCHEDULED_RANGING)
+                .setDataRepetitionCount(0)
+                .build();
+        UwbSession uwbSession = prepareExistingUwbSessionWithSessionType(
+                (byte) FiraParams.SESSION_TYPE_IN_BAND_DATA_PHASE, params);
 
-        SessionHandle sessionHandle = mock(SessionHandle.class);
-        SessionHandle sessionHandle1 = mock(SessionHandle.class);
-        SessionHandle sessionHandle2 = mock(SessionHandle.class);
-        byte[] updateTime = {0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00};
+        byte messageControl = 0;
         int noOfPhases = 2;
+        byte phaseParticipation = 0;
+        byte [] updateTime = new byte[8];
         short startSlotIndex1 = 0x01, endSlotIndex1 = 0x34;
         short startSlotIndex2 = 0x37, endSlotIndex2 = 0x64;
-        FiraHybridSessionConfig params = new FiraHybridSessionConfig.Builder()
-                .setNumberOfPhases(noOfPhases)
-                .setUpdateTime(updateTime)
-                .addPhaseList(new FiraHybridSessionConfig.FiraHybridSessionPhaseList(
-                        sessionHandle1.getId(), startSlotIndex1, endSlotIndex1))
-                .addPhaseList(new FiraHybridSessionConfig.FiraHybridSessionPhaseList(
-                        sessionHandle2.getId(), startSlotIndex2, endSlotIndex2))
-                .build();
 
         // Setup the expected byte-array for the Hybrid configuration.
-        ByteBuffer expectedHybridConfigBytes = ByteBuffer.allocate(noOfPhases * 8);
+        ByteBuffer expectedHybridConfigBytes = ByteBuffer.allocate(noOfPhases
+                * UWB_HUS_CONTROLLER_PHASE_LIST_SHORT_MAC_ADDRESS_SIZE);
         expectedHybridConfigBytes.order(ByteOrder.LITTLE_ENDIAN);
 
-        expectedHybridConfigBytes.putInt(sessionHandle1.getId());
+        expectedHybridConfigBytes.putInt(0); //SessionToken
         expectedHybridConfigBytes.putShort(startSlotIndex1);
         expectedHybridConfigBytes.putShort(endSlotIndex1);
-        expectedHybridConfigBytes.putInt(sessionHandle2.getId());
+        expectedHybridConfigBytes.put(phaseParticipation);
+        expectedHybridConfigBytes.put(getComputedMacAddress(UWB_DEST_ADDRESS.toBytes()));
+
+        expectedHybridConfigBytes.putInt(0); //SessionToken
         expectedHybridConfigBytes.putShort(startSlotIndex2);
         expectedHybridConfigBytes.putShort(endSlotIndex2);
+        expectedHybridConfigBytes.put(phaseParticipation);
+        expectedHybridConfigBytes.put(getComputedMacAddress(UWB_DEST_ADDRESS_2.toBytes()));
 
-        when(mNativeUwbManager.setHybridSessionConfiguration(
-                eq(uwbSession.getSessionId()), eq(noOfPhases), eq(updateTime),
-                eq(expectedHybridConfigBytes.array()), anyString()))
-                .thenReturn((byte) UwbUciConstants.STATUS_CODE_OK);
-        assertThat(mUwbSessionManager.setHybridSessionConfiguration(uwbSession.getSessionHandle(),
-                params.toBundle()))
-                .isEqualTo(UwbUciConstants.STATUS_CODE_OK);
+        when(mNativeUwbManager.setHybridSessionControllerConfiguration(
+                anyInt(), anyByte(), anyInt(), any(), any(), anyString()))
+               .thenReturn((byte) UwbUciConstants.STATUS_CODE_OK);
+
+        // Invoke the method that triggers the 'setHybridSessionControllerConfiguration'
+        mUwbSessionManager.setHybridSessionControllerConfiguration(
+                uwbSession.getSessionHandle(), mHybridControllerParams.toBundle());
+        mTestLooper.dispatchAll();
+
+        verify(mNativeUwbManager).setHybridSessionControllerConfiguration(
+                    uwbSession.getSessionId(), messageControl, noOfPhases,
+                    updateTime, expectedHybridConfigBytes.array(), uwbSession.getChipId());
     }
 
     @Test
-    public void testSetHybridSessionConfiguration_whenUwbSessionDoesNotExist() throws Exception {
+    public void testsetHybridSessionControllerConfiguration_extendedMacAddress() throws Exception {
+        FiraOpenSessionParams params = new FiraOpenSessionParams.Builder()
+                .setDeviceAddress(UwbAddress.fromBytes(new byte[] {(byte) 0x01, (byte) 0x02 }))
+                .setVendorId(new byte[] { (byte) 0x00, (byte) 0x01 })
+                .setStaticStsIV(new byte[] { (byte) 0x01, (byte) 0x02, (byte) 0x03,
+                        (byte) 0x04, (byte) 0x05, (byte) 0x06 })
+                .setDestAddressList(Arrays.asList(
+                        UWB_DEST_ADDRESS))
+                .setProtocolVersion(new FiraProtocolVersion(1, 0))
+                .setSessionId(10)
+                .setSessionType(FiraParams.SESSION_TYPE_RANGING_ONLY_PHASE)
+                .setDeviceType(FiraParams.RANGING_DEVICE_TYPE_CONTROLLER)
+                .setDeviceRole(FiraParams.RANGING_DEVICE_ROLE_INITIATOR)
+                .setMultiNodeMode(FiraParams.MULTI_NODE_MODE_UNICAST)
+                .setRangingIntervalMs(TEST_RANGING_INTERVAL_MS)
+                .setScheduledMode(FiraParams.HYBRID_SCHEDULED_RANGING)
+                .setDataRepetitionCount(0)
+                .build();
+        UwbSession uwbSession = prepareExistingUwbSessionWithSessionType(
+                (byte) FiraParams.SESSION_TYPE_RANGING_ONLY_PHASE, params);
+
+        byte[] updateTime = new byte[8];
+        int noOfPhases = 2;
+        short startSlotIndex1 = 0x01, endSlotIndex1 = 0x34;
+        short startSlotIndex2 = 0x37, endSlotIndex2 = 0x64;
+        byte messageControl = 1;
+        byte phaseParticipation = 0;
+        UwbAddress uwbAddress1 = UwbAddress.fromBytes(new byte[] {
+                0x11, 0x22, 0x33, 0x44, 0x55, 0x56, 0x57, 0x66 });
+        UwbAddress uwbAddress2 = UwbAddress.fromBytes(new byte[] {
+                0x22, 0x22, 0x33, 0x44, 0x55, 0x56, 0x57, 0x66 });
+
+        FiraHybridSessionControllerConfig hybridParams =
+                new FiraHybridSessionControllerConfig.Builder()
+                .setNumberOfPhases(noOfPhases)
+                .setUpdateTime(updateTime)
+                .setMacAddressMode((byte) 1)
+                .addPhaseList(
+                        new FiraHybridSessionControllerConfig.FiraHybridSessionPhaseList(
+                                SESSION_HANDLE.getId(), startSlotIndex1, endSlotIndex1,
+                                phaseParticipation, uwbAddress1))
+                .addPhaseList(
+                        new FiraHybridSessionControllerConfig.FiraHybridSessionPhaseList(
+                                SESSION_HANDLE_2.getId(), startSlotIndex2, endSlotIndex2,
+                                phaseParticipation, uwbAddress2))
+                .build();
+
+        /* Setup the expected byte-array for the Hybrid configuration. */
+        ByteBuffer expectedHybridConfigBytes = ByteBuffer.allocate(noOfPhases
+                * UWB_HUS_CONTROLLER_PHASE_LIST_EXTENDED_MAC_ADDRESS_SIZE);
+        expectedHybridConfigBytes.order(ByteOrder.LITTLE_ENDIAN);
+
+        expectedHybridConfigBytes.putInt(0); //SessionToken
+        expectedHybridConfigBytes.putShort(startSlotIndex1);
+        expectedHybridConfigBytes.putShort(endSlotIndex1);
+        expectedHybridConfigBytes.put(phaseParticipation);
+        expectedHybridConfigBytes.put(getComputedMacAddress(uwbAddress1.toBytes()));
+
+        expectedHybridConfigBytes.putInt(0); //SessionToken
+        expectedHybridConfigBytes.putShort(startSlotIndex2);
+        expectedHybridConfigBytes.putShort(endSlotIndex2);
+        expectedHybridConfigBytes.put(phaseParticipation);
+        expectedHybridConfigBytes.put(getComputedMacAddress(uwbAddress2.toBytes()));
+
+        when(mNativeUwbManager.setHybridSessionControllerConfiguration(
+            anyInt(), anyByte(), anyInt(),
+            any(), any(), anyString()))
+            .thenReturn((byte) UwbUciConstants.STATUS_CODE_OK);
+
+        // Invoke the method that triggers the 'setHybridSessionControllerConfiguration'
+        mUwbSessionManager.setHybridSessionControllerConfiguration(
+                uwbSession.getSessionHandle(), hybridParams.toBundle());
+        mTestLooper.dispatchAll();
+
+        verify(mNativeUwbManager).setHybridSessionControllerConfiguration(
+                uwbSession.getSessionId(), messageControl, noOfPhases,
+                updateTime, expectedHybridConfigBytes.array(), uwbSession.getChipId());
+    }
+
+    @Test
+    public void testsetHybridSessionControllerWithInvalidInvalidSessionType() throws Exception {
+        FiraOpenSessionParams params = new FiraOpenSessionParams.Builder()
+                .setDeviceAddress(UwbAddress.fromBytes(new byte[] {(byte) 0x01, (byte) 0x02 }))
+                .setVendorId(new byte[] { (byte) 0x00, (byte) 0x01 })
+                .setStaticStsIV(new byte[] { (byte) 0x01, (byte) 0x02, (byte) 0x03,
+                        (byte) 0x04, (byte) 0x05, (byte) 0x06 })
+                .setDestAddressList(Arrays.asList(
+                        UWB_DEST_ADDRESS))
+                .setProtocolVersion(new FiraProtocolVersion(1, 0))
+                .setSessionId(10)
+                .setSessionType(FiraParams.SESSION_TYPE_RANGING)
+                .setDeviceType(FiraParams.RANGING_DEVICE_TYPE_CONTROLLER)
+                .setDeviceRole(FiraParams.RANGING_DEVICE_ROLE_INITIATOR)
+                .setMultiNodeMode(FiraParams.MULTI_NODE_MODE_UNICAST)
+                .setRangingIntervalMs(TEST_RANGING_INTERVAL_MS)
+                .setScheduledMode(FiraParams.HYBRID_SCHEDULED_RANGING)
+                .setDataRepetitionCount(0)
+                .build();
+        UwbSession uwbSession = prepareExistingUwbSessionWithSessionType(
+                (byte) FiraParams.SESSION_TYPE_RANGING, params);
+
+
+        // Expected to fail due to invalid session type
+        mUwbSessionManager.setHybridSessionControllerConfiguration(
+                uwbSession.getSessionHandle(), mHybridControllerParams.toBundle());
+        mTestLooper.dispatchAll();
+
+        verify(mUwbSessionNotificationManager).onHybridSessionControllerConfigurationFailed(
+                any(), anyInt());
+    }
+
+    @Test
+    public void testsetHybridSessionControllerWithInvalidScheduledMode() throws Exception {
+        FiraOpenSessionParams params = new FiraOpenSessionParams.Builder()
+                .setDeviceAddress(UwbAddress.fromBytes(new byte[] {(byte) 0x01, (byte) 0x02 }))
+                .setVendorId(new byte[] { (byte) 0x00, (byte) 0x01 })
+                .setStaticStsIV(new byte[] { (byte) 0x01, (byte) 0x02, (byte) 0x03,
+                        (byte) 0x04, (byte) 0x05, (byte) 0x06 })
+                .setDestAddressList(Arrays.asList(
+                        UWB_DEST_ADDRESS))
+                .setProtocolVersion(new FiraProtocolVersion(1, 0))
+                .setSessionId(10)
+                .setSessionType(FiraParams.SESSION_TYPE_RANGING_WITH_DATA_PHASE)
+                .setDeviceType(FiraParams.RANGING_DEVICE_TYPE_CONTROLLER)
+                .setDeviceRole(FiraParams.RANGING_DEVICE_ROLE_INITIATOR)
+                .setMultiNodeMode(FiraParams.MULTI_NODE_MODE_UNICAST)
+                .setRangingIntervalMs(TEST_RANGING_INTERVAL_MS)
+                .setScheduledMode(FiraParams.TIME_SCHEDULED_RANGING)
+                .setDataRepetitionCount(0)
+                .build();
+        UwbSession uwbSession = prepareExistingUwbSessionWithSessionType(
+                (byte) FiraParams.SESSION_TYPE_RANGING_WITH_DATA_PHASE, params);
+
+
+        // Expected to fail due to invalid scheduled mode
+        mUwbSessionManager.setHybridSessionControllerConfiguration(
+                uwbSession.getSessionHandle(), mHybridControllerParams.toBundle());
+        mTestLooper.dispatchAll();
+
+        verify(mUwbSessionNotificationManager).onHybridSessionControllerConfigurationFailed(
+                any(), anyInt());
+    }
+
+    @Test
+    public void testsetHybridSessionControllerWithInvalidDeviceType() throws Exception {
+        FiraOpenSessionParams params = new FiraOpenSessionParams.Builder()
+                .setDeviceAddress(UwbAddress.fromBytes(new byte[] {(byte) 0x01, (byte) 0x02 }))
+                .setVendorId(new byte[] { (byte) 0x00, (byte) 0x01 })
+                .setStaticStsIV(new byte[] { (byte) 0x01, (byte) 0x02, (byte) 0x03,
+                        (byte) 0x04, (byte) 0x05, (byte) 0x06 })
+                .setDestAddressList(Arrays.asList(
+                        UWB_DEST_ADDRESS))
+                .setProtocolVersion(new FiraProtocolVersion(1, 0))
+                .setSessionId(10)
+                .setSessionType(FiraParams.SESSION_TYPE_RANGING_WITH_DATA_PHASE)
+                .setDeviceType(FiraParams.RANGING_DEVICE_TYPE_CONTROLEE)
+                .setDeviceRole(FiraParams.RANGING_DEVICE_ROLE_INITIATOR)
+                .setMultiNodeMode(FiraParams.MULTI_NODE_MODE_UNICAST)
+                .setRangingIntervalMs(TEST_RANGING_INTERVAL_MS)
+                .setScheduledMode(FiraParams.HYBRID_SCHEDULED_RANGING)
+                .setDataRepetitionCount(0)
+                .build();
+        UwbSession uwbSession = prepareExistingUwbSessionWithSessionType(
+                (byte) FiraParams.SESSION_TYPE_RANGING_WITH_DATA_PHASE, params);
+
+
+        // Expected to fail due to invalid device type(controlee)
+        mUwbSessionManager.setHybridSessionControllerConfiguration(
+                uwbSession.getSessionHandle(), mHybridControllerParams.toBundle());
+        mTestLooper.dispatchAll();
+
+        verify(mUwbSessionNotificationManager).onHybridSessionControllerConfigurationFailed(
+                any(), anyInt());
+    }
+
+    @Test
+    public void testsetHybridSessionControllerConfiguration_whenUwbSessionDoesNotExist()
+            throws Exception {
         SessionHandle mockSessionHandle = mock(SessionHandle.class);
         assertThrows(IllegalStateException.class,
-                () -> mUwbSessionManager.setHybridSessionConfiguration(mockSessionHandle,
+                () -> mUwbSessionManager.setHybridSessionControllerConfiguration(mockSessionHandle,
                         mock(PersistableBundle.class)));
+    }
+
+    @Test
+    public void testsetHybridSessionControleeConfiguration_whenUwbSessionDoesNotExist()
+            throws Exception {
+        SessionHandle mockSessionHandle = mock(SessionHandle.class);
+        assertThrows(IllegalStateException.class,
+                () -> mUwbSessionManager.setHybridSessionControleeConfiguration(mockSessionHandle,
+                        mock(PersistableBundle.class)));
+    }
+
+    @Test
+    public void testsetHybridSessionControleeConfiguration() throws Exception {
+        FiraOpenSessionParams params = new FiraOpenSessionParams.Builder()
+                .setDeviceAddress(UwbAddress.fromBytes(new byte[] {(byte) 0x01, (byte) 0x02 }))
+                .setVendorId(new byte[] { (byte) 0x00, (byte) 0x01 })
+                .setStaticStsIV(new byte[] { (byte) 0x01, (byte) 0x02, (byte) 0x03,
+                        (byte) 0x04, (byte) 0x05, (byte) 0x06 })
+                .setDestAddressList(Arrays.asList(
+                        UWB_DEST_ADDRESS))
+                .setProtocolVersion(new FiraProtocolVersion(1, 0))
+                .setSessionId(10)
+                .setSessionType(FiraParams.SESSION_TYPE_RANGING_WITH_DATA_PHASE)
+                .setDeviceType(FiraParams.RANGING_DEVICE_TYPE_CONTROLEE)
+                .setDeviceRole(FiraParams.RANGING_DEVICE_ROLE_INITIATOR)
+                .setMultiNodeMode(FiraParams.MULTI_NODE_MODE_UNICAST)
+                .setRangingIntervalMs(TEST_RANGING_INTERVAL_MS)
+                .setScheduledMode(FiraParams.HYBRID_SCHEDULED_RANGING)
+                .setDataRepetitionCount(0)
+                .build();
+        UwbSession uwbSession = prepareExistingUwbSessionWithSessionType(
+                (byte) FiraParams.SESSION_TYPE_RANGING_WITH_DATA_PHASE, params);
+
+        int noOfPhases = 2;
+        byte phaseParticipation = 0;
+       // Setup the expected byte-array for the Hybrid configuration.
+        ByteBuffer expectedHybridConfigBytes = ByteBuffer.allocate(noOfPhases
+                * UWB_HUS_CONTROLEE_PHASE_LIST_SIZE);
+        expectedHybridConfigBytes.order(ByteOrder.LITTLE_ENDIAN);
+
+        expectedHybridConfigBytes.putInt(0); //SessionToken
+        expectedHybridConfigBytes.put(phaseParticipation);
+        expectedHybridConfigBytes.putInt(0); //SessionToken
+        expectedHybridConfigBytes.put(phaseParticipation);
+        when(mNativeUwbManager.setHybridSessionControleeConfiguration(
+            anyInt(), anyInt(), any(), anyString()))
+            .thenReturn((byte) UwbUciConstants.STATUS_CODE_OK);
+
+        // Invoke the method that triggers the 'setHybridSessionControllerConfiguration'
+        mUwbSessionManager.setHybridSessionControleeConfiguration(
+                uwbSession.getSessionHandle(), mHybridControleeParams.toBundle());
+        mTestLooper.dispatchAll();
+
+        verify(mNativeUwbManager).setHybridSessionControleeConfiguration(
+                uwbSession.getSessionId(), noOfPhases, expectedHybridConfigBytes.array(),
+                uwbSession.getChipId());
+    }
+
+    @Test
+    public void testsetHybridSessionControleeWithInvalidInvalidSessionType() throws Exception {
+        FiraOpenSessionParams params = new FiraOpenSessionParams.Builder()
+                .setDeviceAddress(UwbAddress.fromBytes(new byte[] {(byte) 0x01, (byte) 0x02 }))
+                .setVendorId(new byte[] { (byte) 0x00, (byte) 0x01 })
+                .setStaticStsIV(new byte[] { (byte) 0x01, (byte) 0x02, (byte) 0x03,
+                        (byte) 0x04, (byte) 0x05, (byte) 0x06 })
+                .setDestAddressList(Arrays.asList(
+                        UWB_DEST_ADDRESS))
+                .setProtocolVersion(new FiraProtocolVersion(1, 0))
+                .setSessionId(10)
+                .setSessionType(FiraParams.SESSION_TYPE_DATA_TRANSFER)
+                .setDeviceType(FiraParams.RANGING_DEVICE_TYPE_CONTROLEE)
+                .setDeviceRole(FiraParams.RANGING_DEVICE_ROLE_INITIATOR)
+                .setMultiNodeMode(FiraParams.MULTI_NODE_MODE_UNICAST)
+                .setRangingIntervalMs(TEST_RANGING_INTERVAL_MS)
+                .setScheduledMode(FiraParams.HYBRID_SCHEDULED_RANGING)
+                .setDataRepetitionCount(0)
+                .build();
+        UwbSession uwbSession = prepareExistingUwbSessionWithSessionType(
+                (byte) FiraParams.SESSION_TYPE_DATA_TRANSFER, params);
+
+
+        // Expected to fail due to invalid session type
+        mUwbSessionManager.setHybridSessionControleeConfiguration(
+                uwbSession.getSessionHandle(), mHybridControleeParams.toBundle());
+        mTestLooper.dispatchAll();
+
+        verify(mUwbSessionNotificationManager).onHybridSessionControleeConfigurationFailed(
+                any(), anyInt());
+    }
+
+    @Test
+    public void testsetHybridSessionControleeWithInvalidScheduledMode() throws Exception {
+        FiraOpenSessionParams params = new FiraOpenSessionParams.Builder()
+                .setDeviceAddress(UwbAddress.fromBytes(new byte[] {(byte) 0x01, (byte) 0x02 }))
+                .setVendorId(new byte[] { (byte) 0x00, (byte) 0x01 })
+                .setStaticStsIV(new byte[] { (byte) 0x01, (byte) 0x02, (byte) 0x03,
+                        (byte) 0x04, (byte) 0x05, (byte) 0x06 })
+                .setDestAddressList(Arrays.asList(
+                        UWB_DEST_ADDRESS))
+                .setProtocolVersion(new FiraProtocolVersion(1, 0))
+                .setSessionId(10)
+                .setSessionType(FiraParams.SESSION_TYPE_RANGING_WITH_DATA_PHASE)
+                .setDeviceType(FiraParams.RANGING_DEVICE_TYPE_CONTROLEE)
+                .setDeviceRole(FiraParams.RANGING_DEVICE_ROLE_INITIATOR)
+                .setMultiNodeMode(FiraParams.MULTI_NODE_MODE_UNICAST)
+                .setRangingIntervalMs(TEST_RANGING_INTERVAL_MS)
+                .setScheduledMode(FiraParams.TIME_SCHEDULED_RANGING)
+                .setDataRepetitionCount(0)
+                .build();
+        UwbSession uwbSession = prepareExistingUwbSessionWithSessionType(
+                (byte) FiraParams.SESSION_TYPE_RANGING_WITH_DATA_PHASE, params);
+
+
+        // Expected to fail due to invalid scheduded mode
+        mUwbSessionManager.setHybridSessionControleeConfiguration(
+                uwbSession.getSessionHandle(), mHybridControleeParams.toBundle());
+        mTestLooper.dispatchAll();
+
+        verify(mUwbSessionNotificationManager).onHybridSessionControleeConfigurationFailed(
+                any(), anyInt());
+    }
+
+    @Test
+    public void testsetHybridSessionControleeWithInvalidDeviceType() throws Exception {
+        FiraOpenSessionParams params = new FiraOpenSessionParams.Builder()
+                .setDeviceAddress(UwbAddress.fromBytes(new byte[] {(byte) 0x01, (byte) 0x02 }))
+                .setVendorId(new byte[] { (byte) 0x00, (byte) 0x01 })
+                .setStaticStsIV(new byte[] { (byte) 0x01, (byte) 0x02, (byte) 0x03,
+                        (byte) 0x04, (byte) 0x05, (byte) 0x06 })
+                .setDestAddressList(Arrays.asList(
+                        UWB_DEST_ADDRESS))
+                .setProtocolVersion(new FiraProtocolVersion(1, 0))
+                .setSessionId(10)
+                .setSessionType(FiraParams.SESSION_TYPE_RANGING_WITH_DATA_PHASE)
+                .setDeviceType(FiraParams.RANGING_DEVICE_TYPE_CONTROLLER)
+                .setDeviceRole(FiraParams.RANGING_DEVICE_ROLE_INITIATOR)
+                .setMultiNodeMode(FiraParams.MULTI_NODE_MODE_UNICAST)
+                .setRangingIntervalMs(TEST_RANGING_INTERVAL_MS)
+                .setScheduledMode(FiraParams.HYBRID_SCHEDULED_RANGING)
+                .setDataRepetitionCount(0)
+                .build();
+        UwbSession uwbSession = prepareExistingUwbSessionWithSessionType(
+                (byte) FiraParams.SESSION_TYPE_RANGING_WITH_DATA_PHASE, params);
+
+
+        // Expected to fail due to invalid device type(controller)
+        mUwbSessionManager.setHybridSessionControleeConfiguration(
+                uwbSession.getSessionHandle(), mHybridControleeParams.toBundle());
+        mTestLooper.dispatchAll();
+
+        verify(mUwbSessionNotificationManager).onHybridSessionControleeConfigurationFailed(
+                any(), anyInt());
     }
 
     @Test
@@ -4821,6 +5488,31 @@ public class UwbSessionManagerTest {
                 indices.length, indices, uwbSession.getChipId());
         verify(mUwbSessionNotificationManager).onRangingRoundsUpdateStatus(any(), any());
     }
+
+
+    @Test
+    public void onDataTransferPhaseConfigNotificationReceived()
+            throws Exception {
+        UwbSession uwbSession = prepareExistingUwbSession();
+        //successfully setting the configuration
+        mUwbSessionManager.onDataTransferPhaseConfigNotificationReceived(uwbSession.getSessionId(),
+                UwbUciConstants.STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_DTPCM_CONFIG_SUCCESS);
+        mTestLooper.dispatchAll();
+        verify(mUwbSessionNotificationManager)
+                .onDataTransferPhaseConfigured(
+                isA(UwbSession.class),
+                eq(UwbUciConstants.STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_DTPCM_CONFIG_SUCCESS));
+
+        //failed to set the configuration
+        mUwbSessionManager.onDataTransferPhaseConfigNotificationReceived(uwbSession.getSessionId(),
+                UwbUciConstants
+                .STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_ERROR_DUPLICATE_SLOT_ASSIGNMENT);
+        mTestLooper.dispatchAll();
+        verify(mUwbSessionNotificationManager).onDataTransferPhaseConfigFailed(
+                isA(UwbSession.class),
+                eq(UwbUciConstants.STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_ERROR_DUPLICATE_SLOT_ASSIGNMENT));
+    }
+
 
     @Test
     public void onRadarDataMessageReceivedWithValidUwbSession() {

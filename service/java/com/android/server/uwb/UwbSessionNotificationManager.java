@@ -47,6 +47,7 @@ import com.google.uwb.support.base.Params;
 import com.google.uwb.support.ccc.CccParams;
 import com.google.uwb.support.ccc.CccRangingReconfiguredParams;
 import com.google.uwb.support.dltdoa.DlTDoAMeasurement;
+import com.google.uwb.support.fira.FiraDataTransferPhaseConfigStatusCode;
 import com.google.uwb.support.fira.FiraOpenSessionParams;
 import com.google.uwb.support.fira.FiraParams;
 import com.google.uwb.support.oemextension.RangingReportMetadata;
@@ -171,6 +172,23 @@ public class UwbSessionNotificationManager {
             Log.i(TAG, "IUwbRangingCallbacks - onRangingStartFailed");
         } catch (Exception e) {
             Log.e(TAG, "IUwbRangingCallbacks - onRangingStartFailed : Failed");
+            e.printStackTrace();
+        }
+    }
+
+    public void onRangingStartFailedWithUciReasonCode(UwbSession uwbSession, int reasonCode)  {
+        SessionHandle sessionHandle = uwbSession.getSessionHandle();
+        IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
+        try {
+            int statusCode =
+                    UwbSessionNotificationHelper.convertUciReasonCodeToUciStatusCode(reasonCode);
+            uwbRangingCallbacks.onRangingStartFailed(sessionHandle,
+                    UwbSessionNotificationHelper.convertUciReasonCodeToApiReasonCode(reasonCode),
+                    UwbSessionNotificationHelper.convertUciStatusToParam(
+                            uwbSession.getProtocolName(), statusCode));
+            Log.i(TAG, "IUwbRangingCallbacks - onRangingStartFailedWithUciReasonCode");
+        } catch (Exception e) {
+            Log.e(TAG, "IUwbRangingCallbacks - onRangingStartFailedWithUciReasonCode : Failed");
             e.printStackTrace();
         }
     }
@@ -468,6 +486,45 @@ public class UwbSessionNotificationManager {
         }
     }
 
+    /** Notify that data transfer phase config setting is successful. */
+    public void onDataTransferPhaseConfigured(UwbSession uwbSession,
+            int dataTransferPhaseConfigStatus) {
+        SessionHandle sessionHandle = uwbSession.getSessionHandle();
+        IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
+        FiraDataTransferPhaseConfigStatusCode statusCode =
+                new FiraDataTransferPhaseConfigStatusCode.Builder()
+                        .setStatusCode(dataTransferPhaseConfigStatus).build();
+        try {
+            uwbRangingCallbacks.onDataTransferPhaseConfigured(
+                    sessionHandle, statusCode.toBundle());
+            Log.i(TAG, "IUwbRangingCallbacks - onDataTransferPhaseConfigured");
+        } catch (Exception e) {
+            Log.e(TAG, "IUwbRangingCallbacks - onDataTransferPhaseConfigured : Failed");
+            e.printStackTrace();
+        }
+    }
+
+    /** Notify that data transfer phase config setting is failed. */
+    public void onDataTransferPhaseConfigFailed(UwbSession uwbSession,
+            int dataTransferPhaseConfigStatus) {
+        SessionHandle sessionHandle = uwbSession.getSessionHandle();
+        IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
+        int reason =
+                UwbSessionNotificationHelper.convertDataTransferPhaseConfigStatusToApiReasonCode(
+                        dataTransferPhaseConfigStatus);
+        FiraDataTransferPhaseConfigStatusCode statusCode =
+                new FiraDataTransferPhaseConfigStatusCode.Builder()
+                        .setStatusCode(dataTransferPhaseConfigStatus).build();
+        try {
+            uwbRangingCallbacks.onDataTransferPhaseConfigFailed(sessionHandle,
+                    reason, statusCode.toBundle());
+            Log.i(TAG, "IUwbRangingCallbacks - onDataTransferPhaseConfigFailed");
+        } catch (Exception e) {
+            Log.e(TAG, "IUwbRangingCallbacks - onDataTransferPhaseConfigFailed : Failed");
+            e.printStackTrace();
+        }
+    }
+
     /** Notify the response for Ranging rounds update status for Dt Tag. */
     public void onRangingRoundsUpdateStatus(
             UwbSession uwbSession, PersistableBundle parameters) {
@@ -479,6 +536,70 @@ public class UwbSessionNotificationManager {
             Log.i(TAG, "IUwbRangingCallbacks - onRangingRoundsUpdateDtTagStatus");
         } catch (Exception e) {
             Log.e(TAG, "IUwbRangingCallbacks - onRangingRoundsUpdateDtTagStatus : Failed");
+            e.printStackTrace();
+        }
+    }
+
+    /** Notify that Hybrid session configuration for controller is updated. */
+    public void onHybridSessionControllerConfigured(UwbSession uwbSession, int status) {
+        SessionHandle sessionHandle = uwbSession.getSessionHandle();
+        IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
+        try {
+            uwbRangingCallbacks.onHybridSessionControllerConfigured(sessionHandle,
+                    UwbSessionNotificationHelper.convertUciStatusToParam(
+                            uwbSession.getProtocolName(), status));
+            Log.i(TAG, "IUwbRangingCallbacks - onHybridSessionControllerConfigured");
+        } catch (Exception e) {
+            Log.e(TAG, "IUwbRangingCallbacks - onHybridSessionControllerConfigured: Failed");
+            e.printStackTrace();
+        }
+    }
+
+    /** Notify that Hybrid session configuration for controller is failed to update. */
+    public void onHybridSessionControllerConfigurationFailed(UwbSession uwbSession, int status) {
+        SessionHandle sessionHandle = uwbSession.getSessionHandle();
+        IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
+        try {
+            uwbRangingCallbacks.onHybridSessionControllerConfigurationFailed(sessionHandle,
+                    UwbSessionNotificationHelper.convertUciStatusToApiReasonCode(status),
+                    UwbSessionNotificationHelper.convertUciStatusToParam(
+                            uwbSession.getProtocolName(), status));
+            Log.i(TAG, "IUwbRangingCallbacks - onHybridSessionControllerConfigurationFailed");
+        } catch (Exception e) {
+            Log.e(TAG, "IUwbRangingCallbacks - onHybridSessionControllerConfigurationFailed :"
+                    + "Failed");
+            e.printStackTrace();
+        }
+    }
+
+    /** Notify that Hybrid session configuration for controlee is updated. */
+    public void onHybridSessionControleeConfigured(UwbSession uwbSession, int status) {
+        SessionHandle sessionHandle = uwbSession.getSessionHandle();
+        IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
+        try {
+            uwbRangingCallbacks.onHybridSessionControleeConfigured(sessionHandle,
+                    UwbSessionNotificationHelper.convertUciStatusToParam(
+                            uwbSession.getProtocolName(), status));
+            Log.i(TAG, "IUwbRangingCallbacks - onHybridSessionControleeConfigured");
+        } catch (Exception e) {
+            Log.e(TAG, "IUwbRangingCallbacks - onHybridSessionControleeConfigured: Failed");
+            e.printStackTrace();
+        }
+    }
+
+    /** Notify that Hybrid session configuration for controlee is failed to update. */
+    public void onHybridSessionControleeConfigurationFailed(UwbSession uwbSession, int status) {
+        SessionHandle sessionHandle = uwbSession.getSessionHandle();
+        IUwbRangingCallbacks uwbRangingCallbacks = uwbSession.getIUwbRangingCallbacks();
+        try {
+            uwbRangingCallbacks.onHybridSessionControleeConfigurationFailed(sessionHandle,
+                    UwbSessionNotificationHelper.convertUciStatusToApiReasonCode(status),
+                    UwbSessionNotificationHelper.convertUciStatusToParam(
+                            uwbSession.getProtocolName(), status));
+            Log.i(TAG, "IUwbRangingCallbacks - onHybridSessionControleeConfigurationFailed");
+        } catch (Exception e) {
+            Log.e(TAG, "IUwbRangingCallbacks - onHybridSessionControleeConfigurationFailed :"
+                    + "Failed");
             e.printStackTrace();
         }
     }
@@ -727,7 +848,6 @@ public class UwbSessionNotificationManager {
                         .setActiveRangingRounds(uwbDlTDoAMeasurements[i].getActiveRangingRounds())
                         .setRoundIndex(uwbDlTDoAMeasurements[i].getRoundIndex())
                         .build();
-
                 rangingMeasurementBuilder.setRangingMeasurementMetadata(
                         dlTDoAMeasurement.toBundle());
 

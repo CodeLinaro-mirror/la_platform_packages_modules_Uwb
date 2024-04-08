@@ -378,6 +378,13 @@ public class UwbShellCommand extends BasicShellCommandHandler {
         public void onDataSendFailed(SessionHandle sessionHandle, UwbAddress uwbAddress, int reason,
                 PersistableBundle params) {}
 
+        public void onDataTransferPhaseConfigured(SessionHandle sessionHandle,
+                  PersistableBundle params) {
+        }
+
+        public void onDataTransferPhaseConfigFailed(SessionHandle sessionHandle, int reason,
+                PersistableBundle params) {}
+
         public void onDataReceived(SessionHandle sessionHandle, UwbAddress uwbAddress,
                 PersistableBundle params, byte[] data) {}
 
@@ -390,6 +397,18 @@ public class UwbShellCommand extends BasicShellCommandHandler {
 
         public void onRangingRoundsUpdateDtTagStatus(SessionHandle sessionHandle,
                 PersistableBundle params) {}
+
+        public void onHybridSessionControllerConfigured(SessionHandle sessionHandle,
+                PersistableBundle parameters) {}
+
+        public void onHybridSessionControllerConfigurationFailed(SessionHandle sessionHandle,
+                int reason, PersistableBundle parameters) {}
+
+        public void onHybridSessionControleeConfigured(SessionHandle sessionHandle,
+                PersistableBundle parameters) {}
+
+        public void onHybridSessionControleeConfigurationFailed(SessionHandle sessionHandle,
+                int reason, PersistableBundle parameters) {}
     }
 
 

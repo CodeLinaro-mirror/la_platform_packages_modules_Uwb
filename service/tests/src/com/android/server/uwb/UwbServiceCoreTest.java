@@ -1392,6 +1392,31 @@ public class UwbServiceCoreTest {
     }
 
     @Test
+    public void testSetDataTransferPhaseConfig_success() throws Exception {
+        enableUwbWithCountryCodeChangedCallback();
+
+        SessionHandle sessionHandle = mock(SessionHandle.class);
+        PersistableBundle params = mock(PersistableBundle.class);
+
+        mUwbServiceCore.setDataTransferPhaseConfig(sessionHandle, params);
+        verify(mUwbSessionManager).setDataTransferPhaseConfig(
+                eq(sessionHandle), eq(params));
+    }
+
+    @Test
+    public void testSetDataTransferPhaseConfig_whenUwbIsDisabled() throws Exception {
+        disableUwb();
+
+        SessionHandle sessionHandle = mock(SessionHandle.class);
+        PersistableBundle params = mock(PersistableBundle.class);
+
+        try {
+            mUwbServiceCore.setDataTransferPhaseConfig(sessionHandle, params);
+            fail();
+        } catch (IllegalStateException e) { }
+    }
+
+    @Test
     public void testAddControlee() throws Exception {
         enableUwbWithCountryCodeChangedCallback();
 
@@ -1885,14 +1910,26 @@ public class UwbServiceCoreTest {
     }
 
     @Test
-    public void testHybridSessionConfiguration() throws Exception {
+    public void testSetHybridSessionControllerConfiguration() throws Exception {
         enableUwbWithCountryCodeChangedCallback();
 
         SessionHandle sessionHandle = mock(SessionHandle.class);
         PersistableBundle bundle = new PersistableBundle();
-        mUwbServiceCore.setHybridSessionConfiguration(sessionHandle, bundle);
+        mUwbServiceCore.setHybridSessionControllerConfiguration(sessionHandle, bundle);
 
-        verify(mUwbSessionManager).setHybridSessionConfiguration(sessionHandle, bundle);
+        verify(mUwbSessionManager).setHybridSessionControllerConfiguration(sessionHandle, bundle);
+    }
+
+    @Test
+    public void testSetHybridSessionControleeConfiguration() throws Exception {
+        enableUwbWithCountryCodeChangedCallback();
+
+        SessionHandle sessionHandle = mock(SessionHandle.class);
+        PersistableBundle params = mock(PersistableBundle.class);
+
+        mUwbServiceCore.setHybridSessionControleeConfiguration(sessionHandle, params);
+
+        verify(mUwbSessionManager).setHybridSessionControleeConfiguration(sessionHandle, params);
     }
 
     private CccSpecificationParams getTestCccSpecificationParams() {

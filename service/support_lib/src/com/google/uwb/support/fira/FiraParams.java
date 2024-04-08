@@ -255,6 +255,24 @@ public abstract class FiraParams extends Params {
 
     public static final int BLOCK_BASED_SCHEDULING = 1;
 
+    /** Hybrid session controller phase participation */
+    @IntDef(
+            value = {
+                PARTICIPATION_AS_DEFINED_DEVICE_ROLE,
+                NO_PARTICIPATION_IN_THE_PHASE,
+                PARTICIPATION_AS_INITIATOR,
+                PARTICIPATION_AS_RESPONDER,
+            })
+    public @interface PhaseParticipationHybridSessionController {}
+
+    public static final int PARTICIPATION_AS_DEFINED_DEVICE_ROLE = 0;
+
+    public static final int NO_PARTICIPATION_IN_THE_PHASE = 1;
+
+    public static final int PARTICIPATION_AS_INITIATOR = 2;
+
+    public static final int PARTICIPATION_AS_RESPONDER = 3;
+
     /** Cc Constraint Length */
     @IntDef(
             value = {
@@ -624,6 +642,20 @@ public abstract class FiraParams extends Params {
     public static final int STATUS_CODE_DATA_TRANSFER_NTF_SESSION_TYPE_NOT_SUPPORTED = 5;
     public static final int STATUS_CODE_DATA_TRANSFER_NTF_ERROR_DATA_TRANSFER_IS_ONGOING = 6;
     public static final int STATUS_CODE_DATA_TRANSFER_NTF_STATUS_INVALID_FORMAT = 7;
+
+    /**
+     * Table TBD: Status codes in the SESSION_DATA_TRANSFER_PHASE_CONFIGURATION_NTF.
+     */
+    @IntDef(
+            value = {
+                    STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_DTPCM_CONFIG_SUCCESS,
+                    STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_ERROR_DUPLICATE_SLOT_ASSIGNMENT
+            })
+    public @interface DataTransferPhaseConfigNtfStatusCode {}
+
+    public static final int STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_DTPCM_CONFIG_SUCCESS = 0;
+    public static final int
+            STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_ERROR_DUPLICATE_SLOT_ASSIGNMENT = 1;
 
     /** State change reason codes defined in UCI table-15 */
     @IntDef(
@@ -1124,7 +1156,8 @@ public abstract class FiraParams extends Params {
         return UwbAddress.fromBytes(Arrays.copyOf(buffer.array(), length));
     }
 
-    protected static long uwbAddressToLong(UwbAddress address) {
+    /** Helper functions to convert UwbAdrress in long value. */
+    public static long uwbAddressToLong(UwbAddress address) {
         ByteBuffer buffer = ByteBuffer.wrap(Arrays.copyOf(address.toBytes(), Long.BYTES));
         return buffer.getLong();
     }

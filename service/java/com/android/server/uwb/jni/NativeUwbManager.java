@@ -439,6 +439,28 @@ public class NativeUwbManager {
     }
 
     /**
+     * Set Data transfer phase configuration
+     */
+    public byte setDataTransferPhaseConfig(int sessionId, byte dtpcmRepetition,
+            byte dataTransferControl, byte dtpmlSize, byte[] macAddress, byte[] slotBitmap,
+            String chipId) {
+        synchronized (mNativeLock) {
+            return nativeSessionDataTransferPhaseConfig(sessionId, dtpcmRepetition,
+                dataTransferControl, dtpmlSize, macAddress, slotBitmap, chipId);
+        }
+    }
+
+    /**
+     * Receive the data transfer phase config status
+     */
+    public void onDataTransferPhaseConfigNotificationReceived(long sessionId,
+            int dataTransferPhaseConfigStatus) {
+        Log.d(TAG, "onDataTransferPhaseConfigNotificationReceived ");
+        mSessionListener.onDataTransferPhaseConfigNotificationReceived(sessionId,
+                dataTransferPhaseConfigStatus);
+    }
+
+    /**
      * Update Ranging Rounds for DT Tag
      *
      * @param sessionId Session ID to which ranging round to be updated
@@ -493,7 +515,7 @@ public class NativeUwbManager {
     }
 
     /**
-     * Sets the Hybrid UWB Session Configuration
+     * Sets the Hybrid UWB Session Controller Configuration
      *
      * @param sessionId : Primary session ID
      * @param numberOfPhases : Number of secondary sessions
@@ -503,16 +525,37 @@ public class NativeUwbManager {
      * @param chipId : Identifier of UWB chip for multi-HAL devices
      * @return Byte representing the status of the operation
      */
-    public byte setHybridSessionConfiguration(int sessionId, int numberOfPhases, byte[] updateTime,
+    public byte setHybridSessionControllerConfiguration(int sessionId, byte messageControl,
+            int numberOfPhases, byte[] updateTime, byte[] phaseList, String chipId) {
+        synchronized (mNativeLock) {
+            return nativeSetHybridSessionControllerConfigurations(sessionId, messageControl,
+                numberOfPhases, updateTime, phaseList, chipId);
+        }
+    }
+
+    /**
+     * Sets the Hybrid UWB Session Controlee Configuration
+     *
+     * @param sessionId : Primary session ID
+     * @param numberOfPhases : Number of secondary sessions
+     * @param phaseList : list of secondary sessions
+     * @param chipId : Identifier of UWB chip for multi-HAL devices
+     * @return Byte representing the status of the operation
+     */
+    public byte setHybridSessionControleeConfiguration(int sessionId, int numberOfPhases,
             byte[] phaseList, String chipId) {
         synchronized (mNativeLock) {
-            return nativeSetHybridSessionConfigurations(sessionId, numberOfPhases, updateTime,
+            return nativeSetHybridSessionControleeConfigurations(sessionId, numberOfPhases,
                 phaseList, chipId);
         }
     }
 
     private native byte nativeSendData(int sessionId, byte[] address,
             short sequenceNum, byte[] appData, String chipId);
+
+    private native byte nativeSessionDataTransferPhaseConfig(int sessionId, byte dtpcmRepetition,
+            byte dataTransferControl, byte dtpmlSize, byte[] macAddress, byte[] slotBitmap,
+            String chipId);
 
     private native long nativeDispatcherNew(Object[] chipIds);
 
@@ -573,6 +616,10 @@ public class NativeUwbManager {
 
     private native int nativeGetSessionToken(int sessionId, String chipId);
 
-    private native byte nativeSetHybridSessionConfigurations(int sessionId, int noOfPhases,
-            byte[] updateTime, byte[] phaseList, String chipId);
+    private native byte nativeSetHybridSessionControllerConfigurations(int sessionId,
+            byte messageControl, int noOfPhases, byte[] updateTime, byte[] phaseList,
+                String chipId);
+
+    private native byte nativeSetHybridSessionControleeConfigurations(int sessionId,
+            int noOfPhases, byte[] phaseList, String chipId);
 }

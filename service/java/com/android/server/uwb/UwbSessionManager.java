@@ -97,7 +97,10 @@ import com.google.uwb.support.ccc.CccSpecificationParams;
 import com.google.uwb.support.ccc.CccStartRangingParams;
 import com.google.uwb.support.dltdoa.DlTDoARangingRoundsUpdate;
 import com.google.uwb.support.dltdoa.DlTDoARangingRoundsUpdateStatus;
-import com.google.uwb.support.fira.FiraHybridSessionConfig;
+import com.google.uwb.support.fira.FiraDataTransferPhaseConfig;
+import com.google.uwb.support.fira.FiraDataTransferPhaseConfig.FiraDataTransferPhaseManagementList;
+import com.google.uwb.support.fira.FiraHybridSessionControleeConfig;
+import com.google.uwb.support.fira.FiraHybridSessionControllerConfig;
 import com.google.uwb.support.fira.FiraOpenSessionParams;
 import com.google.uwb.support.fira.FiraParams;
 import com.google.uwb.support.fira.FiraPoseUpdateParams;
@@ -139,7 +142,9 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
 
     private static final String TAG = "UwbSessionManager";
     private static final byte OPERATION_TYPE_INIT_SESSION = 0;
-    private static final int UWB_HUS_PHASE_SIZE = 8;
+    private static final int UWB_HUS_CONTROLLER_PHASE_LIST_SHORT_MAC_ADDRESS_SIZE = 11;
+    private static final int UWB_HUS_CONTROLLER_PHASE_LIST_EXTENDED_MAC_ADDRESS_SIZE = 17;
+    private static final int UWB_HUS_CONTROLEE_PHASE_LIST_SIZE = 5;
 
     @VisibleForTesting
     public static final int SESSION_OPEN_RANGING = 1;
@@ -157,6 +162,12 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
     public static final int SESSION_SEND_DATA = 7;
     @VisibleForTesting
     public static final int SESSION_UPDATE_DT_TAG_RANGING_ROUNDS = 8;
+    @VisibleForTesting
+    public static final int SESSION_SET_HUS_CONTROLLER_CONFIG = 9;
+    @VisibleForTesting
+    public static final int SESSION_SET_HUS_CONTROLEE_CONFIG = 10;
+    @VisibleForTesting
+    public static final int SESSION_DATA_TRANSFER_PHASE_CONFIG = 11;
 
     // TODO: don't expose the internal field for testing.
     @VisibleForTesting
@@ -394,6 +405,30 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
         Trace.endSection();
     }
 
+    @Override
+    public void onDataTransferPhaseConfigNotificationReceived(long sessionId,
+            int dataTransferPhaseConfigStatus) {
+        Log.d(TAG, "onDataTransferPhaseConfigNotificationReceived:"
+                + ", sessionId: " + sessionId
+                + ", status: " + dataTransferPhaseConfigStatus);
+
+        UwbSession uwbSession = getUwbSession((int) sessionId);
+        if (uwbSession == null) {
+            Log.e(TAG, "onDataTransferPhaseConfigNotificationReceived: Received data transfer"
+                    + "config notification for unknown sessionId = " + sessionId);
+            return;
+        }
+
+        if (dataTransferPhaseConfigStatus
+                == UwbUciConstants.STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_DTPCM_CONFIG_SUCCESS) {
+            mSessionNotificationManager.onDataTransferPhaseConfigured(
+                    uwbSession, dataTransferPhaseConfigStatus);
+        } else {
+            mSessionNotificationManager.onDataTransferPhaseConfigFailed(
+                    uwbSession, dataTransferPhaseConfigStatus);
+        }
+    }
+
     /** Updates pose information if the session is using an ApplicationPoseSource */
     public void updatePose(SessionHandle sessionHandle, PersistableBundle params) {
         int sessionId = getSessionId(sessionHandle);
@@ -452,13 +487,11 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                 && state == UwbUciConstants.UWB_SESSION_STATE_IDLE
                 && reasonCode != REASON_STATE_CHANGE_WITH_SESSION_MANAGEMENT_COMMANDS)) {
             Log.d(TAG, "Session status NTF is received due to in-band session state change");
-            synchronized (uwbSession.getWaitObj()) {
-                uwbSession.getWaitObj().blockingNotify();
-            }
-        } else {
-            synchronized (uwbSession.getWaitObj()) {
-                uwbSession.getWaitObj().blockingNotify();
-            }
+        }
+        // Store the reasonCode before notifying on the waitObj.
+        synchronized (uwbSession.getWaitObj()) {
+            uwbSession.setLastSessionStatusNtfReasonCode(reasonCode);
+            uwbSession.getWaitObj().blockingNotify();
         }
 
         //TODO : process only error handling in this switch function, b/218921154
@@ -1124,41 +1157,65 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
     }
 
     /**
-     * Sets the hybrid UWB configuration
+     * Sets the hybrid UWB controller configuration.
      *
-     * @param sessionHandle : Primary session handle
-     * @param params        : protocol specific parameters to initiate the hybrid
-     *                      session
-     * @return the status code of the operation
-     * @throws RemoteException if an error occurs during the remote call.
+     * @param sessionHandle : Primary session handle.
+     * @param params        : protocol specific parameters to configure the hybrid
+     *                        session controller.
      */
-    public int setHybridSessionConfiguration(SessionHandle sessionHandle, PersistableBundle params)
-            throws RemoteException {
+    public void setHybridSessionControllerConfiguration(SessionHandle sessionHandle,
+            PersistableBundle params) {
+
         if (!isExistedSession(sessionHandle)) {
-            throw new IllegalStateException("Not initialized session ID");
+            throw new IllegalStateException("Not initialized session ID: "
+                    + getSessionId(sessionHandle));
         }
 
-        FiraHybridSessionConfig husConfig = FiraHybridSessionConfig.fromBundle(params);
-        int numberOfPhases = husConfig.getNumberOfPhases();
-        int sessionId = getSessionId(sessionHandle);
+        HybridSessionConfig hybridSessionConfig = new HybridSessionConfig();
+        hybridSessionConfig.sessionHandle = sessionHandle;
+        hybridSessionConfig.params = params;
 
-        Log.i(TAG, "setHybridSessionConfiguration() - sessionId: " + sessionId
-                + ", sessionHandle: " + sessionHandle
-                + ", numberOfPhases: " + numberOfPhases);
+        mEventTask.execute(SESSION_SET_HUS_CONTROLLER_CONFIG, hybridSessionConfig);
+    }
 
-        ByteBuffer buffer = ByteBuffer.allocate(numberOfPhases * UWB_HUS_PHASE_SIZE);
-        buffer.order(ByteOrder.LITTLE_ENDIAN);
-
-        for (FiraHybridSessionConfig.FiraHybridSessionPhaseList phaseList :
-                husConfig.getPhaseList()) {
-            buffer.putInt(mNativeUwbManager.getSessionToken(phaseList.getSessionHandle(),
-                    getUwbSession(sessionId).getChipId()));
-            buffer.putShort(phaseList.getStartSlotIndex());
-            buffer.putShort(phaseList.getEndSlotIndex());
+    /**
+     * Sets the hybrid UWB controlee configuration.
+     *
+     * @param sessionHandle : Primary session handle.
+     * @param params        : protocol specific parameters to configure the hybrid
+     *                        session controlee.
+     */
+    public void setHybridSessionControleeConfiguration(SessionHandle sessionHandle,
+            PersistableBundle params) {
+        if (!isExistedSession(sessionHandle)) {
+            throw new IllegalStateException("Not initialized session ID: "
+                + getSessionId(sessionHandle));
         }
 
-        return mNativeUwbManager.setHybridSessionConfiguration(sessionId, numberOfPhases,
-                husConfig.getUpdateTime(), buffer.array(), getUwbSession(sessionId).getChipId());
+        HybridSessionConfig hybridSessionConfig = new HybridSessionConfig();
+        hybridSessionConfig.sessionHandle = sessionHandle;
+        hybridSessionConfig.params = params;
+
+        mEventTask.execute(SESSION_SET_HUS_CONTROLEE_CONFIG, hybridSessionConfig);
+    }
+
+    /**
+     * Sets the data transfer session configuration
+     *
+     * @param sessionHandle : session handle
+     * @param params        : protocol specific parameters to configure data transfer session
+     */
+    public void setDataTransferPhaseConfig(SessionHandle sessionHandle, PersistableBundle params) {
+        if (!isExistedSession(sessionHandle)) {
+            throw new IllegalStateException("Not initialized session ID: "
+                + getSessionId(sessionHandle));
+        }
+
+        UpdateSessionInfo updateSessionInfo = new UpdateSessionInfo();
+        updateSessionInfo.sessionHandle = sessionHandle;
+        updateSessionInfo.params = params;
+
+        mEventTask.execute(SESSION_DATA_TRANSFER_PHASE_CONFIG, updateSessionInfo);
     }
 
     private static final class SendDataInfo {
@@ -1169,6 +1226,16 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
     }
 
     private static final class RangingRoundsUpdateDtTagInfo {
+        public SessionHandle sessionHandle;
+        public PersistableBundle params;
+    }
+
+    private static final class UpdateSessionInfo {
+        public SessionHandle sessionHandle;
+        public PersistableBundle params;
+    }
+
+    private static final class HybridSessionConfig {
         public SessionHandle sessionHandle;
         public PersistableBundle params;
     }
@@ -1202,7 +1269,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
     }
 
     /** Handle ranging rounds update for DT Tag */
-    public void handleRangingRoundsUpdateDtTag(RangingRoundsUpdateDtTagInfo info) {
+    private void handleRangingRoundsUpdateDtTag(RangingRoundsUpdateDtTagInfo info) {
         SessionHandle sessionHandle = info.sessionHandle;
         Integer sessionId = getSessionId(sessionHandle);
         if (sessionId == null) {
@@ -1259,6 +1326,283 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                 .build()
                 .toBundle();
         mSessionNotificationManager.onRangingRoundsUpdateStatus(uwbSession, params);
+    }
+
+    private void handleSetHybridSessionControllerConfiguration(HybridSessionConfig info) {
+        SessionHandle sessionHandle = info.sessionHandle;
+        if (!isExistedSession(sessionHandle)) {
+            Log.e(TAG, "handleSetHybridSessionControllerConfiguration() - cannot find session");
+            return;
+        }
+
+        int sessionId = getSessionId(sessionHandle);
+        UwbSession uwbSession = getUwbSession(sessionId);
+
+        // precondition check
+        int deviceType = uwbSession.getDeviceType();
+        int scheduleMode = uwbSession.getScheduledMode();
+        int sessionType = uwbSession.getSessionType();
+        if (UwbUciConstants.DEVICE_TYPE_CONTROLLER != deviceType
+                || UwbUciConstants.HYBRID_SCHEDULED_RANGING != scheduleMode
+                || (FiraParams.SESSION_TYPE_RANGING_ONLY_PHASE != sessionType
+                && FiraParams.SESSION_TYPE_IN_BAND_DATA_PHASE != sessionType
+                && FiraParams.SESSION_TYPE_RANGING_WITH_DATA_PHASE != sessionType)) {
+            Log.e(TAG, "SetHybridSessionControllerConfiguration() failed: device type: "
+                    + deviceType + " schedule mode: "
+                    + scheduleMode + " sessionType: " + sessionType);
+            mSessionNotificationManager.onHybridSessionControllerConfigurationFailed(
+                    uwbSession, UwbUciConstants.STATUS_CODE_FAILED);
+            return;
+        }
+
+        FiraHybridSessionControllerConfig husConfig =
+                FiraHybridSessionControllerConfig.fromBundle(info.params);
+        int numberOfPhases = husConfig.getNumberOfPhases();
+        byte messageControl = husConfig.getMessageControl();
+        byte macAddressMode = (byte) (messageControl & 0x01);
+
+        Log.i(TAG, "handleSetHybridSessionControllerConfiguration() - sessionId: " + sessionId
+                + ", sessionHandle: " + sessionHandle
+                + ", numberOfPhases: " + numberOfPhases);
+
+        ByteBuffer buffer = ByteBuffer.allocate(numberOfPhases
+                * ((macAddressMode == UwbUciConstants.MAC_ADDRESSING_MODE_SHORT)
+                ? UWB_HUS_CONTROLLER_PHASE_LIST_SHORT_MAC_ADDRESS_SIZE :
+                    UWB_HUS_CONTROLLER_PHASE_LIST_EXTENDED_MAC_ADDRESS_SIZE));
+        buffer.order(ByteOrder.LITTLE_ENDIAN);
+
+        for (FiraHybridSessionControllerConfig.FiraHybridSessionPhaseList phaseList :
+                husConfig.getPhaseList()) {
+            buffer.putInt(mNativeUwbManager.getSessionToken(phaseList.getSessionHandle(),
+                    uwbSession.getChipId()));
+            buffer.putShort(phaseList.getStartSlotIndex());
+            buffer.putShort(phaseList.getEndSlotIndex());
+            buffer.put(phaseList.getPhaseParticipation());
+            // validate the MacAddress
+            int addressByteLength = (macAddressMode
+                        == UwbUciConstants.SHORT_MAC_ADDRESS)
+                    ? UwbAddress.SHORT_ADDRESS_BYTE_LENGTH
+                    : UwbAddress.EXTENDED_ADDRESS_BYTE_LENGTH;
+            UwbAddress uwbAddress = phaseList.getMacAddress();
+            if (uwbAddress == null || uwbAddress.size() != addressByteLength) {
+                Log.e(TAG, "handleSetHybridSessionControllerConfiguration() invalid address");
+                mSessionNotificationManager.onHybridSessionControllerConfigurationFailed(
+                         uwbSession, UwbUciConstants.STATUS_CODE_FAILED);
+                return;
+            }
+            buffer.put(getComputedMacAddress(uwbAddress));
+        }
+
+        // create session set hus controller configuration task
+        FutureTask<Integer> sessionsetHybridControllerConfigTask = new FutureTask<>(
+                (Callable<Integer>) () -> {
+                    int status = UwbUciConstants.STATUS_CODE_FAILED;
+                    synchronized (uwbSession.getWaitObj()) {
+                        status = mNativeUwbManager.setHybridSessionControllerConfiguration(
+                                sessionId, messageControl, numberOfPhases,
+                                husConfig.getUpdateTime(), buffer.array(),
+                                uwbSession.getChipId());
+                    }
+                    return status;
+                }
+        );
+
+        // execute task
+        int status = UwbUciConstants.STATUS_CODE_FAILED;
+        try {
+            status = mUwbInjector.runTaskOnSingleThreadExecutor(
+                sessionsetHybridControllerConfigTask,
+                    IUwbAdapter.SESSION_CONFIGURATION_THRESHOLD_MS);
+        } catch (TimeoutException e) {
+            Log.e(TAG, "Failed to set session hybrid controller config : TIMEOUT");
+            mSessionNotificationManager.onHybridSessionControllerConfigurationFailed(
+                    uwbSession, status);
+        } catch (InterruptedException | ExecutionException e) {
+            Log.e(TAG, "Exception while executing task " + e);
+        }
+
+        if (UwbUciConstants.STATUS_CODE_OK == status) {
+            mSessionNotificationManager.onHybridSessionControllerConfigured(uwbSession,
+                    status);
+        } else {
+            Log.e(TAG, "Failed to configure controller hybrid session - status : " + status);
+            mSessionNotificationManager.onHybridSessionControllerConfigurationFailed(uwbSession,
+                    status);
+        }
+    }
+
+    private void handleSetHybridSessionControleeConfiguration(HybridSessionConfig info) {
+        SessionHandle sessionHandle = info.sessionHandle;
+        if (!isExistedSession(sessionHandle)) {
+            Log.e(TAG, "handleSetHybridSessionControlleeConfiguration() - cannot find session");
+            return;
+        }
+
+        int sessionId = getSessionId(sessionHandle);
+        UwbSession uwbSession = getUwbSession(sessionId);
+
+        // precondition check
+        int deviceType = uwbSession.getDeviceType();
+        int scheduleMode = uwbSession.getScheduledMode();
+        int sessionType = uwbSession.getSessionType();
+        if (UwbUciConstants.DEVICE_TYPE_CONTROLEE != deviceType
+                || UwbUciConstants.HYBRID_SCHEDULED_RANGING != scheduleMode
+                || (FiraParams.SESSION_TYPE_RANGING_ONLY_PHASE != sessionType
+                && FiraParams.SESSION_TYPE_IN_BAND_DATA_PHASE != sessionType
+                && FiraParams.SESSION_TYPE_RANGING_WITH_DATA_PHASE != sessionType)) {
+            Log.e(TAG, "handleSetHybridSessionControleeConfiguration() failed: device type: "
+                    + deviceType + " schedule mode: " + scheduleMode
+                    + " sessionType: " + sessionType);
+            mSessionNotificationManager.onHybridSessionControleeConfigurationFailed(
+                    uwbSession, UwbUciConstants.STATUS_CODE_FAILED);
+            return;
+        }
+
+        FiraHybridSessionControleeConfig controleeConfig =
+                FiraHybridSessionControleeConfig.fromBundle(info.params);
+        int numberOfPhases = controleeConfig.getNumberOfPhases();
+
+        Log.i(TAG, "handleSetHybridSessionControleeConfiguration() - sessionId: " + sessionId
+                + ", sessionHandle: " + sessionHandle
+                + ", numberOfPhases: " + numberOfPhases);
+
+        ByteBuffer phaseListBuffer = ByteBuffer.allocate(numberOfPhases
+                * UWB_HUS_CONTROLEE_PHASE_LIST_SIZE);
+        phaseListBuffer.order(ByteOrder.LITTLE_ENDIAN);
+
+        for (FiraHybridSessionControleeConfig.FiraHybridSessionPhaseList phaseList :
+                controleeConfig.getPhaseList()) {
+            phaseListBuffer.putInt(mNativeUwbManager.getSessionToken(phaseList.getSessionHandle(),
+                    uwbSession.getChipId()));
+            phaseListBuffer.put(phaseList.getPhaseParticipation());
+        }
+
+        // create session set hus controlee configuration task
+        FutureTask<Integer> sessionsetHybridControleeConfigTask = new FutureTask<>(
+                (Callable<Integer>) () -> {
+                    int status = UwbUciConstants.STATUS_CODE_FAILED;
+                    synchronized (uwbSession.getWaitObj()) {
+                        status = mNativeUwbManager.setHybridSessionControleeConfiguration(
+                                sessionId, numberOfPhases,
+                                phaseListBuffer.array(),
+                                uwbSession.getChipId());
+                    }
+                    return status;
+                }
+        );
+
+        // execute task
+        int status = UwbUciConstants.STATUS_CODE_FAILED;
+        try {
+            status = mUwbInjector.runTaskOnSingleThreadExecutor(
+                sessionsetHybridControleeConfigTask,
+                    IUwbAdapter.SESSION_CONFIGURATION_THRESHOLD_MS);
+        } catch (TimeoutException e) {
+            Log.e(TAG, "Failed to set session hybrid controlee config : TIMEOUT");
+            mSessionNotificationManager.onHybridSessionControleeConfigurationFailed(
+                    uwbSession, status);
+        } catch (InterruptedException | ExecutionException e) {
+            Log.e(TAG, "Exception while executing task " + e);
+        }
+
+        if (UwbUciConstants.STATUS_CODE_OK == status) {
+            mSessionNotificationManager.onHybridSessionControleeConfigured(uwbSession,
+                    status);
+        } else {
+            Log.e(TAG, "Failed to configure controlee hybrid session - status : " + status);
+            mSessionNotificationManager.onHybridSessionControleeConfigurationFailed(uwbSession,
+                    status);
+        }
+    }
+
+    private void handleSetDataTransferPhaseConfig(UpdateSessionInfo info) {
+        SessionHandle sessionHandle = info.sessionHandle;
+        Integer sessionId = getSessionId(sessionHandle);
+        UwbSession uwbSession = getUwbSession(sessionHandle);
+
+        int sessionType = uwbSession.getSessionType();
+        if (sessionType != FiraParams.SESSION_TYPE_RANGING_AND_IN_BAND_DATA
+                && sessionType != FiraParams.SESSION_TYPE_DATA_TRANSFER
+                && sessionType !=  FiraParams.SESSION_TYPE_IN_BAND_DATA_PHASE) {
+            Log.e(TAG, "SetDataTransferPhaseConfig not applicable for session type: "
+                    + sessionType);
+            return;
+        }
+
+        FiraDataTransferPhaseConfig dataTransferPhaseConfig =
+                FiraDataTransferPhaseConfig.fromBundle(info.params);
+
+        List<FiraDataTransferPhaseManagementList> mDataTransferPhaseManagementList =
+                dataTransferPhaseConfig.getDataTransferPhaseManagementList();
+        int dataTransferManagementListSize = mDataTransferPhaseManagementList.size();
+        int dataTransferControl = dataTransferPhaseConfig.getDataTransferControl();
+        int slotBitmapSizeInBytes = 1 << ((dataTransferControl & 0X0F) >> 1);
+
+        List<byte[]> macAddressList = new ArrayList<>();
+        ByteBuffer slotBitmapByteBuffer = ByteBuffer.allocate(dataTransferManagementListSize
+                * slotBitmapSizeInBytes);
+        slotBitmapByteBuffer.order(ByteOrder.LITTLE_ENDIAN);
+
+        int addressByteLength = ((dataTransferControl & 0x01)
+                       == UwbUciConstants.SHORT_MAC_ADDRESS)
+                ? UwbAddress.SHORT_ADDRESS_BYTE_LENGTH : UwbAddress.EXTENDED_ADDRESS_BYTE_LENGTH;
+
+        for (FiraDataTransferPhaseManagementList dataTransferPhaseManagementList :
+                mDataTransferPhaseManagementList) {
+            UwbAddress uwbAddress = dataTransferPhaseManagementList.getUwbAddress();
+            byte[] slotBitMap = dataTransferPhaseManagementList.getSlotBitMap();
+            if (uwbAddress != null && uwbAddress.size() == addressByteLength
+                    && slotBitMap.length == slotBitmapSizeInBytes) {
+                macAddressList.add(getComputedMacAddress(uwbAddress));
+                slotBitmapByteBuffer.put(slotBitMap);
+            } else {
+                Log.e(TAG, "handleSetDataTransferPhaseConfig: slot bitmap size "
+                            + "or address is not matching");
+                return;
+            }
+        }
+
+        // Check for buffer size mismatches
+        if (slotBitmapByteBuffer.array().length
+                != (slotBitmapSizeInBytes * dataTransferManagementListSize)
+                || macAddressList.size() != dataTransferManagementListSize) {
+            Log.e(TAG, "handleSetDataTransferPhaseConfig: slot bitmap buffer size or address list"
+                    + " size mismatch");
+            return;
+        }
+
+        // create session data transfer phase configuration task
+        FutureTask<Integer> sessionDataTransferPhaseConfigTask = new FutureTask<>(
+                (Callable<Integer>) () -> {
+                    int status = UwbUciConstants.STATUS_CODE_FAILED;
+                    synchronized (uwbSession.getWaitObj()) {
+                        status = mNativeUwbManager.setDataTransferPhaseConfig(sessionId,
+                                (byte) dataTransferPhaseConfig.getDtpcmRepetition(),
+                                (byte) dataTransferControl,
+                                (byte) dataTransferManagementListSize,
+                                ArrayUtils.toPrimitive(macAddressList),
+                                slotBitmapByteBuffer.array(),
+                                uwbSession.getChipId());
+                    }
+                    return status;
+                }
+        );
+
+        // execute task
+        int status = UwbUciConstants.STATUS_CODE_FAILED;
+        try {
+            status = mUwbInjector.runTaskOnSingleThreadExecutor(sessionDataTransferPhaseConfigTask,
+                    IUwbAdapter.SESSION_DATA_TRANSFER_PHASE_CONFIG_THRESHOLD_MS);
+        } catch (TimeoutException e) {
+            Log.e(TAG, "Failed to set session data transfer phase config : TIMEOUT");
+            mSessionNotificationManager.onDataTransferPhaseConfigFailed(uwbSession, status);
+        } catch (InterruptedException | ExecutionException e) {
+            Log.e(TAG, "Exception while executing task " + e);
+        }
+
+        if (status != UwbUciConstants.STATUS_CODE_OK) {
+            mSessionNotificationManager.onDataTransferPhaseConfigFailed(uwbSession, status);
+        }
     }
 
     void removeSession(UwbSession uwbSession) {
@@ -1398,6 +1742,27 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                     Log.d(TAG, "SESSION_UPDATE_DT_TAG_RANGING_ROUNDS");
                     RangingRoundsUpdateDtTagInfo info = (RangingRoundsUpdateDtTagInfo) msg.obj;
                     handleRangingRoundsUpdateDtTag(info);
+                    break;
+                }
+
+                case SESSION_SET_HUS_CONTROLLER_CONFIG: {
+                    Log.d(TAG, "SESSION_SET_HUS_CONTROLLER_CONFIG");
+                    HybridSessionConfig info = (HybridSessionConfig) msg.obj;
+                    handleSetHybridSessionControllerConfiguration(info);
+                    break;
+                }
+
+                case SESSION_SET_HUS_CONTROLEE_CONFIG: {
+                    Log.d(TAG, "SESSION_SET_HUS_CONTROLEE_CONFIG");
+                    HybridSessionConfig info = (HybridSessionConfig) msg.obj;
+                    handleSetHybridSessionControleeConfiguration(info);
+                    break;
+                }
+
+                case SESSION_DATA_TRANSFER_PHASE_CONFIG: {
+                    Log.d(TAG, "SESSION_DATA_TRANSFER_PHASE_CONFIG");
+                    UpdateSessionInfo info = (UpdateSessionInfo) msg.obj;
+                    handleSetDataTransferPhaseConfig(info);
                     break;
                 }
 
@@ -1572,9 +1937,12 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                                     uwbSession.reconfigureFiraSessionOnFgStateChange();
                                 }
                             } else {
-                                status = UwbUciConstants.STATUS_CODE_FAILED;
-                                mSessionNotificationManager.onRangingStartFailed(uwbSession,
-                                        status);
+                                int reasonCode = uwbSession.getLastSessionStatusNtfReasonCode();
+                                status =
+                                        UwbSessionNotificationHelper.convertUciReasonCodeToUciStatusCode(
+                                               reasonCode);
+                                mSessionNotificationManager.onRangingStartFailedWithUciReasonCode(
+                                        uwbSession, reasonCode);
                             }
                         }
                         return status;
@@ -2125,6 +2493,9 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
         private IPoseSource mPoseSource;
         // Application data repetition count
         private int mDataRepetitionCount;
+        // Hybrid session
+        private int mDeviceType;
+        private int mScheduleMode;
 
         // Store the UCI sequence number for the next Data packet (to be sent to UWBS).
         private short mDataSndSequenceNumber;
@@ -2134,6 +2505,9 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
 
         // Whether data delivery permission check is needed for the ranging session.
         private boolean mDataDeliveryPermissionCheckNeeded = true;
+
+        // reasonCode from the last received SESSION_STATUS_NTF for this session.
+        private int mLastSessionStatusNtfReasonCode = -1;
 
         @VisibleForTesting
         public List<UwbControlee> mControleeList;
@@ -2196,9 +2570,13 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                             mStackSessionPriority).build();
                 }
                 this.mDataRepetitionCount = firaParams.getDataRepetitionCount();
+                this.mDeviceType = firaParams.getDeviceType();
+                this.mScheduleMode = firaParams.getScheduledMode();
             } else {
                 this.mRangingRoundUsage = -1;
                 this.mDataRepetitionCount = 0;
+                this.mDeviceType = -1;
+                this.mScheduleMode = -1;
             }
 
             this.mReceivedDataInfoMap = new ConcurrentHashMap<>();
@@ -2448,6 +2826,14 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
 
         public int getDataRepetitionCount() {
             return mDataRepetitionCount;
+        }
+
+        public int getDeviceType() {
+            return mDeviceType;
+        }
+
+        public int getScheduledMode() {
+            return mScheduleMode;
         }
 
         public void updateAliroParamsOnStart(AliroStartRangingParams rangingStartParams) {
@@ -2896,6 +3282,14 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
 
         public void setOperationType(int type) {
             mOperationType = type;
+        }
+
+        public int getLastSessionStatusNtfReasonCode() {
+            return mLastSessionStatusNtfReasonCode;
+        }
+
+        public void setLastSessionStatusNtfReasonCode(int lastSessionStatusNtfReasonCode) {
+            mLastSessionStatusNtfReasonCode = lastSessionStatusNtfReasonCode;
         }
 
         /** Creates a filter engine based on the device configuration. */
