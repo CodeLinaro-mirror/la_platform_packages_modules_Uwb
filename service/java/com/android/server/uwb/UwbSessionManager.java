@@ -2745,6 +2745,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
             this.mNonPrivilegedAppInAttributionSource =
                     getAnyNonPrivilegedAppInAttributionSourceInternal();
             this.mStackSessionPriority = calculateSessionPriority();
+            this.mControlees = new ConcurrentHashMap<>();
 
             if (params instanceof FiraOpenSessionParams) {
                 FiraOpenSessionParams firaParams = (FiraOpenSessionParams) params;
@@ -2762,7 +2763,6 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                         break;
                 }
 
-                mControlees = new ConcurrentHashMap<>();
                 if (firaParams.getDestAddressList() != null) {
                     // Set up list of all controlees involved.
                     for (UwbAddress address : firaParams.getDestAddressList()) {
