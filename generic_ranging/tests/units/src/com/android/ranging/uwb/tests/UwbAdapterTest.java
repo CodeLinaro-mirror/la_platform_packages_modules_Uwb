@@ -27,19 +27,20 @@ import static org.mockito.Mockito.when;
 import android.content.Context;
 import android.content.pm.PackageManager;
 
-import androidx.core.uwb.backend.impl.internal.RangingController;
-import androidx.core.uwb.backend.impl.internal.RangingPosition;
-import androidx.core.uwb.backend.impl.internal.RangingSessionCallback;
-import androidx.core.uwb.backend.impl.internal.UwbDevice;
-import androidx.core.uwb.backend.impl.internal.UwbServiceImpl;
 import androidx.test.filters.SmallTest;
 
 import com.android.ranging.RangingAdapter;
+import com.android.ranging.RangingData;
 import com.android.ranging.RangingParameters.DeviceRole;
 import com.android.ranging.RangingTechnology;
 import com.android.ranging.cs.CsParameters;
 import com.android.ranging.uwb.UwbAdapter;
 import com.android.ranging.uwb.UwbParameters;
+import com.android.ranging.uwb.backend.internal.RangingController;
+import com.android.ranging.uwb.backend.internal.RangingPosition;
+import com.android.ranging.uwb.backend.internal.RangingSessionCallback;
+import com.android.ranging.uwb.backend.internal.UwbDevice;
+import com.android.ranging.uwb.backend.internal.UwbServiceImpl;
 
 import com.google.common.util.concurrent.MoreExecutors;
 
@@ -111,10 +112,6 @@ public class UwbAdapterTest {
         callbackCaptor.getValue().onRangingInitialized(mockUwbdevice);
         verify(mMockCallback).onStarted();
 
-        callbackCaptor.getValue().onRangingResult(
-                mockUwbdevice, mock(RangingPosition.class, Answers.RETURNS_DEEP_STUBS));
-        verify(mMockCallback).onRangingData(any());
-
         callbackCaptor.getValue().onRangingSuspended(mockUwbdevice, anyInt());
         verify(mMockCallback).onStopped(anyInt());
     }
@@ -124,5 +121,34 @@ public class UwbAdapterTest {
         mUwbAdapter.start(mock(UwbParameters.class), mMockCallback);
         mUwbAdapter.stop();
         verify(mMockUwbClient).stopRanging();
+    }
+
+    @Test
+    public void shouldReportData_onRangingResult() {
+        mUwbAdapter.start(mock(UwbParameters.class), mMockCallback);
+
+        ArgumentCaptor<RangingSessionCallback> callbackCaptor =
+                ArgumentCaptor.forClass(RangingSessionCallback.class);
+        verify(mMockUwbClient).startRanging(callbackCaptor.capture(), any());
+
+        UwbDevice mockDevice = mock(UwbDevice.class, Answers.RETURNS_DEEP_STUBS);
+        when(mockDevice.getAddress().toBytes()).thenReturn(new byte[]{0x1, 0x2});
+
+        RangingPosition mockPosition = mock(RangingPosition.class, Answers.RETURNS_DEEP_STUBS);
+        when(mockPosition.getDistance().getValue()).thenReturn(12F);
+        when(mockPosition.getElapsedRealtimeNanos()).thenReturn(1234L);
+
+        callbackCaptor.getValue().onRangingInitialized(mockDevice);
+        verify(mMockCallback).onStarted();
+
+        ArgumentCaptor<RangingData> dataCaptor = ArgumentCaptor.forClass(RangingData.class);
+        callbackCaptor.getValue().onRangingResult(mockDevice, mockPosition);
+        verify(mMockCallback).onRangingData(dataCaptor.capture());
+
+        RangingData data = dataCaptor.getValue();
+        Assert.assertEquals(RangingTechnology.UWB, data.getTechnology().get());
+        Assert.assertEquals(mockPosition.getDistance().getValue(), data.getRangeMeters(), 0.1);
+        Assert.assertArrayEquals(mockDevice.getAddress().toBytes(), data.getPeerAddress());
+        Assert.assertEquals(mockPosition.getElapsedRealtimeNanos(), data.getTimestamp().getNano());
     }
 }
