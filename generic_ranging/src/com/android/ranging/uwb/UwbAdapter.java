@@ -25,25 +25,25 @@ import android.os.RemoteException;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
-import androidx.core.uwb.backend.impl.internal.RangingCapabilities;
-import androidx.core.uwb.backend.impl.internal.RangingController;
-import androidx.core.uwb.backend.impl.internal.RangingDevice;
-import androidx.core.uwb.backend.impl.internal.RangingParameters;
-import androidx.core.uwb.backend.impl.internal.RangingPosition;
-import androidx.core.uwb.backend.impl.internal.RangingSessionCallback;
-import androidx.core.uwb.backend.impl.internal.Utils;
-import androidx.core.uwb.backend.impl.internal.UwbAddress;
-import androidx.core.uwb.backend.impl.internal.UwbComplexChannel;
-import androidx.core.uwb.backend.impl.internal.UwbDevice;
-import androidx.core.uwb.backend.impl.internal.UwbFeatureFlags;
-import androidx.core.uwb.backend.impl.internal.UwbServiceImpl;
 
 import com.android.ranging.RangingAdapter;
+import com.android.ranging.RangingData;
 import com.android.ranging.RangingParameters.DeviceRole;
 import com.android.ranging.RangingParameters.TechnologyParameters;
-import com.android.ranging.RangingReport;
 import com.android.ranging.RangingTechnology;
 import com.android.ranging.RangingUtils.StateMachine;
+import com.android.ranging.uwb.backend.internal.RangingCapabilities;
+import com.android.ranging.uwb.backend.internal.RangingController;
+import com.android.ranging.uwb.backend.internal.RangingDevice;
+import com.android.ranging.uwb.backend.internal.RangingParameters;
+import com.android.ranging.uwb.backend.internal.RangingPosition;
+import com.android.ranging.uwb.backend.internal.RangingSessionCallback;
+import com.android.ranging.uwb.backend.internal.Utils;
+import com.android.ranging.uwb.backend.internal.UwbAddress;
+import com.android.ranging.uwb.backend.internal.UwbComplexChannel;
+import com.android.ranging.uwb.backend.internal.UwbDevice;
+import com.android.ranging.uwb.backend.internal.UwbFeatureFlags;
+import com.android.ranging.uwb.backend.internal.UwbServiceImpl;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.FutureCallback;
@@ -51,6 +51,7 @@ import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
 
+import java.time.Duration;
 import java.util.concurrent.Executors;
 
 /** Ranging adapter for Ultra-wideband (UWB). */
@@ -182,21 +183,20 @@ public class UwbAdapter implements RangingAdapter {
 
         @Override
         public void onRangingResult(UwbDevice device, RangingPosition position) {
-            RangingReport.Builder rangingDataBuilder =
-                    new RangingReport.Builder()
-                            .setRangingTechnology(RangingTechnology.UWB)
-                            .setRangeDistance(position.getDistance().getValue())
-                            .setRssi(position.getRssiDbm())
-                            .setTimestamp(position.getElapsedRealtimeNanos())
-                            .setPeerAddress(device.getAddress().toBytes());
+            RangingData.Builder dataBuilder = new RangingData.Builder()
+                    .setTechnology(RangingTechnology.UWB)
+                    .setRangeDistance(position.getDistance().getValue())
+                    .setRssi(position.getRssiDbm())
+                    .setTimestamp(Duration.ofNanos(position.getElapsedRealtimeNanos()))
+                    .setPeerAddress(device.getAddress().toBytes());
 
             if (position.getAzimuth() != null) {
-                rangingDataBuilder.setAzimuth(position.getAzimuth().getValue());
+                dataBuilder.setAzimuthRadians(position.getAzimuth().getValue());
             }
             if (position.getElevation() != null) {
-                rangingDataBuilder.setElevation(position.getElevation().getValue());
+                dataBuilder.setElevationRadians(position.getElevation().getValue());
             }
-            mCallbacks.onRangingData(rangingDataBuilder.build());
+            mCallbacks.onRangingData(dataBuilder.build());
         }
 
         private static @Callback.StoppedReason int convertReason(

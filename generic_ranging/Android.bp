@@ -41,7 +41,7 @@ java_library {
         "guava",
         "multi-sensor-finder-configuration-java-proto",
         "com.uwb.fusion",
-        "uwb_androidx_backend",
+        "ranging_uwb_backend",
     ],
     visibility: [
         ":__subpackages__",
