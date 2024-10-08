@@ -14,17 +14,17 @@
  * limitations under the License.
  */
 
-package androidx.core.uwb.backend.impl.internal;
+package com.android.ranging.uwb.backend.internal;
 
-import static androidx.core.uwb.backend.impl.internal.RangingSessionCallback.REASON_FAILED_TO_START;
-import static androidx.core.uwb.backend.impl.internal.RangingSessionCallback.REASON_STOP_RANGING_CALLED;
-import static androidx.core.uwb.backend.impl.internal.RangingSessionCallback.REASON_WRONG_PARAMETERS;
-import static androidx.core.uwb.backend.impl.internal.Utils.INVALID_API_CALL;
-import static androidx.core.uwb.backend.impl.internal.Utils.RANGING_ALREADY_STARTED;
-import static androidx.core.uwb.backend.impl.internal.Utils.STATUS_OK;
-import static androidx.core.uwb.backend.impl.internal.Utils.TAG;
-import static androidx.core.uwb.backend.impl.internal.Utils.UWB_RECONFIGURATION_FAILURE;
-import static androidx.core.uwb.backend.impl.internal.Utils.UWB_SYSTEM_CALLBACK_FAILURE;
+import static com.android.ranging.uwb.backend.internal.RangingSessionCallback.REASON_FAILED_TO_START;
+import static com.android.ranging.uwb.backend.internal.RangingSessionCallback.REASON_STOP_RANGING_CALLED;
+import static com.android.ranging.uwb.backend.internal.RangingSessionCallback.REASON_WRONG_PARAMETERS;
+import static com.android.ranging.uwb.backend.internal.Utils.INVALID_API_CALL;
+import static com.android.ranging.uwb.backend.internal.Utils.RANGING_ALREADY_STARTED;
+import static com.android.ranging.uwb.backend.internal.Utils.STATUS_OK;
+import static com.android.ranging.uwb.backend.internal.Utils.TAG;
+import static com.android.ranging.uwb.backend.internal.Utils.UWB_RECONFIGURATION_FAILURE;
+import static com.android.ranging.uwb.backend.internal.Utils.UWB_SYSTEM_CALLBACK_FAILURE;
 
 import static com.google.uwb.support.fira.FiraParams.RANGING_DEVICE_DT_TAG;
 
@@ -133,7 +133,7 @@ public abstract class RangingDevice {
     /** Gets local address. The first call will return a randomized short address. */
     public UwbAddress getLocalAddress() {
         if (isLocalAddressSet()) {
-          return mLocalAddress;
+            return mLocalAddress;
         }
         // UwbManager#getDefaultChipId is supported from Android T.
         if (VERSION.SDK_INT < VERSION_CODES.TIRAMISU) {
@@ -499,7 +499,8 @@ public abstract class RangingDevice {
             return STATUS_OK;
         }
 
-        if (openSessionParams.getDeviceRole() == RANGING_DEVICE_DT_TAG) {
+        if (VERSION.SDK_INT >= VERSION_CODES.UPSIDE_DOWN_CAKE
+                && openSessionParams.getDeviceRole() == RANGING_DEVICE_DT_TAG) {
             // Setting default ranging rounds value.
             DlTDoARangingRoundsUpdate rangingRounds =
                     new DlTDoARangingRoundsUpdate.Builder()
@@ -605,8 +606,8 @@ public abstract class RangingDevice {
      * Reconfigures range data notification for an ongoing session.
      *
      * @return STATUS_OK if reconfigure was successful.
-     * @return UWB_RECONFIGURATION_FAILURE if reconfigure failed.
-     * @return INVALID_API_CALL if ranging session is not active.
+     * UWB_RECONFIGURATION_FAILURE if reconfigure failed.
+     * INVALID_API_CALL if ranging session is not active.
      */
     public synchronized int reconfigureRangeDataNtfConfig(UwbRangeDataNtfConfig config) {
         if (!isAlive()) {
