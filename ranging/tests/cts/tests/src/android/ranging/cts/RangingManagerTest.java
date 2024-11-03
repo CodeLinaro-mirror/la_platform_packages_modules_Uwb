@@ -25,10 +25,10 @@ import android.content.Context;
 import android.platform.test.annotations.AppModeFull;
 import android.platform.test.annotations.RequiresFlagsEnabled;
 import android.ranging.RangingCapabilities;
-import android.ranging.RangingCapabilitiesListener;
 import android.ranging.RangingData;
 import android.ranging.RangingDevice;
 import android.ranging.RangingManager;
+import android.ranging.RangingManager.RangingCapabilitiesCallback;
 import android.ranging.RangingParams;
 import android.ranging.RangingPreference;
 import android.ranging.RangingSession;
@@ -186,6 +186,10 @@ public class RangingManagerTest {
         private volatile CountDownLatch mOnStartedCalled = new CountDownLatch(1);
         private volatile CountDownLatch mOnClosedCalled = new CountDownLatch(1);
 
+        public void replaceOnStartedCountDownLatch(CountDownLatch latch) {
+            mOnStartedCalled = latch;
+        }
+
         @Override
         public void onStarted(int technology) {
             mOnStartedCalled.countDown();
@@ -216,39 +220,92 @@ public class RangingManagerTest {
     @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_enabled")
     public void testGetRangingCapabilities() throws InterruptedException {
-        RangingCapListener rangingCapListener = new RangingCapListener(new CountDownLatch(1));
-        mRangingManager.getRangingCapabilities(
-                Executors.newSingleThreadExecutor(), rangingCapListener
-        );
+        CapabilitiesCallback capabilitiesCallback = new CapabilitiesCallback(new CountDownLatch(1));
+        mRangingManager.registerCapabilitiesCallback(Executors.newSingleThreadExecutor(),
+                capabilitiesCallback);
 
-        assertThat(rangingCapListener.mOnCapabilitiesReceived.await(1, TimeUnit.SECONDS)).isTrue();
-        assertThat(rangingCapListener.mOnRangingCapabilitiesCalled).isTrue();
-        assertThat(rangingCapListener.mRangingCapabilities).isNotNull();
+        assertThat(capabilitiesCallback.mCountDownLatch.await(2, TimeUnit.SECONDS)).isTrue();
+        assertThat(capabilitiesCallback.mOnCapabilitiesReceived).isTrue();
+        assertThat(capabilitiesCallback.mRangingCapabilities).isNotNull();
+        assertThat(capabilitiesCallback.mRangingCapabilities.getTechnologyAvailabilityMap())
+                .isNotNull();
 
         UwbRangingCapabilities uwbRangingCapabilities =
-                rangingCapListener.mRangingCapabilities.getUwbCapabilities();
+                capabilitiesCallback.mRangingCapabilities.getUwbCapabilities();
         if (uwbRangingCapabilities != null) {
             assertThat(uwbRangingCapabilities.isSupportsDistance()).isTrue();
             assertThat(uwbRangingCapabilities.getSupportedChannels()).isNotNull();
         }
+
+        mRangingManager.unregisterCapabilitiesCallback(capabilitiesCallback);
     }
 
-    private static class RangingCapListener implements RangingCapabilitiesListener {
-        private final CountDownLatch mOnCapabilitiesReceived;
+    @Test
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @RequiresFlagsEnabled("com.android.ranging.flags.ranging_rtt_enabled")
+    public void testRttRanging() throws InterruptedException {
+        //Enable when
+//        CapabilitiesCallback capabilitiesCallback = new CapabilitiesCallback(new CountDownLatch
+//        (1));
+//        mRangingManager.registerCapabilitiesCallback(Executors.newSingleThreadExecutor(),
+//                capabilitiesCallback);
+//
+//        assertThat(capabilitiesCallback.mCountDownLatch.await(3, TimeUnit.SECONDS)).isTrue();
+//        assertThat(capabilitiesCallback.mOnCapabilitiesReceived).isTrue();
+//        assertThat(capabilitiesCallback.mRangingCapabilities).isNotNull();
+//        assertThat(
+//                capabilitiesCallback.mRangingCapabilities.getTechnologyAvailabilityMap())
+//                .isNotNull();
+//
+//        assumeTrue(capabilitiesCallback.mRangingCapabilities.getTechnologyAvailabilityMap().get(
+//                RangingManager.RangingTechnology.WIFI_RTT)
+//                == RangingManager.RangingTechnologyAvailability.ENABLED);
+//        List<RttRangingParams> rttParamsList = new ArrayList<>();
+//        rttParamsList.add(new RttRangingParams.Builder()
+//                .setDeviceRole(RttRangingParams.DEVICE_ROLE_SUBSCRIBER)
+//                .setServiceName("Test1")
+//                .setMatchFilter(new byte[]{0,1,2})
+//                .build());
+//        rttParamsList.add(new RttRangingParams.Builder()
+//                .setDeviceRole(RttRangingParams.DEVICE_ROLE_SUBSCRIBER)
+//                .setServiceName("Test2")
+//                .setMatchFilter(new byte[]{0,1})
+//                .build());
+//        RangingPreference preference = new RangingPreference.Builder()
+//                .setRangingParameters(new RangingParams.Builder()
+//                        .setRttParameters(rttParamsList)
+//                        .build())
+//                .build();
+//
+//        CallbackVerifier callback = new CallbackVerifier();
+//        RangingSession rangingSession = mRangingManager.createRangingSession(
+//                MoreExecutors.directExecutor(), callback);
+//        assertThat(rangingSession).isNotNull();
+//
+//        callback.replaceOnStartedCountDownLatch(new CountDownLatch(2));
+//        rangingSession.start(preference);
+//        assertThat(callback.mOnStartedCalled.await(2, TimeUnit.SECONDS)).isTrue();
+//        rangingSession.stop();
+//        assertThat(callback.mOnClosedCalled.await(2, TimeUnit.SECONDS)).isTrue();
+//
+//        mRangingManager.unregisterCapabilitiesCallback(capabilitiesCallback);
+    }
 
-        private boolean mOnRangingCapabilitiesCalled = false;
+    private static class CapabilitiesCallback implements RangingCapabilitiesCallback {
 
-        private RangingCapabilities mRangingCapabilities;
+        private final CountDownLatch mCountDownLatch;
+        private boolean mOnCapabilitiesReceived = false;
+        private RangingCapabilities mRangingCapabilities = null;
 
-        RangingCapListener(CountDownLatch countDownLatch) {
-            mOnCapabilitiesReceived = countDownLatch;
+        CapabilitiesCallback(CountDownLatch countDownLatch) {
+            mCountDownLatch = countDownLatch;
         }
 
         @Override
-        public void onRangingCapabilities(RangingCapabilities capabilities) {
-            mOnCapabilitiesReceived.countDown();
-            mOnRangingCapabilitiesCalled = true;
+        public void onRangingCapabilities(@NonNull RangingCapabilities capabilities) {
+            mOnCapabilitiesReceived = true;
             mRangingCapabilities = capabilities;
+            mCountDownLatch.countDown();
         }
     }
 }
