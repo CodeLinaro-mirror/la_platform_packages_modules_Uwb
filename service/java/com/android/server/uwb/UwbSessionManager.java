@@ -710,6 +710,12 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
             maxSessionsExceeded = !tryMakeSpaceForFiraSession(
                     uwbSession.getStackSessionPriority());
         }
+
+        if (!maxSessionsExceeded && getSessionCount() >= getMaxSupportedSessionCount(chipId)) {
+            maxSessionsExceeded = true;
+            Log.i(TAG, "Session count exceeds max supported Session count");
+        }
+
         if (maxSessionsExceeded) {
             rangingCallbacks.onRangingOpenFailed(sessionHandle,
                     RangingChangeReason.MAX_SESSIONS_REACHED,
@@ -1110,6 +1116,15 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
             // specification params are empty, return the default Fira max sessions value
             return FiraSpecificationParams.DEFAULT_MAX_RANGING_SESSIONS_NUMBER;
         }
+    }
+
+    /** Returns max supported session count possible on given chip. */
+    public long getMaxSupportedSessionCount(String chipId) {
+        GenericSpecificationParams params =
+                mUwbInjector.getUwbServiceCore().getCachedSpecificationParams(chipId);
+        return (params != null)
+                ? params.getMaxSupportedSessionCount()
+                : getMaxFiraSessionsNumber(chipId) + getMaxCccSessionsNumber(chipId);
     }
 
     /** Gets the session with the lowest session priority among all sessions with given protocol. */
