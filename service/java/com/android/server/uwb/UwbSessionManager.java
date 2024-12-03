@@ -559,6 +559,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                 && reasonCode != REASON_STATE_CHANGE_WITH_SESSION_MANAGEMENT_COMMANDS)) {
             Log.d(TAG, "Session status NTF is received due to in-band session state change");
         }
+
         // Store the reasonCode before notifying on the waitObj.
         synchronized (uwbSession.getWaitObj()) {
             uwbSession.setLastSessionStatusNtfReasonCode(reasonCode);
