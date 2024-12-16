@@ -16,12 +16,14 @@
 
 package com.android.server.ranging.uwb;
 
+import static com.android.ranging.uwb.backend.internal.RangingMeasurement.CONFIDENCE_HIGH;
+import static com.android.ranging.uwb.backend.internal.RangingMeasurement.CONFIDENCE_MEDIUM;
 import static com.android.server.ranging.uwb.UwbConfig.toBackend;
 
 import android.content.Context;
-import android.content.pm.PackageManager;
-import android.os.Build;
-import android.os.RemoteException;
+import android.ranging.RangingData;
+import android.ranging.RangingDevice;
+import android.ranging.RangingPreference;
 import android.ranging.uwb.UwbAddress;
 import android.ranging.uwb.UwbComplexChannel;
 import android.util.Log;
@@ -29,40 +31,34 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
-import com.android.ranging.uwb.backend.internal.RangingCapabilities;
 import com.android.ranging.uwb.backend.internal.RangingController;
-import com.android.ranging.uwb.backend.internal.RangingDevice;
+import com.android.ranging.uwb.backend.internal.RangingMeasurement;
 import com.android.ranging.uwb.backend.internal.RangingPosition;
 import com.android.ranging.uwb.backend.internal.RangingSessionCallback;
 import com.android.ranging.uwb.backend.internal.Utils;
 import com.android.ranging.uwb.backend.internal.UwbDevice;
-import com.android.ranging.uwb.backend.internal.UwbFeatureFlags;
 import com.android.ranging.uwb.backend.internal.UwbServiceImpl;
 import com.android.server.ranging.RangingAdapter;
-import com.android.server.ranging.RangingConfig;
-import com.android.server.ranging.RangingData;
+import com.android.server.ranging.RangingPeerConfig;
 import com.android.server.ranging.RangingTechnology;
 import com.android.server.ranging.RangingUtils.StateMachine;
 
 import com.google.common.annotations.VisibleForTesting;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
-import com.google.common.util.concurrent.ListenableFuture;
 import com.google.common.util.concurrent.ListeningExecutorService;
-import com.google.uwb.support.fira.FiraParams;
 
-import java.time.Duration;
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 /** Ranging adapter for Ultra-wideband (UWB). */
 public class UwbAdapter implements RangingAdapter {
     private static final String TAG = UwbAdapter.class.getSimpleName();
 
-    private final UwbServiceImpl mUwbService;
-    // private IUwb mIUwb;
-
-    private final RangingDevice mUwbClient;
+    private final com.android.ranging.uwb.backend.internal.RangingDevice mUwbClient;
     private final ListeningExecutorService mExecutorService;
+    private final ExecutorService mBackendExecutor;
     private final ExecutorResultHandlers mUwbClientResultHandlers = new ExecutorResultHandlers();
     private final RangingSessionCallback mUwbListener = new UwbListener();
     private final StateMachine<State> mStateMachine;
@@ -70,46 +66,42 @@ public class UwbAdapter implements RangingAdapter {
     /** Invariant: non-null while a ranging session is active */
     private Callback mCallbacks;
 
-    /** @return true if UWB is supported in the provided context, false otherwise */
-    public static boolean isSupported(Context context) {
-        return context.getPackageManager().hasSystemFeature(PackageManager.FEATURE_UWB);
-    }
+    /** Invariant: non-null while a ranging session is active */
+    private Map<UwbAddress, RangingDevice> mDeviceFromUwbAddress;
 
     public UwbAdapter(
-            @NonNull Context context, @NonNull ListeningExecutorService executorService,
-            @FiraParams.RangingDeviceType int type
+            @NonNull Context context, @NonNull ListeningExecutorService executor,
+            @RangingPreference.DeviceRole int role
     ) {
-        this(context, executorService,
-                new UwbServiceImpl(
-                        context,
-                        new UwbFeatureFlags.Builder()
-                                .setSkipRangingCapabilitiesCheck(
-                                        Build.VERSION.SDK_INT <= Build.VERSION_CODES.S_V2)
-                                .setReversedByteOrderFiraParams(
-                                        Build.VERSION.SDK_INT <= Build.VERSION_CODES.TIRAMISU)
-                                .build(),
-                        (isUwbAvailable, reason) -> {
-                            // TODO: Implement when adding backend support.
-                        }
-                ),
-                type);
+        this(context, executor, Executors.newSingleThreadExecutor(), role);
     }
 
+    /** Intermediary constructor used to make an additional reference to backendExecutor. */
+    private UwbAdapter(
+            @NonNull Context context, @NonNull ListeningExecutorService executor,
+            @NonNull ExecutorService backendExecutor, @RangingPreference.DeviceRole int role
+    ) {
+        this(context, executor, backendExecutor,
+                role == RangingPreference.DEVICE_ROLE_INITIATOR
+                        ? UwbServiceImpl.getController(context, backendExecutor)
+                        : UwbServiceImpl.getControlee(context, backendExecutor));
+    }
+
+    /** Injectable constructor for testing. */
     @VisibleForTesting
     public UwbAdapter(
-            @NonNull Context context, @NonNull ListeningExecutorService executorService,
-            @NonNull UwbServiceImpl uwbService, @FiraParams.RangingDeviceType int type
+            @NonNull Context context, @NonNull ListeningExecutorService executor,
+            @NonNull ExecutorService backendExecutor,
+            @NonNull com.android.ranging.uwb.backend.internal.RangingDevice uwbClient
     ) {
-        if (!UwbAdapter.isSupported(context)) {
+        if (!RangingTechnology.UWB.isSupported(context)) {
             throw new IllegalArgumentException("UWB system feature not found.");
         }
 
         mStateMachine = new StateMachine<>(State.STOPPED);
-        mUwbService = uwbService;
-        mUwbClient = type == FiraParams.RANGING_DEVICE_TYPE_CONTROLLER
-                ? mUwbService.getController(context)
-                : mUwbService.getControlee(context);
-        mExecutorService = executorService;
+        mUwbClient = uwbClient;
+        mExecutorService = executor;
+        mBackendExecutor = backendExecutor;
         mCallbacks = null;
     }
 
@@ -119,12 +111,8 @@ public class UwbAdapter implements RangingAdapter {
     }
 
     @Override
-    public ListenableFuture<Boolean> isEnabled() {
-        return Futures.immediateFuture(mUwbService.isAvailable());
-    }
-
-    @Override
-    public void start(@NonNull RangingConfig.TechnologyConfig config, @NonNull Callback callbacks) {
+    public void start(@NonNull RangingPeerConfig.TechnologyConfig config,
+            @NonNull Callback callbacks) {
         Log.i(TAG, "Start called.");
         if (!mStateMachine.transition(State.STOPPED, State.STARTED)) {
             Log.v(TAG, "Attempted to start adapter when it was already started");
@@ -134,14 +122,22 @@ public class UwbAdapter implements RangingAdapter {
         mCallbacks = callbacks;
         if (!(config instanceof UwbConfig uwbConfig)) {
             Log.w(TAG, "Tried to start adapter with invalid ranging parameters");
-            mCallbacks.onStopped(Callback.StoppedReason.FAILED_TO_START);
             return;
         }
+        // TODO(b/376273627): Support multiple peer devices here
+        mDeviceFromUwbAddress = Map.of(
+                UwbAddress.fromBytes(uwbConfig.getPeer().second.getAddressBytes()),
+                uwbConfig.getPeer().first
+        );
         mUwbClient.setRangingParameters(uwbConfig.asBackendParameters());
         mUwbClient.setLocalAddress(toBackend(uwbConfig.getParameters().getDeviceAddress()));
+        if (mUwbClient instanceof RangingController controller) {
+            controller.setComplexChannel(
+                    toBackend(uwbConfig.getParameters().getComplexChannel()));
+        }
 
         var future = Futures.submit(() -> {
-            mUwbClient.startRanging(mUwbListener, Executors.newSingleThreadExecutor());
+            mUwbClient.startRanging(mUwbListener, mBackendExecutor);
         }, mExecutorService);
         Futures.addCallback(future, mUwbClientResultHandlers.startRanging, mExecutorService);
     }
@@ -158,8 +154,8 @@ public class UwbAdapter implements RangingAdapter {
         Futures.addCallback(future, mUwbClientResultHandlers.stopRanging, mExecutorService);
     }
 
-    public @NonNull UwbAddress getLocalAddress() {
-        return UwbAddress.fromBytes(mUwbClient.getLocalAddress().toBytes());
+    public @NonNull android.ranging.uwb.UwbAddress getLocalAddress() {
+        return android.ranging.uwb.UwbAddress.fromBytes(mUwbClient.getLocalAddress().toBytes());
     }
 
     public @Nullable UwbComplexChannel getComplexChannel() {
@@ -174,14 +170,10 @@ public class UwbAdapter implements RangingAdapter {
                 .build();
     }
 
-    public ListenableFuture<RangingCapabilities> getCapabilities() throws RemoteException {
-        return Futures.submit(mUwbService::getRangingCapabilities, mExecutorService);
-    }
-
     private class UwbListener implements RangingSessionCallback {
 
         @Override
-        public void onRangingInitialized(UwbDevice device) {
+        public void onRangingInitialized(UwbDevice localDevice) {
             Log.i(TAG, "onRangingInitialized");
             synchronized (mStateMachine) {
                 if (mStateMachine.getState() == State.STARTED) {
@@ -190,24 +182,43 @@ public class UwbAdapter implements RangingAdapter {
             }
         }
 
+        private static android.ranging.RangingMeasurement convertMeasurement(
+                @NonNull RangingMeasurement measurement
+        ) {
+            return new android.ranging.RangingMeasurement.Builder()
+                    .setMeasurement(measurement.getValue())
+                    .setConfidence(convertConfidence(measurement.getConfidence()))
+                    .build();
+        }
+
         @Override
-        public void onRangingResult(UwbDevice device, RangingPosition position) {
+        public void onRangingResult(UwbDevice peer, RangingPosition position) {
             RangingData.Builder dataBuilder = new RangingData.Builder()
-                    .setTechnology(RangingTechnology.UWB)
-                    .setRangeDistance(position.getDistance().getValue())
-                    .setRssi(position.getRssiDbm())
-                    .setTimestamp(Duration.ofNanos(position.getElapsedRealtimeNanos()))
-                    .setPeerAddress(device.getAddress().toBytes());
+                    .setRangingTechnology((int) RangingTechnology.UWB.getValue())
+                    .setDistance(convertMeasurement(position.getDistance()))
+                    .setTimestampMillis(position.getElapsedRealtimeNanos());
 
             if (position.getAzimuth() != null) {
-                dataBuilder.setAzimuthRadians(position.getAzimuth().getValue());
+                dataBuilder.setAzimuth(convertMeasurement(position.getAzimuth()));
             }
             if (position.getElevation() != null) {
-                dataBuilder.setElevationRadians(position.getElevation().getValue());
+                dataBuilder.setElevation(convertMeasurement(position.getElevation()));
             }
+            if (position.getRssiDbm() != RangingPosition.RSSI_UNKNOWN) {
+                dataBuilder.setRssi(position.getRssiDbm());
+            }
+
             synchronized (mStateMachine) {
                 if (mStateMachine.getState() == State.STARTED) {
-                    mCallbacks.onRangingData(dataBuilder.build());
+                    RangingDevice device = mDeviceFromUwbAddress.get(
+                            UwbAddress.fromBytes(peer.getAddress().toBytes())
+                    );
+                    if (device == null) {
+                        Log.w(TAG, "onRangingResult for unknown peer with UWB address "
+                                + peer.getAddress().toHexString());
+                    } else {
+                        mCallbacks.onRangingData(device, dataBuilder.build());
+                    }
                 }
             }
         }
@@ -231,7 +242,7 @@ public class UwbAdapter implements RangingAdapter {
         }
 
         @Override
-        public void onRangingSuspended(UwbDevice device, @RangingSuspendedReason int reason) {
+        public void onRangingSuspended(UwbDevice localDevice, @RangingSuspendedReason int reason) {
             Log.i(TAG, "onRangingSuspended: " + reason);
 
             synchronized (mStateMachine) {
@@ -239,10 +250,22 @@ public class UwbAdapter implements RangingAdapter {
                 clear();
             }
         }
+
+        @Override
+        public void onPeerDisconnected(UwbDevice peer, @PeerDisconnectedReason int reason) {
+            // TODO(b/376273627): Use multicast sessions
+            Log.i(TAG, "onPeerDisconnected: " + reason);
+
+            synchronized (mStateMachine) {
+                mCallbacks.onStopped(Callback.StoppedReason.LOST_CONNECTION);
+                clear();
+            }
+        }
     }
 
     private void clear() {
         mCallbacks = null;
+        mDeviceFromUwbAddress = null;
     }
 
     public enum State {
@@ -278,9 +301,17 @@ public class UwbAdapter implements RangingAdapter {
             public void onFailure(@NonNull Throwable t) {
                 Log.w(TAG, "stopRanging failed ", t);
                 // We failed to stop but there's nothing else we can do.
-                mCallbacks.onStopped(RangingAdapter.Callback.StoppedReason.REQUESTED);
+                mCallbacks.onStopped(Callback.StoppedReason.ERROR);
                 clear();
             }
+        };
+    }
+
+    public static int convertConfidence(int confidence) {
+        return switch (confidence) {
+            case CONFIDENCE_HIGH -> android.ranging.RangingMeasurement.CONFIDENCE_HIGH;
+            case CONFIDENCE_MEDIUM -> android.ranging.RangingMeasurement.CONFIDENCE_MEDIUM;
+            default -> android.ranging.RangingMeasurement.CONFIDENCE_LOW;
         };
     }
 }

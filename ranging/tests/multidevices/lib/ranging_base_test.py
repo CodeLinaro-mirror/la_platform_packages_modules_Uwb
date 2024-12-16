@@ -15,11 +15,11 @@
 
 import re
 
+from lib import utils
 from mobly import base_test
-from mobly import records
 from mobly import test_runner
 from mobly.controllers import android_device
-from test_utils import uwb_test_utils
+
 
 RELEASE_ID_REGEX = re.compile(r"\w+\.\d+\.\d+")
 
@@ -34,8 +34,10 @@ class RangingBaseTest(base_test.BaseTestClass):
         android_device, min_number=2
     )
     for ad in self.android_devices:
-      ad.load_snippet("ranging", "multidevices.snippet.ranging")
-      uwb_test_utils.initialize_uwb_country_code_if_necessary(ad)
+      ad.load_snippet("ranging", "com.google.snippet.ranging")
+      utils.initialize_uwb_country_code_if_necessary(ad)
+      ad.load_snippet("uwb", "com.google.snippet.uwb")
+      ad.load_snippet("bluetooth", "com.google.snippet.bluetooth")
 
   def setup_test(self):
     super().setup_test()

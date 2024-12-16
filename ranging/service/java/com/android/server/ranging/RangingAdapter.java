@@ -16,9 +16,10 @@
 
 package com.android.server.ranging;
 
-import androidx.annotation.IntDef;
+import android.ranging.RangingData;
+import android.ranging.RangingDevice;
 
-import com.google.common.util.concurrent.ListenableFuture;
+import androidx.annotation.IntDef;
 
 /** RangingAdapter representing a common ranging class for multiple ranging technologies. */
 public interface RangingAdapter {
@@ -27,20 +28,13 @@ public interface RangingAdapter {
     RangingTechnology getType();
 
     /**
-     * @return true if ranging with this ranging technology is currently enabled, or false
-     * otherwise. When this returns false it's most likely because of not being enabled in settings,
-     * airplane mode being on, etc.
-     */
-    ListenableFuture<Boolean> isEnabled();
-
-    /**
      * Start ranging. Does nothing if the ranging technology is not enabled on device or if ranging
      * has already been started. In the latter case, this method will not overwrite the existing
      * callback.
      * @param config for the ranging session.
      * @param callback to be called on the occurrence of ranging events.
      */
-    void start(RangingConfig.TechnologyConfig config, Callback callback);
+    void start(RangingPeerConfig.TechnologyConfig config, Callback callback);
 
     /** Stop ranging. */
     void stop();
@@ -54,14 +48,20 @@ public interface RangingAdapter {
          */
         void onStarted();
 
-        /** Notifies the caller that ranging has stopped on this device. */
+        /**
+         * Notifies the caller that ranging has stopped on this device.
+         *
+         * @param reason why ranging was stopped.
+         */
         void onStopped(@StoppedReason int reason);
 
         /**
          * Notifies the caller on each instance of ranging data received from the ranging
          * technology.
+         * @param peer device whose distance was measured.
+         * @param data the distance measurement and other position-related data.
          */
-        void onRangingData(RangingData data);
+        void onRangingData(RangingDevice peer, RangingData data);
 
         @IntDef({
                 StoppedReason.UNKNOWN,

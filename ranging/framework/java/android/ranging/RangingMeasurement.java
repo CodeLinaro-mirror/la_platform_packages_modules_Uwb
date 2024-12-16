@@ -17,25 +17,60 @@
 package android.ranging;
 
 import android.annotation.FlaggedApi;
+import android.annotation.IntDef;
 import android.annotation.NonNull;
 import android.os.Parcel;
 import android.os.Parcelable;
 
 import com.android.ranging.flags.Flags;
 
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
+
 /**
  * Represents a ranging measurement.
  *
  * <p>This class provides a measurement result, such as a distance or angle.
  *
- * @hide
  */
 @FlaggedApi(Flags.FLAG_RANGING_STACK_ENABLED)
 public final class RangingMeasurement implements Parcelable {
+
+    /**
+     * @hide
+     */
+    @Retention(RetentionPolicy.SOURCE)
+    @IntDef({
+            CONFIDENCE_LOW,
+            CONFIDENCE_MEDIUM,
+            CONFIDENCE_HIGH
+    })
+    public @interface Confidence {
+    }
+
+    /** Ranging measurement with low confidence.
+     *
+     * @hide
+     */
+    public static final int CONFIDENCE_LOW = 0;
+    /** Ranging measurement with medium confidence.
+     *
+     * @hide
+     */
+    public static final int CONFIDENCE_MEDIUM = 1;
+    /** Ranging measurement with high confidence.
+     *
+     * @hide
+     */
+    public static final int CONFIDENCE_HIGH = 2;
     private final double mMeasurement;
+    @Confidence
     private final int mConfidence;
 
     private RangingMeasurement(Builder builder) {
+        if (Double.isNaN(builder.mMeasurement)) {
+            throw new IllegalArgumentException("Missing required parameter: measurement");
+        }
         mMeasurement = builder.mMeasurement;
         mConfidence = builder.mConfidence;
     }
@@ -63,16 +98,16 @@ public final class RangingMeasurement implements Parcelable {
      *
      * @return The measurement, such as a distance in meters or an angle in degrees.
      */
-    @NonNull
     public double getMeasurement() {
         return mMeasurement;
     }
 
     /**
-     * Returns the confidence score for this measurement.
+     * Returns the confidence score for this measurement - [0, 100].
      *
      * @hide
      */
+    @Confidence
     public int getConfidence() {
         return mConfidence;
     }
@@ -92,8 +127,8 @@ public final class RangingMeasurement implements Parcelable {
      * A builder class for creating instances of {@link RangingMeasurement}.
      */
     public static final class Builder {
-        private double mMeasurement = 0.0;
-        private int mConfidence = 1;
+        private double mMeasurement = Double.NaN;
+        @Confidence private int mConfidence = CONFIDENCE_MEDIUM;
 
         /**
          * Sets the measurement value.
@@ -113,11 +148,10 @@ public final class RangingMeasurement implements Parcelable {
          *
          * @param confidence indicating confidence in the measurement.
          * @return This {@link Builder} instance.
-         *
          * @hide
          */
         @NonNull
-        public Builder setConfidence(int confidence) {
+        public Builder setConfidence(@Confidence int confidence) {
             mConfidence = confidence;
             return this;
         }

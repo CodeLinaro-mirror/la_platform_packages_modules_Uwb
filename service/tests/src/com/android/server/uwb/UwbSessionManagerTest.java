@@ -148,6 +148,8 @@ import com.google.uwb.support.fira.FiraSpecificationParams;
 import com.google.uwb.support.generic.GenericSpecificationParams;
 import com.google.uwb.support.radar.RadarOpenSessionParams;
 import com.google.uwb.support.radar.RadarParams;
+import com.google.uwb.support.rftest.RfTestParams;
+import com.google.uwb.support.rftest.RfTestStartSessionParams;
 
 import org.junit.After;
 import org.junit.Before;
@@ -1040,6 +1042,23 @@ public class UwbSessionManagerTest {
     }
 
     @Test
+    public void initSession_maxSessionsExceeded() throws RemoteException {
+        doReturn(GenericSpecificationParams.DEFAULT_MAX_SUPPORTED_SESSIONS_COUNT)
+                .when(mUwbSessionManager).getSessionCount();
+        doReturn(false).when(mUwbSessionManager).isExistedSession(anyInt());
+        IUwbRangingCallbacks mockRangingCallbacks = mock(IUwbRangingCallbacks.class);
+
+        mUwbSessionManager.initSession(ATTRIBUTION_SOURCE, mock(SessionHandle.class),
+                TEST_SESSION_ID, TEST_SESSION_TYPE, FiraParams.PROTOCOL_NAME, mock(Params.class),
+                mockRangingCallbacks,
+                TEST_CHIP_ID);
+
+        verify(mockRangingCallbacks).onRangingOpenFailed(any(),
+                eq(RangingChangeReason.MAX_SESSIONS_REACHED), any());
+        assertThat(mTestLooper.nextMessage()).isNull();
+    }
+
+    @Test
     public void initSession_UwbSession_RemoteException() throws RemoteException {
         doReturn(0).when(mUwbSessionManager).getSessionCount();
         doReturn(0L).when(mUwbSessionManager).getAliroSessionCount();
@@ -1386,6 +1405,42 @@ public class UwbSessionManagerTest {
     }
 
     @Test
+    public void startRfTest_currentSessionStateIdle() {
+        doReturn(true).when(mUwbSessionManager).isExistedSession(any());
+        doReturn(RfTestParams.SESSION_ID_RFTEST).when(mUwbSessionManager).getSessionId(any());
+        UwbSession uwbSession = mock(UwbSession.class);
+        when(uwbSession.getProtocolName()).thenReturn(RfTestParams.PROTOCOL_NAME);
+        doReturn(uwbSession).when(mUwbSessionManager).getUwbSession(anyInt());
+        doReturn(UwbUciConstants.UWB_SESSION_STATE_IDLE)
+                .when(mUwbSessionManager).getCurrentSessionState(anyInt());
+
+        RfTestStartSessionParams rfTestParams = mock(RfTestStartSessionParams.class);
+
+        mUwbSessionManager.startRanging(mock(SessionHandle.class), rfTestParams);
+
+        verify(uwbSession).setRfTestStartSessionParams(eq(rfTestParams));
+
+        assertThat(mTestLooper.nextMessage().what).isEqualTo(UwbSessionManager.SESSION_RF_TEST_CMD);
+    }
+
+    @Test
+    public void stopRfTest_currentSessionStateActive() {
+        UwbSession mockUwbSession = mock(UwbSession.class);
+
+        doReturn(true).when(mUwbSessionManager).isExistedSession(any());
+        doReturn(RfTestParams.SESSION_ID_RFTEST).when(mUwbSessionManager).getSessionId(any());
+        doReturn(mockUwbSession).when(mUwbSessionManager).getUwbSession(anyInt());
+        doReturn(UwbUciConstants.UWB_SESSION_STATE_ACTIVE)
+                .when(mUwbSessionManager).getCurrentSessionState(anyInt());
+        doReturn(RfTestParams.PROTOCOL_NAME).when(mockUwbSession).getProtocolName();
+
+        mUwbSessionManager.stopRanging(mock(SessionHandle.class));
+
+        assertThat(mTestLooper.nextMessage().what).isEqualTo(
+                UwbSessionManager.SESSION_STOP_RF_TEST_SESSION);
+    }
+
+    @Test
     public void stopRanging_notExistedSession() {
         doReturn(false).when(mUwbSessionManager).isExistedSession(any());
         doReturn(TEST_SESSION_ID).when(mUwbSessionManager).getSessionId(any());
@@ -1400,9 +1455,12 @@ public class UwbSessionManagerTest {
 
     @Test
     public void stopRanging_currentSessionStateActive() {
+        UwbSession mockUwbSession = mock(UwbSession.class);
+
         doReturn(true).when(mUwbSessionManager).isExistedSession(any());
         doReturn(TEST_SESSION_ID).when(mUwbSessionManager).getSessionId(any());
-        doReturn(mock(UwbSession.class)).when(mUwbSessionManager).getUwbSession(anyInt());
+        doReturn(mockUwbSession).when(mUwbSessionManager).getUwbSession(anyInt());
+        when(mockUwbSession.getProtocolName()).thenReturn(FiraParams.PROTOCOL_NAME);
         doReturn(UwbUciConstants.UWB_SESSION_STATE_ACTIVE)
                 .when(mUwbSessionManager).getCurrentSessionState(anyInt());
 
@@ -1439,9 +1497,12 @@ public class UwbSessionManagerTest {
 
     @Test
     public void stopRanging_currentSessionStateIdle() {
+        UwbSession mockUwbSession = mock(UwbSession.class);
+
         doReturn(true).when(mUwbSessionManager).isExistedSession(any());
         doReturn(TEST_SESSION_ID).when(mUwbSessionManager).getSessionId(any());
-        doReturn(mock(UwbSession.class)).when(mUwbSessionManager).getUwbSession(anyInt());
+        doReturn(mockUwbSession).when(mUwbSessionManager).getUwbSession(anyInt());
+        when(mockUwbSession.getProtocolName()).thenReturn(FiraParams.PROTOCOL_NAME);
         doReturn(UwbUciConstants.UWB_SESSION_STATE_IDLE)
                 .when(mUwbSessionManager).getCurrentSessionState(anyInt());
 
@@ -1453,9 +1514,12 @@ public class UwbSessionManagerTest {
 
     @Test
     public void stopRanging_currentSessionStateInvalid() {
+        UwbSession mockUwbSession = mock(UwbSession.class);
+
         doReturn(true).when(mUwbSessionManager).isExistedSession(any());
         doReturn(TEST_SESSION_ID).when(mUwbSessionManager).getSessionId(any());
-        doReturn(mock(UwbSession.class)).when(mUwbSessionManager).getUwbSession(anyInt());
+        doReturn(mockUwbSession).when(mUwbSessionManager).getUwbSession(anyInt());
+        when(mockUwbSession.getProtocolName()).thenReturn(FiraParams.PROTOCOL_NAME);
         doReturn(UwbUciConstants.UWB_SESSION_STATE_ERROR)
                 .when(mUwbSessionManager).getCurrentSessionState(anyInt());
 

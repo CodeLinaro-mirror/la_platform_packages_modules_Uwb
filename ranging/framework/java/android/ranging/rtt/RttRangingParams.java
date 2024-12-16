@@ -17,31 +17,34 @@
 package android.ranging.rtt;
 
 import android.annotation.FlaggedApi;
-import android.annotation.IntDef;
+import android.annotation.NonNull;
+import android.annotation.Nullable;
 import android.os.Parcel;
 import android.os.Parcelable;
-import android.ranging.RangingDevice;
-
-import androidx.annotation.NonNull;
+import android.ranging.params.RawRangingDevice;
+import android.ranging.params.RawRangingDevice.RangingUpdateRate;
 
 import com.android.ranging.flags.Flags;
 
-import java.lang.annotation.Retention;
-import java.lang.annotation.RetentionPolicy;
+import java.util.List;
+import java.util.Objects;
 
 /**
+ * Represents the parameters required to perform Wi-Fi Round Trip Time (RTT) ranging.
+ *
  * @hide
  */
 @FlaggedApi(Flags.FLAG_RANGING_RTT_ENABLED)
 public class RttRangingParams implements Parcelable {
 
-    protected RttRangingParams(Parcel in) {
-        mDeviceRole = in.readInt();
-        mPeerDevice = in.readParcelable(RangingDevice.class.getClassLoader());
+    private RttRangingParams(Parcel in) {
         mServiceName = in.readString();
         mMatchFilter = in.createByteArray();
+        mRangingUpdateRate = in.readInt();
+        mPeriodicRangingHwFeatureEnabled = in.readBoolean();
     }
 
+    @NonNull
     public static final Creator<RttRangingParams> CREATOR = new Creator<RttRangingParams>() {
         @Override
         public RttRangingParams createFromParcel(Parcel in) {
@@ -61,90 +64,152 @@ public class RttRangingParams implements Parcelable {
 
     @Override
     public void writeToParcel(@NonNull Parcel dest, int flags) {
-        dest.writeInt(mDeviceRole);
-        dest.writeParcelable(mPeerDevice, flags);
         dest.writeString(mServiceName);
         dest.writeByteArray(mMatchFilter);
+        dest.writeInt(mRangingUpdateRate);
+        dest.writeBoolean(mPeriodicRangingHwFeatureEnabled);
     }
-
-    @Retention(RetentionPolicy.SOURCE)
-    @IntDef({
-            DEVICE_ROLE_PUBLISHER,
-            DEVICE_ROLE_SUBSCRIBER,
-    })
-    public @interface DeviceRole {
-    }
-
-    public static final int DEVICE_ROLE_PUBLISHER = 0;
-    /** The device that initiates the session. */
-    public static final int DEVICE_ROLE_SUBSCRIBER = 1;
-    @DeviceRole
-    private final int mDeviceRole;
-
-    private final RangingDevice mPeerDevice;
 
     private final String mServiceName;
 
     private final byte[] mMatchFilter;
 
-    public int getDeviceRole() {
-        return mDeviceRole;
-    }
+    @RangingUpdateRate
+    private final int mRangingUpdateRate;
 
-    public RangingDevice getPeerDevice() {
-        return mPeerDevice;
-    }
+    private final boolean mPeriodicRangingHwFeatureEnabled;
 
+    /**
+     * Returns the service name associated with this RTT ranging session.
+     *
+     * @return the service name as a {@link String}.
+     * @see android.net.wifi.aware.PublishConfig.Builder#setServiceName(String)
+     * @see android.net.wifi.aware.SubscribeConfig.Builder#setServiceName(String)
+     */
+    @NonNull
     public String getServiceName() {
         return mServiceName;
     }
 
+    /**
+     * Returns the match filter for this ranging session.
+     *
+     * @return a byte array representing the match filter.
+     * @see android.net.wifi.aware.PublishConfig.Builder#setMatchFilter(List)
+     * @see android.net.wifi.aware.SubscribeConfig.Builder#setMatchFilter(List)
+     */
+    @Nullable
     public byte[] getMatchFilter() {
         return mMatchFilter;
     }
 
-    private RttRangingParams(Builder builder) {
-        mDeviceRole = builder.mDeviceRole;
-        mPeerDevice = builder.mPeerDevice;
-        mServiceName = builder.mServiceName;
-        mMatchFilter = builder.mMatchFilter;
+    /**
+     * Returns the ranging update rate.
+     *
+     * @return ranging update rate.
+     * <p>Possible values:
+     * {@link RangingUpdateRate#UPDATE_RATE_NORMAL}
+     * {@link RangingUpdateRate#UPDATE_RATE_INFREQUENT}
+     * {@link RangingUpdateRate#UPDATE_RATE_FREQUENT}
+     */
+    @RangingUpdateRate
+    public int getRangingUpdateRate() {
+        return mRangingUpdateRate;
     }
 
+    /**
+     * Returns whether the periodic ranging hardware feature was enabled.
+     *
+     * @return returns {@code true} if periodic ranging hardware feature was enabled, {@code false}
+     * otherwise
+     */
+    public boolean isPeriodicRangingHwFeatureEnabled() {
+        return mPeriodicRangingHwFeatureEnabled;
+    }
+
+    private RttRangingParams(Builder builder) {
+        mServiceName = builder.mServiceName;
+        mMatchFilter = builder.mMatchFilter;
+        mRangingUpdateRate = builder.mRangingUpdateRate;
+        mPeriodicRangingHwFeatureEnabled = builder.mPeriodicRangingHwFeatureEnabled;
+    }
+
+    /**
+     * Builder class for {@link RttRangingParams}.
+     */
     public static final class Builder {
-        @DeviceRole
-        private int mDeviceRole = DEVICE_ROLE_PUBLISHER;
-        private RangingDevice mPeerDevice;
         private String mServiceName = "";
 
-        private byte[] mMatchFilter = new byte[0];
+        private byte[] mMatchFilter = null;
 
-        public Builder setDeviceRole(@DeviceRole int deviceRole) {
-            this.mDeviceRole = deviceRole;
-            return this;
+        private boolean mPeriodicRangingHwFeatureEnabled = false;
+        @RawRangingDevice.RangingUpdateRate
+        private int mRangingUpdateRate = RawRangingDevice.UPDATE_RATE_NORMAL;
+
+        /**
+         * Constructs a new {@link Builder} for creating a Wifi NAN-RTT ranging session.
+         *
+         * @param serviceName The service name associated with this session
+         * @throws IllegalArgumentException if {@code serviceName} is null.
+         */
+        public Builder(@NonNull String serviceName) {
+            Objects.requireNonNull(serviceName);
+            mServiceName = serviceName;
         }
 
-        public Builder setPeerDevice(RangingDevice peerDevice) {
-            this.mPeerDevice = peerDevice;
-            return this;
-        }
-
-        public Builder setServiceName(String serviceName) {
-            if (serviceName != null) {
-                this.mServiceName = serviceName;
-            }
-            return this;
-        }
-
-        public Builder setMatchFilter(byte[] matchFilter) {
+        /**
+         * Sets the match filter to identify specific devices or services for RTT.
+         *
+         * @param matchFilter a byte array representing the filter. If {@code null}, it will be
+         *                    ignored.
+         * @return this {@link Builder} instance.
+         */
+        @NonNull
+        public Builder setMatchFilter(@NonNull byte[] matchFilter) {
             if (matchFilter != null) {
                 this.mMatchFilter = matchFilter.clone();
             }
             return this;
         }
 
+        /**
+         * Sets the update rate for the RTT ranging session.
+         * <p>Defaults to {@link RangingUpdateRate#UPDATE_RATE_NORMAL}
+         *
+         * @param updateRate the reporting frequency.
+         *                   <p>Possible values:
+         *                   {@link RangingUpdateRate#UPDATE_RATE_NORMAL}
+         *                   {@link RangingUpdateRate#UPDATE_RATE_INFREQUENT}
+         *                   {@link RangingUpdateRate#UPDATE_RATE_FREQUENT}
+         * @return this {@link Builder} instance.
+         */
+        @NonNull
+        public Builder setRangingUpdateRate(@RawRangingDevice.RangingUpdateRate int updateRate) {
+            mRangingUpdateRate = updateRate;
+            return this;
+        }
+
+        /**
+         * Sets whether to use hardware supported periodic ranging feature in WiFi Nan-RTT.
+         *
+         * @param periodicRangingHwFeatureEnabled {@code true} to enable periodic ranging;
+         *                                        {@code false} otherwise.
+         * @return this {@link Builder} instance.
+         */
+        @NonNull
+        public Builder setPeriodicRangingHwFeatureEnabled(boolean periodicRangingHwFeatureEnabled) {
+            mPeriodicRangingHwFeatureEnabled = periodicRangingHwFeatureEnabled;
+            return this;
+        }
+
+        /**
+         * Builds and returns a new {@link RttRangingParams} instance.
+         *
+         * @return a new {@link RttRangingParams} object configured with the provided parameters.
+         */
+        @NonNull
         public RttRangingParams build() {
             return new RttRangingParams(this);
         }
     }
-
 }

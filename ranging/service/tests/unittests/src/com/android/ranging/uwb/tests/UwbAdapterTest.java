@@ -16,6 +16,9 @@
 
 package com.android.server.ranging.uwb.tests;
 
+import static android.ranging.params.RawRangingDevice.UPDATE_RATE_NORMAL;
+import static android.ranging.uwb.UwbRangingParams.CONFIG_UNICAST_DS_TWR;
+
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.eq;
@@ -26,6 +29,7 @@ import static org.mockito.Mockito.when;
 
 import android.content.Context;
 import android.content.pm.PackageManager;
+import android.ranging.RangingData;
 import android.ranging.uwb.UwbAddress;
 import android.ranging.uwb.UwbComplexChannel;
 import android.ranging.uwb.UwbRangingParams;
@@ -36,15 +40,12 @@ import com.android.ranging.uwb.backend.internal.RangingController;
 import com.android.ranging.uwb.backend.internal.RangingPosition;
 import com.android.ranging.uwb.backend.internal.RangingSessionCallback;
 import com.android.ranging.uwb.backend.internal.UwbDevice;
-import com.android.ranging.uwb.backend.internal.UwbServiceImpl;
 import com.android.server.ranging.RangingAdapter;
-import com.android.server.ranging.RangingData;
 import com.android.server.ranging.RangingTechnology;
 import com.android.server.ranging.cs.CsConfig;
 import com.android.server.ranging.uwb.UwbAdapter;
 import com.android.server.ranging.uwb.UwbConfig;
 
-import com.google.common.collect.ImmutableMap;
 import com.google.common.util.concurrent.MoreExecutors;
 
 import org.junit.Assert;
@@ -59,8 +60,6 @@ import org.mockito.Mock;
 import org.mockito.junit.MockitoJUnit;
 import org.mockito.junit.MockitoRule;
 
-import java.util.concurrent.ExecutionException;
-
 @RunWith(JUnit4.class)
 @SmallTest
 public class UwbAdapterTest {
@@ -69,8 +68,6 @@ public class UwbAdapterTest {
 
     @Mock(answer = Answers.RETURNS_DEEP_STUBS)
     private Context mMockContext;
-    @Mock
-    private UwbServiceImpl mMockUwbService;
     @Mock
     private RangingController mMockUwbClient;
 
@@ -82,14 +79,12 @@ public class UwbAdapterTest {
 
     private UwbConfig.Builder generateConfig() {
         return new UwbConfig.Builder(
-                new UwbRangingParams.Builder()
-                        .setConfigId(UwbRangingParams.ConfigId.UNICAST_DS_TWR)
-                        .setDeviceRole(UwbRangingParams.DeviceRole.INITIATOR)
-                        .setDeviceAddress(UwbAddress.fromBytes(new byte[]{1, 2}))
+                new UwbRangingParams.Builder(
+                        10, CONFIG_UNICAST_DS_TWR, UwbAddress.fromBytes(new byte[]{1, 2}),
+                        UwbAddress.fromBytes(new byte[]{3, 4}))
                         .setComplexChannel(new UwbComplexChannel.Builder().setChannel(
                                 9).setPreambleIndex(11).build())
-                        .setPeerAddresses(ImmutableMap.of())
-                        .setRangingUpdateRate(UwbRangingParams.RangingUpdateRate.NORMAL)
+                        .setRangingUpdateRate(UPDATE_RATE_NORMAL)
                         .build()
         )
                 .setCountryCode("US");
@@ -99,21 +94,13 @@ public class UwbAdapterTest {
     public void setup() {
         when(mMockContext.getPackageManager().hasSystemFeature(PackageManager.FEATURE_UWB))
                 .thenReturn(true);
-        when(mMockUwbService.getController(any())).thenReturn(mMockUwbClient);
         mUwbAdapter = new UwbAdapter(mMockContext, MoreExecutors.newDirectExecutorService(),
-                mMockUwbService, UwbRangingParams.DeviceRole.INITIATOR);
+                MoreExecutors.newDirectExecutorService(), mMockUwbClient);
     }
 
     @Test
     public void getType_returnsUwb() {
         Assert.assertEquals(RangingTechnology.UWB, mUwbAdapter.getType());
-    }
-
-    @Test
-    public void isEnabled_checksServiceIsAvailable()
-            throws InterruptedException, ExecutionException {
-        when(mMockUwbService.isAvailable()).thenReturn(true);
-        Assert.assertTrue(mUwbAdapter.isEnabled().get());
     }
 
     @Test
@@ -155,7 +142,7 @@ public class UwbAdapterTest {
         verify(mMockUwbClient).startRanging(callbackCaptor.capture(), any());
 
         UwbDevice mockDevice = mock(UwbDevice.class, Answers.RETURNS_DEEP_STUBS);
-        when(mockDevice.getAddress().toBytes()).thenReturn(new byte[]{0x1, 0x2});
+//        when(mockDevice.getAddress().toBytes()).thenReturn(new byte[]{0x1, 0x2});
 
         RangingPosition mockPosition = mock(RangingPosition.class, Answers.RETURNS_DEEP_STUBS);
         when(mockPosition.getDistance().getValue()).thenReturn(12F);
@@ -166,12 +153,13 @@ public class UwbAdapterTest {
 
         ArgumentCaptor<RangingData> dataCaptor = ArgumentCaptor.forClass(RangingData.class);
         callbackCaptor.getValue().onRangingResult(mockDevice, mockPosition);
-        verify(mMockCallback).onRangingData(dataCaptor.capture());
+        verify(mMockCallback).onRangingData(any(), dataCaptor.capture());
 
         RangingData data = dataCaptor.getValue();
-        Assert.assertEquals(RangingTechnology.UWB, data.getTechnology().get());
-        Assert.assertEquals(mockPosition.getDistance().getValue(), data.getRangeMeters(), 0.1);
-        Assert.assertArrayEquals(mockDevice.getAddress().toBytes(), data.getPeerAddress());
-        Assert.assertEquals(mockPosition.getElapsedRealtimeNanos(), data.getTimestamp().getNano());
+        Assert.assertEquals(RangingTechnology.UWB.getValue(), data.getRangingTechnology());
+        Assert.assertEquals(
+                mockPosition.getDistance().getValue(),
+                data.getDistance().getMeasurement(), 0.1);
+        Assert.assertEquals(mockPosition.getElapsedRealtimeNanos(), data.getTimestampMillis());
     }
 }
