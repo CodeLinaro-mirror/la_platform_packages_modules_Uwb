@@ -20,10 +20,10 @@ import android.annotation.FlaggedApi;
 import android.annotation.NonNull;
 import android.os.Parcel;
 import android.os.Parcelable;
+import android.ranging.DataNotificationConfig.NotificationConfigType;
 import android.ranging.RangingCapabilities.TechnologyCapabilities;
 import android.ranging.RangingManager;
-import android.ranging.params.DataNotificationConfig.NotificationConfigType;
-import android.ranging.params.RawRangingDevice.RangingUpdateRate;
+import android.ranging.raw.RawRangingDevice.RangingUpdateRate;
 import android.ranging.uwb.UwbComplexChannel.UwbChannel;
 import android.ranging.uwb.UwbComplexChannel.UwbPreambleCodeIndex;
 import android.ranging.uwb.UwbRangingParams.ConfigId;
@@ -126,7 +126,7 @@ public final class UwbRangingCapabilities implements Parcelable, TechnologyCapab
     }
 
     /**
-     * Checks if the device supports azimuthal angle measurement.
+     * Checks if the device hardware supports azimuthal angle measurement.
      *
      * @return {@code true} if azimuthal angle measurement is supported; {@code false} otherwise.
      */
@@ -135,7 +135,7 @@ public final class UwbRangingCapabilities implements Parcelable, TechnologyCapab
     }
 
     /**
-     * Checks if the device supports elevation angle measurement.
+     * Checks if the device hardware supports elevation angle measurement.
      *
      * @return {@code true} if elevation angle measurement is supported; {@code false} otherwise.
      */
@@ -153,7 +153,7 @@ public final class UwbRangingCapabilities implements Parcelable, TechnologyCapab
     }
 
     /**
-     * Gets the minimum supported ranging interval in milliseconds.
+     * Gets the minimum supported ranging interval.
      *
      * @return the minimum ranging interval.
      */
@@ -170,7 +170,7 @@ public final class UwbRangingCapabilities implements Parcelable, TechnologyCapab
     @NonNull
     @UwbChannel
     public List<Integer> getSupportedChannels() {
-        return mSupportedChannels;
+        return List.copyOf(mSupportedChannels);
     }
 
 
@@ -179,12 +179,12 @@ public final class UwbRangingCapabilities implements Parcelable, TechnologyCapab
      *
      * @return a list of supported preamble indexes.
      *
-     * @hide
      */
     @NonNull
     @UwbPreambleCodeIndex
     public List<Integer> getSupportedPreambleIndexes() {
-        return mSupportedPreambleIndexes;
+        return List.copyOf(mSupportedPreambleIndexes);
+
     }
 
     /**
@@ -195,7 +195,7 @@ public final class UwbRangingCapabilities implements Parcelable, TechnologyCapab
     @NonNull
     @NotificationConfigType
     public List<Integer> getSupportedNotificationConfigurations() {
-        return mSupportedNtfConfigs;
+        return List.copyOf(mSupportedNtfConfigs);
     }
 
     /**
@@ -206,7 +206,7 @@ public final class UwbRangingCapabilities implements Parcelable, TechnologyCapab
     @NonNull
     @ConfigId
     public List<Integer> getSupportedConfigIds() {
-        return mSupportedConfigIds;
+        return List.copyOf(mSupportedConfigIds);
     }
 
     /**
@@ -217,7 +217,7 @@ public final class UwbRangingCapabilities implements Parcelable, TechnologyCapab
     @NonNull
     @SlotDuration
     public List<Integer> getSupportedSlotDurations() {
-        return mSupportedSlotDurations;
+        return List.copyOf(mSupportedSlotDurations);
     }
 
     /**
@@ -228,7 +228,7 @@ public final class UwbRangingCapabilities implements Parcelable, TechnologyCapab
     @NonNull
     @RangingUpdateRate
     public List<Integer> getSupportedRangingUpdateRates() {
-        return mSupportedRangingUpdateRates;
+        return List.copyOf(mSupportedRangingUpdateRates);
     }
 
     /**
@@ -448,19 +448,31 @@ public final class UwbRangingCapabilities implements Parcelable, TechnologyCapab
 
     @Override
     public String toString() {
-        return "UwbRangingCapabilities{" +
-                "mSupportsDistance=" + mSupportsDistance +
-                ", mSupportsAzimuthalAngle=" + mSupportsAzimuthalAngle +
-                ", mSupportsElevationAngle=" + mSupportsElevationAngle +
-                ", mSupportsRangingIntervalReconfigure=" + mSupportsRangingIntervalReconfigure +
-                ", mMinRangingInterval=" + mMinRangingInterval +
-                ", mSupportedChannels=" + mSupportedChannels +
-                ", mSupportedNtfConfigs=" + mSupportedNtfConfigs +
-                ", mSupportedConfigIds=" + mSupportedConfigIds +
-                ", mSupportedSlotDurations=" + mSupportedSlotDurations +
-                ", mSupportedRangingUpdateRates=" + mSupportedRangingUpdateRates +
-                ", mSupportedPreambleIndexes=" + mSupportedPreambleIndexes +
-                ", mHasBackgroundRangingSupport=" + mHasBackgroundRangingSupport +
-                '}';
+        return "UwbRangingCapabilities{ "
+                + "mSupportsDistance="
+                + mSupportsDistance
+                + ", mSupportsAzimuthalAngle="
+                + mSupportsAzimuthalAngle
+                + ", mSupportsElevationAngle="
+                + mSupportsElevationAngle
+                + ", mSupportsRangingIntervalReconfigure="
+                + mSupportsRangingIntervalReconfigure
+                + ", mMinRangingInterval="
+                + mMinRangingInterval
+                + ", mSupportedChannels="
+                + mSupportedChannels
+                + ", mSupportedNtfConfigs="
+                + mSupportedNtfConfigs
+                + ", mSupportedConfigIds="
+                + mSupportedConfigIds
+                + ", mSupportedSlotDurations="
+                + mSupportedSlotDurations
+                + ", mSupportedRangingUpdateRates="
+                + mSupportedRangingUpdateRates
+                + ", mSupportedPreambleIndexes="
+                + mSupportedPreambleIndexes
+                + ", mHasBackgroundRangingSupport="
+                + mHasBackgroundRangingSupport
+                + " }";
     }
 }
