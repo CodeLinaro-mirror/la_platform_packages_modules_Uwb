@@ -70,6 +70,10 @@ public class RttRangingDevice {
     private boolean mProximityEdgeEnabled;
     private boolean mCheckProximityEdgeFlag = true;
 
+    public RttRangingParameters getRttRangingParameters() {
+        return mRttRangingParameters;
+    }
+
     /** Listener for range results. */
     private RttRangerListener mRttRangingListener = new RttRangerListener() {
         @Override
@@ -124,11 +128,8 @@ public class RttRangingDevice {
             if (mPeerHandle.equals(peerHandle)) {
                 synchronized (mLock) {
                     if (mRttListener != null) {
-                        if (!mProximityEdgeEnabled || sendProximityEdgeResult(
-                                result.getDistanceMm())) {
-                            mRttListener.onRangingResult(mRttDevice,
-                                    new RttRangingPosition(result));
-                        }
+                        mRttListener.onRangingResult(mRttDevice,
+                                new RttRangingPosition(result));
                     }
                 }
                 Log.i(TAG, "callback onRangingResult");
@@ -138,24 +139,6 @@ public class RttRangingDevice {
             }
         }
     };
-
-    private boolean sendProximityEdgeResult(int distance) {
-        int near = mRttRangingParameters.getProximityEdgeNear();
-        int far = mRttRangingParameters.getProximityEdgeFar();
-
-        // Notification for crossing above `far` or below `near`
-        if (!mCheckProximityEdgeFlag && (distance <= near || distance >= far)) {
-            mCheckProximityEdgeFlag = true;
-            return true;
-        }
-
-        // Notification for crossing back below `far` or back above `near`
-        if (mCheckProximityEdgeFlag && (distance > near && distance < far)) {
-            mCheckProximityEdgeFlag = false;
-            return true;
-        }
-        return false;
-    }
 
     private Runnable mRunnablePingPublisher = new Runnable() {
         @Override
@@ -187,7 +170,6 @@ public class RttRangingDevice {
 
     public void setRangingParameters(@NonNull RttRangingParameters rttRangingParameters) {
         this.mRttRangingParameters = rttRangingParameters;
-        this.mProximityEdgeEnabled = rttRangingParameters.isProximityEdgeEnabled();
     }
 
     public void startRanging(@NonNull RttRangingSessionCallback rttListener,
