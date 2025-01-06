@@ -14,6 +14,7 @@
 import sys
 import time
 from typing import Set
+from lib import cs
 from lib import ranging_base_test
 from lib import rssi
 from lib import rtt
@@ -32,6 +33,7 @@ _TEST_CASES = (
     "test_one_to_one_uwb_ranging_disable_range_data_ntf",
     "test_one_to_one_rtt_ranging",
     "test_one_to_one_ble_rssi_ranging",
+    "test_one_to_one_ble_cs_ranging",
 )
 
 SERVICE_UUID = "0000fffb-0000-1000-8000-00805f9b34fc"
@@ -68,11 +70,8 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
       utils.set_airplane_mode(device.ad, state=False)
       if device.is_ranging_technology_supported(RangingTechnology.UWB):
         utils.set_uwb_state_and_verify(device.ad, state=True)
-      if device.is_ranging_technology_supported(RangingTechnology.BLE_RSSI) or \
-         device.is_ranging_technology_supported(RangingTechnology.BLE_CS):
-        utils.set_bt_state_and_verify(device.ad, state=True)
-        device.ad.bluetooth.reset()
       utils.set_snippet_foreground_state(device.ad, isForeground=True)
+      utils.set_screen_state(device.ad, on=True)
 
   def teardown_test(self):
     super().teardown_test()
@@ -117,7 +116,11 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
         f"Responder did not find initiator",
     )
 
-  # TODO: Use this in BLE CS and OOB tests.
+  def _reset_bt_state(self):
+    utils.reset_bt_state(self.initiator.ad)
+    utils.reset_bt_state(self.responder.ad)
+
+
   def _ble_connect(self):
     """Create BLE GATT connection between initiator and responder.
 
@@ -137,7 +140,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     asserts.assert_true(
         self.initiator.ad.bluetooth.connectGatt(SERVICE_UUID), "Server not disconnected")
 
-  def _le_bond(self):
+  def _ble_bond(self):
     """Create BLE GATT connection and bonding between initiator and responder.
 
     """
@@ -154,7 +157,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     asserts.assert_true(connected_devices, "No clients found connected to server")
     self.initiator.bt_addr = connected_devices[0]
 
-  def _le_unbond(self):
+  def _ble_unbond(self):
     asserts.assert_true(
         self.initiator.ad.bluetooth.removeBond(SERVICE_UUID), "Server not unbonded")
 
@@ -441,10 +444,9 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
         not self.initiator.is_ranging_technology_supported(RangingTechnology.BLE_RSSI),
         f"BLE RSSI not supported by initiator",
     )
+    self._reset_bt_state()
 
     self._ble_connect()
-    responder_addr = [int(part, 16) for part in self.responder.bt_addr.split(":")]
-    initiator_addr = [int(part, 16) for part in self.initiator.bt_addr.split(":")]
 
     initiator_preference = RangingPreference(
         device_role=DeviceRole.INITIATOR,
@@ -453,7 +455,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
                 DeviceParams(
                     peer_id=self.responder.id,
                     rssi_params=rssi.BleRssiRangingParams(
-                      peer_address=responder_addr,
+                      peer_address=self.responder.bt_addr,
                     ),
                 )
             ],
@@ -466,7 +468,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
             peer_params=DeviceParams(
                 peer_id=self.initiator.id,
                 rssi_params=rssi.BleRssiRangingParams(
-                    peer_address=initiator_addr,
+                  peer_address=self.initiator.bt_addr,
                 ),
             ),
         ),
@@ -504,6 +506,83 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
       self._ble_disconnect()
 
+  def test_one_to_one_ble_cs_ranging(self):
+    """Verifies cs ranging with peer device, devices range for 10 seconds."""
+    SESSION_HANDLE = str(uuid4())
+    TECHNOLOGIES = {RangingTechnology.BLE_CS}
+
+    asserts.skip_if(
+        not self.responder.is_ranging_technology_supported(RangingTechnology.BLE_CS),
+        f"BLE_CS not supported by responder",
+    )
+    asserts.skip_if(
+        not self.initiator.is_ranging_technology_supported(RangingTechnology.BLE_CS),
+        f"BLE CS not supported by initiator",
+    )
+    self._reset_bt_state()
+
+    self._ble_bond()
+
+    responder_addr = [int(part, 16) for part in self.responder.bt_addr.split(":")]
+    initiator_addr = [int(part, 16) for part in self.initiator.bt_addr.split(":")]
+
+    initiator_preference = RangingPreference(
+        device_role=DeviceRole.INITIATOR,
+        ranging_params=RawInitiatorRangingParams(
+            peer_params=[
+                DeviceParams(
+                    peer_id=self.responder.id,
+                    cs_params=cs.CsRangingParams(
+                      peer_address=self.responder.bt_addr,
+                    ),
+                )
+            ],
+        ),
+    )
+
+    responder_preference = RangingPreference(
+        device_role=DeviceRole.RESPONDER,
+        ranging_params=RawResponderRangingParams(
+            peer_params=DeviceParams(
+                peer_id=self.initiator.id,
+                cs_params=cs.CsRangingParams(
+                  peer_address=self.initiator.bt_addr,
+                ),
+            ),
+        ),
+    )
+
+    try:
+      self._start_mutual_ranging_and_assert_started(
+          SESSION_HANDLE,
+          initiator_preference,
+          responder_preference,
+          TECHNOLOGIES,
+      )
+
+      time.sleep(10)
+
+      asserts.assert_true(
+          self.initiator.verify_received_data_from_peer_using_technologies(
+              SESSION_HANDLE,
+              self.responder.id,
+              TECHNOLOGIES
+          ),
+          "Initiator did not find responder",
+      )
+      asserts.assert_true(
+          self.responder.verify_received_data_from_peer_using_technologies(
+              SESSION_HANDLE,
+              self.initiator.id,
+              TECHNOLOGIES,
+          ),
+          "Responder did not find initiator",
+      )
+    finally:
+      self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
+      self.responder.stop_ranging_and_assert_closed(SESSION_HANDLE)
+
+      self._ble_unbond()
 
 if __name__ == "__main__":
   if "--" in sys.argv:
