@@ -14,25 +14,33 @@
  * limitations under the License.
  */
 
-package com.android.server.ranging;
+package com.android.server.ranging.session;
 
+import android.app.AlarmManager;
 import android.content.AttributionSource;
 import android.os.Binder;
+import android.os.Handler;
+import android.os.SystemClock;
 import android.ranging.RangingData;
 import android.ranging.RangingDevice;
 import android.ranging.SessionHandle;
+import android.ranging.raw.RawResponderRangingConfig;
 import android.util.Log;
 
 import androidx.annotation.GuardedBy;
 import androidx.annotation.NonNull;
 
-import com.android.server.ranging.RangingSessionConfig.MulticastTechnologyConfig;
-import com.android.server.ranging.RangingSessionConfig.TechnologyConfig;
-import com.android.server.ranging.RangingSessionConfig.UnicastTechnologyConfig;
+import com.android.server.ranging.RangingAdapter;
+import com.android.server.ranging.RangingInjector;
+import com.android.server.ranging.RangingServiceManager;
+import com.android.server.ranging.RangingTechnology;
 import com.android.server.ranging.RangingUtils.StateMachine;
 import com.android.server.ranging.fusion.DataFusers;
 import com.android.server.ranging.fusion.FilteringFusionEngine;
 import com.android.server.ranging.fusion.FusionEngine;
+import com.android.server.ranging.session.RangingSessionConfig.MulticastTechnologyConfig;
+import com.android.server.ranging.session.RangingSessionConfig.TechnologyConfig;
+import com.android.server.ranging.session.RangingSessionConfig.UnicastTechnologyConfig;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
@@ -40,20 +48,29 @@ import com.google.common.util.concurrent.ListeningExecutorService;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
+import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentMap;
 
 /** A multi-technology ranging session in the Android generic ranging service */
-public class RangingSession {
-    private static final String TAG = RangingSession.class.getSimpleName();
+public class BaseRangingSession {
+    private static final String TAG = BaseRangingSession.class.getSimpleName();
 
+    private static final int NON_PRIVILEGED_RANGING_BG_APP_TIMEOUT_MS = 1000;
+
+    public static final String NON_PRIVILEGED_RANGING_BG_APP_TIMER_TAG =
+            "RangingSessionNonPrivilegedBgAppTimeout";
     private final RangingInjector mInjector;
     private final AttributionSource mAttributionSource;
-    private final SessionHandle mSessionHandle;
-    private final RangingSessionConfig mConfig;
     private final RangingServiceManager.SessionListener mSessionListener;
     private final ListeningExecutorService mAdapterExecutor;
+
+    protected final SessionHandle mSessionHandle;
+    protected final RangingSessionConfig mConfig;
+
+    private final AlarmManager mAlarmManager;
+    private AlarmManager.OnAlarmListener mNonPrivilegedBgAppTimerListener;
 
     /* Lock for internal state. */
     private final Object mLock = new Object();
@@ -91,7 +108,7 @@ public class RangingSession {
 
         Peer(@NonNull RangingDevice device, @NonNull RangingTechnology initialTechnology) {
             technologies = Sets.newConcurrentHashSet(Set.of(initialTechnology));
-            if (mConfig.getSensorFusionConfig().isSensorFusionEnabled()) {
+            if (mConfig.getSessionConfig().getSensorFusionParams().isSensorFusionEnabled()) {
                 fusionEngine = new FilteringFusionEngine(
                         new DataFusers.PreferentialDataFuser(RangingTechnology.UWB));
             } else {
@@ -111,7 +128,7 @@ public class RangingSession {
         }
     }
 
-    public RangingSession(
+    public BaseRangingSession(
             @NonNull AttributionSource attributionSource,
             @NonNull SessionHandle sessionHandle,
             @NonNull RangingInjector injector,
@@ -128,17 +145,20 @@ public class RangingSession {
         mStateMachine = new StateMachine<>(State.STOPPED);
         mPeers = new ConcurrentHashMap<>();
         mAdapters = new ConcurrentHashMap<>();
+        mAlarmManager = injector.getContext().getSystemService(AlarmManager.class);
     }
 
     /** Start ranging in this session. */
-    public void start() {
+    public void start(ImmutableSet<TechnologyConfig> technologyConfigs) {
         synchronized (mLock) {
             if (!mStateMachine.transition(State.STOPPED, State.STARTING)) {
                 Log.w(TAG, "Failed transition STOPPED -> STARTING");
                 return;
             }
+            AttributionSource nonPrivilegedAttributionSource =
+                    mInjector.getAnyNonPrivilegedAppInAttributionSource(mAttributionSource);
 
-            for (TechnologyConfig config : mConfig.getTechnologyConfigs()) {
+            for (TechnologyConfig config : technologyConfigs) {
                 ImmutableSet<RangingDevice> peerDevices;
 
                 if (config instanceof UnicastTechnologyConfig unicastConfig) {
@@ -167,25 +187,88 @@ public class RangingSession {
                 RangingAdapter adapter = mInjector.createAdapter(
                         config, mConfig.getDeviceRole(), mAdapterExecutor);
                 mAdapters.put(config, adapter);
-                adapter.start(config, new AdapterListener(config));
+                adapter.start(config, nonPrivilegedAttributionSource, new AdapterListener(config));
                 Binder.restoreCallingIdentity(token);
             }
         }
     }
 
-    public void addPeer(RangingDevice params) {
-        //TODO: Implement this
-        throw new IllegalArgumentException("Dynamic addition of raw peer not supported yet");
+    public void addPeer(RawResponderRangingConfig params) {
+        synchronized (mLock) {
+            for (Map.Entry<TechnologyConfig, RangingAdapter> entry : mAdapters.entrySet()) {
+                if (entry.getValue().isDynamicUpdatePeersSupported()) {
+                    RangingDevice peerDevice = params.getRawRangingDevice().getRangingDevice();
+                    mPeers.put(peerDevice, new Peer(peerDevice, entry.getKey().getTechnology()));
+                    entry.getValue().addPeer(params);
+                }
+            }
+        }
     }
 
-    public void removePeer(RangingDevice params) {
-        //TODO: Implement this
-        throw new IllegalArgumentException("Dynamic addition of raw peer not supported yet");
+    public void removePeer(RangingDevice device) {
+        synchronized (mLock) {
+            for (Map.Entry<TechnologyConfig, RangingAdapter> entry : mAdapters.entrySet()) {
+                if (entry.getValue().isDynamicUpdatePeersSupported()) {
+                    entry.getValue().removePeer(device);
+                }
+            }
+        }
     }
 
     public void reconfigureInterval(int intervalSkipCount) {
-        //TODO: Implement this
-        throw new IllegalArgumentException("Dynamic addition of raw peer not supported yet");
+        synchronized (mLock) {
+            for (Map.Entry<TechnologyConfig, RangingAdapter> entry : mAdapters.entrySet()) {
+                entry.getValue().reconfigureRangingInterval(intervalSkipCount);
+            }
+        }
+    }
+
+    public void appForegroundStateUpdated(boolean appInForeground) {
+        synchronized (mLock) {
+            for (Map.Entry<TechnologyConfig, RangingAdapter> entry : mAdapters.entrySet()) {
+                entry.getValue().appForegroundStateUpdated(appInForeground);
+                if (!appInForeground) {
+                    startNonPrivilegedBgAppTimerIfNotSet();
+                } else {
+                    stopNonPrivilegedBgAppTimerIfSet();
+                }
+            }
+        }
+    }
+
+    public void appInBackgroundTimeout() {
+        synchronized (mLock) {
+            for (Map.Entry<TechnologyConfig, RangingAdapter> entry : mAdapters.entrySet()) {
+                entry.getValue().appInBackgroundTimeout();
+            }
+        }
+    }
+
+    /**
+     * Starts a timer to detect if the app that started the UWB session is in the background
+     * for longer than NON_PRIVILEGED_BG_APP_TIMEOUT_MS.
+     */
+    private void startNonPrivilegedBgAppTimerIfNotSet() {
+        // Start a timer when the non-privileged app goes into the background.
+        if (mNonPrivilegedBgAppTimerListener == null) {
+            mNonPrivilegedBgAppTimerListener = () -> {
+                Log.w(TAG, "Non-privileged app in background for longer than timeout");
+                appInBackgroundTimeout();
+            };
+            mAlarmManager.setExact(AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                    SystemClock.elapsedRealtime() + NON_PRIVILEGED_RANGING_BG_APP_TIMEOUT_MS,
+                    NON_PRIVILEGED_RANGING_BG_APP_TIMER_TAG,
+                    mNonPrivilegedBgAppTimerListener,
+                    mInjector.getAlarmHandler());
+        }
+    }
+
+    public void stopNonPrivilegedBgAppTimerIfSet() {
+        // Stop the timer when the non-privileged app goes into the foreground.
+        if (mNonPrivilegedBgAppTimerListener != null) {
+            mAlarmManager.cancel(mNonPrivilegedBgAppTimerListener);
+            mNonPrivilegedBgAppTimerListener = null;
+        }
     }
 
     /** Stop ranging in this session. */
@@ -196,6 +279,7 @@ public class RangingSession {
                 Log.v(TAG, "Ranging already stopping or stopped, skipping");
                 return;
             }
+            stopNonPrivilegedBgAppTimerIfSet();
             mStateMachine.setState(State.STOPPING);
 
             // Any calls to the corresponding technology stacks must be
@@ -218,6 +302,10 @@ public class RangingSession {
         @Override
         public void onStarted(@NonNull RangingDevice peerDevice) {
             synchronized (mLock) {
+                if (!mPeers.containsKey(peerDevice)) {
+                    Log.w(TAG, "onStarted peer not found");
+                    return;
+                }
                 mStateMachine.transition(State.STARTING, State.STARTED);
                 mPeers.get(peerDevice).setUsingTechnology(mConfig.getTechnology());
                 mSessionListener.onTechnologyStarted(peerDevice, mConfig.getTechnology());
@@ -227,6 +315,10 @@ public class RangingSession {
         @Override
         public void onStopped(@NonNull RangingDevice peerDevice) {
             synchronized (mLock) {
+                if (!mPeers.containsKey(peerDevice)) {
+                    Log.w(TAG, "onStopped peer not found");
+                    return;
+                }
                 Peer peer = mPeers.get(peerDevice);
                 peer.setNotUsingTechnology(mConfig.getTechnology());
                 mSessionListener.onTechnologyStopped(peerDevice, mConfig.getTechnology());

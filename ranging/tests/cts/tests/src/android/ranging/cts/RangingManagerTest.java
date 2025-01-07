@@ -18,7 +18,9 @@ package android.ranging.cts;
 
 import static android.ranging.RangingPreference.DEVICE_ROLE_INITIATOR;
 import static android.ranging.RangingPreference.DEVICE_ROLE_RESPONDER;
+import static android.ranging.raw.RawRangingDevice.UPDATE_RATE_FREQUENT;
 import static android.ranging.raw.RawRangingDevice.UPDATE_RATE_NORMAL;
+import static android.ranging.uwb.UwbRangingParams.CONFIG_MULTICAST_DS_TWR;
 import static android.ranging.uwb.UwbRangingParams.CONFIG_UNICAST_DS_TWR;
 import static android.uwb.UwbManager.AdapterStateCallback.STATE_ENABLED_INACTIVE;
 
@@ -53,12 +55,12 @@ import android.ranging.RangingManager.RangingCapabilitiesCallback;
 import android.ranging.RangingPreference;
 import android.ranging.RangingSession;
 import android.ranging.SensorFusionParams;
-import android.ranging.SessionConfiguration;
-import android.ranging.ble.cs.CsRangingParams;
+import android.ranging.SessionConfig;
+import android.ranging.ble.cs.BleCsRangingParams;
 import android.ranging.ble.rssi.BleRssiRangingParams;
-import android.ranging.raw.RawInitiatorRangingParams;
+import android.ranging.raw.RawInitiatorRangingConfig;
 import android.ranging.raw.RawRangingDevice;
-import android.ranging.raw.RawResponderRangingParams;
+import android.ranging.raw.RawResponderRangingConfig;
 import android.ranging.uwb.UwbAddress;
 import android.ranging.uwb.UwbComplexChannel;
 import android.ranging.uwb.UwbRangingParams;
@@ -215,14 +217,14 @@ public class RangingManagerTest {
         assertThat(BlockingBluetoothAdapter.enable()).isTrue();
     }
 
-    private RangingPreference getGenericRangingPreference(int deviceRole) {
+    private RangingPreference getGenericUwbRangingPreference(int deviceRole) {
         // Generic ranging preference, Improve this method based on future needs.
         return new RangingPreference.Builder(deviceRole,
-                new RawInitiatorRangingParams.Builder()
+                new RawInitiatorRangingConfig.Builder()
                         .addRawRangingDevice(new RawRangingDevice.Builder()
                                 .setRangingDevice(new RangingDevice.Builder().build())
-                                .setUwbRangingParams(new UwbRangingParams.Builder(10,
-                                        CONFIG_UNICAST_DS_TWR,
+                                .setUwbRangingParams(new UwbRangingParams.Builder(15,
+                                        CONFIG_MULTICAST_DS_TWR,
                                         UwbAddress.fromBytes(new byte[]{1, 2}),
                                         UwbAddress.fromBytes(new byte[]{3, 4}))
                                         .setComplexChannel(
@@ -234,6 +236,9 @@ public class RangingManagerTest {
                                         .setRangingUpdateRate(UPDATE_RATE_NORMAL)
                                         .build())
                                 .build())
+                        .build())
+                .setSessionConfig(new SessionConfig.Builder()
+                        .setRangingMeasurementsLimit(100)
                         .build())
                 .build();
     }
@@ -248,7 +253,7 @@ public class RangingManagerTest {
                 MoreExecutors.directExecutor(), callback);
         assertThat(rangingSession).isNotNull();
 
-        RangingPreference preference = getGenericRangingPreference(DEVICE_ROLE_INITIATOR);
+        RangingPreference preference = getGenericUwbRangingPreference(DEVICE_ROLE_INITIATOR);
 
         try {
             rangingSession.start(preference);
@@ -280,6 +285,7 @@ public class RangingManagerTest {
             Log.i(TAG, "Failed with expected security exception: " + e);
         }
     }
+
     @Test
     @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_enabled")
@@ -297,7 +303,7 @@ public class RangingManagerTest {
         assertThat(rangingSession).isNotNull();
 
         RangingPreference preference = new RangingPreference.Builder(DEVICE_ROLE_INITIATOR,
-                new RawInitiatorRangingParams.Builder()
+                new RawInitiatorRangingConfig.Builder()
                         .addRawRangingDevice(new RawRangingDevice.Builder()
                                 .setRangingDevice(new RangingDevice.Builder().build())
                                 .setUwbRangingParams(new UwbRangingParams.Builder(
@@ -314,10 +320,10 @@ public class RangingManagerTest {
                                         .build())
                                 .build())
                         .build())
-                .setSessionConfiguration(new SessionConfiguration.Builder()
+                .setSessionConfig(new SessionConfig.Builder()
                         .setRangingMeasurementsLimit(1000)
                         .setAngleOfArrivalNeeded(true)
-                        .setSensorFusionParameters(
+                        .setSensorFusionParams(
                                 new SensorFusionParams.Builder()
                                         .setSensorFusionEnabled(false)
                                         .build())
@@ -329,6 +335,87 @@ public class RangingManagerTest {
 
         rangingSession.stop();
         assertThat(callback.mOnClosedCalled.await(2, TimeUnit.SECONDS)).isTrue();
+
+        uiAutomation.dropShellPermissionIdentity();
+    }
+
+    @Test
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_enabled")
+    public void testRawAddRemoverPeer() throws Exception {
+        assumeTrue(mSupportedTechnologies.contains(RangingManager.UWB));
+        enableUwb();
+        int sessionId = 10;
+        UiAutomation uiAutomation = getInstrumentation().getUiAutomation();
+        uiAutomation.adoptShellPermissionIdentity();
+
+        RangingSessionCallback callback = new RangingSessionCallback();
+
+        RangingSession rangingSession = mRangingManager.createRangingSession(
+                MoreExecutors.directExecutor(), callback);
+        assertThat(rangingSession).isNotNull();
+
+        RangingPreference preference = getGenericUwbRangingPreference(DEVICE_ROLE_INITIATOR);
+
+        rangingSession.start(preference);
+        assertThat(callback.mOnOpenedCalled.await(1, TimeUnit.SECONDS)).isTrue();
+        assertThat(callback.mOnPeerAdded.await(2, TimeUnit.SECONDS)).isTrue();
+        RangingDevice device = new RangingDevice.Builder().build();
+        RawResponderRangingConfig peerParams = new RawResponderRangingConfig.Builder()
+                .setRawRangingDevice(
+                        new RawRangingDevice.Builder()
+                                .setRangingDevice(device)
+                                .setUwbRangingParams(new UwbRangingParams.Builder(
+                                        sessionId, CONFIG_UNICAST_DS_TWR,
+                                        UwbAddress.fromBytes(new byte[]{1, 2}),
+                                        UwbAddress.fromBytes(new byte[]{5, 6}))
+                                        .setComplexChannel(
+                                                new UwbComplexChannel.Builder().setChannel(
+                                                        9).setPreambleIndex(11).build())
+                                        .setSessionKeyInfo(
+                                                new byte[]{1, 2, 3, 4, 5, 6, 7, 8, 8, 7, 6, 5,
+                                                        4, 3, 2, 1})
+                                        .setRangingUpdateRate(UPDATE_RATE_NORMAL)
+                                        .build())
+                                .build())
+                .build();
+
+        callback.replaceOnPeerAddedLatch(new CountDownLatch(1));
+        rangingSession.addDeviceToRangingSession(peerParams);
+        assertThat(callback.mOnPeerAdded.await(2, TimeUnit.SECONDS)).isTrue();
+
+        callback.replaceOnPeerRemovedLatch(new CountDownLatch(1));
+        rangingSession.removeDeviceFromRangingSession(device);
+        assertThat(callback.mOnPeerRemoved.await(2, TimeUnit.SECONDS)).isTrue();
+
+        rangingSession.stop();
+        assertThat(callback.mOnClosedCalled.await(3, TimeUnit.SECONDS)).isTrue();
+
+        uiAutomation.dropShellPermissionIdentity();
+    }
+
+    @Test
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_enabled")
+    public void testRawReconfigureRangingInterval() throws Exception {
+        assumeTrue(mSupportedTechnologies.contains(RangingManager.UWB));
+        enableUwb();
+        UiAutomation uiAutomation = getInstrumentation().getUiAutomation();
+        uiAutomation.adoptShellPermissionIdentity();
+
+        RangingSessionCallback callback = new RangingSessionCallback();
+
+        RangingSession rangingSession = mRangingManager.createRangingSession(
+                MoreExecutors.directExecutor(), callback);
+        assertThat(rangingSession).isNotNull();
+
+        RangingPreference preference = getGenericUwbRangingPreference(DEVICE_ROLE_INITIATOR);
+
+        rangingSession.start(preference);
+        assertThat(callback.mOnOpenedCalled.await(1, TimeUnit.SECONDS)).isTrue();
+        rangingSession.reconfigureRangingInterval(3);
+        rangingSession.stop();
+        assertThat(callback.mOnClosedCalled.await(3, TimeUnit.SECONDS)).isTrue();
 
         uiAutomation.dropShellPermissionIdentity();
     }
@@ -355,7 +442,7 @@ public class RangingManagerTest {
                 MoreExecutors.directExecutor(), callback2);
         assertThat(rangingSession2).isNotNull();
         RangingPreference preference1 = new RangingPreference.Builder(DEVICE_ROLE_INITIATOR,
-                new RawInitiatorRangingParams.Builder()
+                new RawInitiatorRangingConfig.Builder()
                         .addRawRangingDevice(new RawRangingDevice.Builder()
                                 .setRangingDevice(new RangingDevice.Builder().build())
                                 .setUwbRangingParams(new UwbRangingParams.Builder(sessionId1,
@@ -375,7 +462,7 @@ public class RangingManagerTest {
                 .build();
 
         RangingPreference preference2 = new RangingPreference.Builder(DEVICE_ROLE_INITIATOR,
-                new RawInitiatorRangingParams.Builder()
+                new RawInitiatorRangingConfig.Builder()
                         .addRawRangingDevice(new RawRangingDevice.Builder()
                                 .setRangingDevice(new RangingDevice.Builder().build())
                                 .setUwbRangingParams(new UwbRangingParams.Builder(sessionId2,
@@ -412,8 +499,21 @@ public class RangingManagerTest {
     private static class RangingSessionCallback implements RangingSession.Callback {
 
         private final CountDownLatch mOnOpenedCalled = new CountDownLatch(1);
-        private final CountDownLatch mOnClosedCalled = new CountDownLatch(1);
+        private CountDownLatch mOnClosedCalled = new CountDownLatch(1);
+        private CountDownLatch mOnPeerAdded = new CountDownLatch(1);
+        private CountDownLatch mOnPeerRemoved = new CountDownLatch(1);
 
+        public void replaceOnPeerAddedLatch(CountDownLatch countDownLatch) {
+            mOnPeerAdded = countDownLatch;
+        }
+
+        public void replaceOnPeerRemovedLatch(CountDownLatch countDownLatch) {
+            mOnPeerRemoved = countDownLatch;
+        }
+
+        public void replaceOnClosedCalled(CountDownLatch countDownLatch) {
+            mOnClosedCalled = countDownLatch;
+        }
         @Override
         public void onOpened() {
             mOnOpenedCalled.countDown();
@@ -426,6 +526,7 @@ public class RangingManagerTest {
         @Override
         public void onStarted(@NonNull RangingDevice peer,
                 @RangingManager.RangingTechnology int technology) {
+            mOnPeerAdded.countDown();
         }
 
         @Override
@@ -435,6 +536,7 @@ public class RangingManagerTest {
         @Override
         public void onStopped(@NonNull RangingDevice peer,
                 @RangingManager.RangingTechnology int technology) {
+            mOnPeerRemoved.countDown();
         }
 
         @Override
@@ -448,6 +550,7 @@ public class RangingManagerTest {
     @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_enabled")
     public void testCapabilitiesListener() throws InterruptedException {
+        assumeTrue(mSupportedTechnologies.contains(RangingManager.UWB));
         UiAutomation uiAutomation = getInstrumentation().getUiAutomation();
         uiAutomation.adoptShellPermissionIdentity();
 
@@ -497,7 +600,7 @@ public class RangingManagerTest {
                 .isNotNull();
 
         RangingPreference preference = new RangingPreference.Builder(DEVICE_ROLE_INITIATOR,
-                new RawInitiatorRangingParams.Builder()
+                new RawInitiatorRangingConfig.Builder()
                         .addRawRangingDevice(new RawRangingDevice.Builder()
                                 .setRangingDevice(new RangingDevice.Builder().build())
                                 .setRttRangingParams(new RttRangingParams.Builder("test_rtt_1")
@@ -517,9 +620,14 @@ public class RangingManagerTest {
         assertThat(rangingSession).isNotNull();
 
         rangingSession.start(preference);
-        assertThat(callback.mOnOpenedCalled.await(1, TimeUnit.SECONDS)).isTrue();
+        assertThat(callback.mOnOpenedCalled.await(2, TimeUnit.SECONDS)).isTrue();
+
+        // OnOpened can be successful for test_rtt_1 and not be successful yet for test_rtt_2,
+        // calling stop before it was initialized will result in not getting onClosed. So, sleep for
+        // 1 second here.
+        Thread.sleep(1000);
         rangingSession.stop();
-        assertThat(callback.mOnClosedCalled.await(1, TimeUnit.SECONDS)).isTrue();
+        assertThat(callback.mOnClosedCalled.await(2, TimeUnit.SECONDS)).isTrue();
 
         mRangingManager.unregisterCapabilitiesCallback(capabilitiesCallback);
         uiAutomation.dropShellPermissionIdentity();
@@ -545,7 +653,7 @@ public class RangingManagerTest {
                 .isNotNull();
 
         RangingPreference preference = new RangingPreference.Builder(DEVICE_ROLE_RESPONDER,
-                new RawResponderRangingParams.Builder()
+                new RawResponderRangingConfig.Builder()
                         .setRawRangingDevice(new RawRangingDevice.Builder()
                                 .setRangingDevice(new RangingDevice.Builder().build())
                                 .setRttRangingParams(new RttRangingParams.Builder("test_rtt_1")
@@ -562,6 +670,53 @@ public class RangingManagerTest {
         rangingSession.start(preference);
         assertThat(callback.mOnOpenedCalled.await(2, TimeUnit.SECONDS)).isTrue();
         rangingSession.stop();
+        assertThat(callback.mOnClosedCalled.await(2, TimeUnit.SECONDS)).isTrue();
+
+        mRangingManager.unregisterCapabilitiesCallback(capabilitiesCallback);
+        uiAutomation.dropShellPermissionIdentity();
+    }
+
+    @Test
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @RequiresFlagsEnabled("com.android.ranging.flags.ranging_rtt_enabled")
+    public void testRttRangingResponder_WithMeasurementLimit() throws InterruptedException {
+        assumeTrue(mSupportedTechnologies.contains(RangingManager.WIFI_NAN_RTT));
+        enableWifiNanRtt();
+        UiAutomation uiAutomation = getInstrumentation().getUiAutomation();
+        uiAutomation.adoptShellPermissionIdentity();
+        CapabilitiesCallback capabilitiesCallback = new CapabilitiesCallback(new CountDownLatch(1));
+        mRangingManager.registerCapabilitiesCallback(Executors.newSingleThreadExecutor(),
+                capabilitiesCallback);
+
+        assertThat(capabilitiesCallback.mCountDownLatch.await(3, TimeUnit.SECONDS)).isTrue();
+        assertThat(capabilitiesCallback.mOnCapabilitiesReceived).isTrue();
+        assertThat(capabilitiesCallback.mRangingCapabilities).isNotNull();
+        assertThat(
+                capabilitiesCallback.mRangingCapabilities.getTechnologyAvailability())
+                .isNotNull();
+
+        RangingPreference preference = new RangingPreference.Builder(DEVICE_ROLE_RESPONDER,
+                new RawResponderRangingConfig.Builder()
+                        .setRawRangingDevice(new RawRangingDevice.Builder()
+                                .setRangingDevice(new RangingDevice.Builder().build())
+                                .setRttRangingParams(new RttRangingParams.Builder("test_rtt_1")
+                                        .setRangingUpdateRate(UPDATE_RATE_FREQUENT)
+                                        .build())
+                                .build())
+                        .build())
+                .setSessionConfig(
+                        new SessionConfig.Builder().setRangingMeasurementsLimit(2).build())
+                .build();
+
+        RangingSessionCallback callback = new RangingSessionCallback();
+        RangingSession rangingSession = mRangingManager.createRangingSession(
+                MoreExecutors.directExecutor(), callback);
+        assertThat(rangingSession).isNotNull();
+
+        rangingSession.start(preference);
+        assertThat(callback.mOnOpenedCalled.await(2, TimeUnit.SECONDS)).isTrue();
+
+        // Session should close after measurement limit.
         assertThat(callback.mOnClosedCalled.await(2, TimeUnit.SECONDS)).isTrue();
 
         mRangingManager.unregisterCapabilitiesCallback(capabilitiesCallback);
@@ -591,7 +746,7 @@ public class RangingManagerTest {
                 .isNotNull();
 
         RangingPreference preference = new RangingPreference.Builder(DEVICE_ROLE_RESPONDER,
-                new RawResponderRangingParams.Builder()
+                new RawResponderRangingConfig.Builder()
                         .setRawRangingDevice(new RawRangingDevice.Builder()
                                 .setRangingDevice(new RangingDevice.Builder().build())
                                 .setRttRangingParams(new RttRangingParams.Builder("test_rtt_multi")
@@ -618,8 +773,12 @@ public class RangingManagerTest {
         assertThat(rangingSession).isNotNull();
 
         rangingSession.start(preference);
-        assertThat(callback.mOnOpenedCalled.await(1, TimeUnit.SECONDS)).isTrue();
+        assertThat(callback.mOnOpenedCalled.await(2, TimeUnit.SECONDS)).isTrue();
 
+        // OnOpened can be successful for uwb and not be successful yet for rtt session,
+        // calling stop before it was initialized will result in not getting onClosed. So, sleep for
+        // 1 second here.
+        Thread.sleep(1000);
         rangingSession.stop();
         assertThat(callback.mOnClosedCalled.await(4, TimeUnit.SECONDS)).isTrue();
 
@@ -643,7 +802,7 @@ public class RangingManagerTest {
         assertThat(rangingSession).isNotNull();
 
         RangingPreference preference = new RangingPreference.Builder(DEVICE_ROLE_INITIATOR,
-                new RawInitiatorRangingParams.Builder()
+                new RawInitiatorRangingConfig.Builder()
                         .addRawRangingDevice(new RawRangingDevice.Builder()
                                 .setRangingDevice(new RangingDevice.Builder().build())
                                 .setBleRssiRangingParams(
@@ -651,10 +810,10 @@ public class RangingManagerTest {
                                                 .build())
                                 .build())
                         .build())
-                .setSessionConfiguration(new SessionConfiguration.Builder()
+                .setSessionConfig(new SessionConfig.Builder()
                         .setRangingMeasurementsLimit(1000)
                         .setAngleOfArrivalNeeded(true)
-                        .setSensorFusionParameters(
+                        .setSensorFusionParams(
                                 new SensorFusionParams.Builder()
                                         .setSensorFusionEnabled(false)
                                         .build())
@@ -686,18 +845,18 @@ public class RangingManagerTest {
         assertThat(rangingSession).isNotNull();
 
         RangingPreference preference = new RangingPreference.Builder(DEVICE_ROLE_INITIATOR,
-                new RawInitiatorRangingParams.Builder()
+                new RawInitiatorRangingConfig.Builder()
                         .addRawRangingDevice(new RawRangingDevice.Builder()
                                 .setRangingDevice(new RangingDevice.Builder().build())
                                 .setCsRangingParams(new
-                                        CsRangingParams.Builder("00:11:22:33:AA:BB")
+                                        BleCsRangingParams.Builder("00:11:22:33:AA:BB")
                                         .build())
                                 .build())
                         .build())
-                .setSessionConfiguration(new SessionConfiguration.Builder()
+                .setSessionConfig(new SessionConfig.Builder()
                         .setRangingMeasurementsLimit(1000)
                         .setAngleOfArrivalNeeded(true)
-                        .setSensorFusionParameters(
+                        .setSensorFusionParams(
                                 new SensorFusionParams.Builder()
                                         .setSensorFusionEnabled(false)
                                         .build())

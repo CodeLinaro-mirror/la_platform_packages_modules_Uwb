@@ -21,15 +21,18 @@ import static android.ranging.RangingPreference.DEVICE_ROLE_RESPONDER;
 import android.ranging.DataNotificationConfig;
 import android.ranging.RangingDevice;
 import android.ranging.RangingPreference;
+import android.ranging.SessionConfig;
 import android.ranging.uwb.UwbAddress;
 import android.ranging.uwb.UwbComplexChannel;
 import android.ranging.uwb.UwbRangingParams;
 
 import androidx.annotation.NonNull;
 
+import com.android.ranging.uwb.backend.internal.RangingParameters;
 import com.android.ranging.uwb.backend.internal.UwbRangeDataNtfConfig;
-import com.android.server.ranging.RangingSessionConfig;
+import com.android.ranging.uwb.backend.internal.UwbRangeLimitsConfig;
 import com.android.server.ranging.RangingTechnology;
+import com.android.server.ranging.session.RangingSessionConfig;
 
 import com.google.common.collect.ImmutableBiMap;
 import com.google.common.collect.ImmutableSet;
@@ -47,18 +50,16 @@ public class UwbConfig implements RangingSessionConfig.MulticastTechnologyConfig
     private static final String TAG = UwbConfig.class.getSimpleName();
 
     private final String mCountryCode;
-    private final DataNotificationConfig mDataNotificationConfig;
+    private final SessionConfig mSessionConfig;
     private final UwbRangingParams mParameters;
     private final int mDeviceRole;
-    private final boolean mIsAoaNeeded;
     private final ImmutableBiMap<RangingDevice, UwbAddress> mPeerAddresses;
 
     private UwbConfig(Builder builder) {
         mParameters = builder.mParameters;
         mCountryCode = builder.mCountryCode.get();
-        mDataNotificationConfig = builder.mDataNotificationConfig;
+        mSessionConfig = builder.mSessionConfig;
         mDeviceRole = builder.mDeviceRole;
-        mIsAoaNeeded = builder.mIsAoaNeeded;
         mPeerAddresses = builder.mPeerAddresses.get();
     }
 
@@ -89,16 +90,12 @@ public class UwbConfig implements RangingSessionConfig.MulticastTechnologyConfig
         return mCountryCode;
     }
 
-    public @NonNull DataNotificationConfig getDataNotificationConfig() {
-        return mDataNotificationConfig;
-    }
-
     public int getDeviceRole() {
         return mDeviceRole;
     }
 
-    public boolean isAoaNeeded() {
-        return mIsAoaNeeded;
+    public SessionConfig getSessionConfig() {
+        return mSessionConfig;
     }
 
     public @NonNull ImmutableBiMap<RangingDevice, UwbAddress> getPeerAddresses() {
@@ -111,7 +108,7 @@ public class UwbConfig implements RangingSessionConfig.MulticastTechnologyConfig
      * {@link androidx.core.uwb.backend.impl.internal.RangingParameters} accepted by the UWB
      * backend.
      */
-    public com.android.ranging.uwb.backend.internal.RangingParameters asBackendParameters() {
+    public RangingParameters asBackendParameters(DataNotificationConfig dataNotificationConfig) {
         List<com.android.ranging.uwb.backend.internal.UwbAddress> peerAddresses = mPeerAddresses
                 .values()
                 .stream()
@@ -119,7 +116,7 @@ public class UwbConfig implements RangingSessionConfig.MulticastTechnologyConfig
                         com.android.ranging.uwb.backend.internal.UwbAddress.fromBytes(
                                 address.getAddressBytes()))
                 .collect(Collectors.toList());
-        return new com.android.ranging.uwb.backend.internal.RangingParameters(
+        return new RangingParameters(
                 (int) mParameters.getConfigId(),
                 mParameters.getSessionId(),
                 mParameters.getSubSessionId(),
@@ -128,9 +125,12 @@ public class UwbConfig implements RangingSessionConfig.MulticastTechnologyConfig
                 toBackend(mParameters.getComplexChannel()),
                 peerAddresses,
                 (int) mParameters.getRangingUpdateRate(),
-                toBackend(getDataNotificationConfig()),
+                toBackend(dataNotificationConfig),
                 (int) mParameters.getSlotDuration(),
-                mIsAoaNeeded
+                mSessionConfig.isAngleOfArrivalNeeded(),
+                new UwbRangeLimitsConfig.Builder().setRangeMaxNumberOfMeasurements(
+                        mSessionConfig.getRangingMeasurementsLimit()
+                ).build()
         );
     }
 
@@ -165,8 +165,7 @@ public class UwbConfig implements RangingSessionConfig.MulticastTechnologyConfig
         private final RequiredParam<ImmutableBiMap<RangingDevice, UwbAddress>> mPeerAddresses =
                 new RequiredParam<>();
         private final RequiredParam<String> mCountryCode = new RequiredParam<>();
-        private DataNotificationConfig mDataNotificationConfig =
-                new DataNotificationConfig.Builder().build();
+        private SessionConfig mSessionConfig = new SessionConfig.Builder().build();
 
         private int mDeviceRole = DEVICE_ROLE_RESPONDER;
         private boolean mIsAoaNeeded = false;
@@ -196,13 +195,8 @@ public class UwbConfig implements RangingSessionConfig.MulticastTechnologyConfig
             return this;
         }
 
-        public Builder setAoaNeeded(boolean isAoaNeeded) {
-            mIsAoaNeeded = isAoaNeeded;
-            return this;
-        }
-
-        public Builder setDataNotificationConfig(@NonNull DataNotificationConfig config) {
-            mDataNotificationConfig = config;
+        public Builder setSessionConfig(SessionConfig sessionConfig) {
+            mSessionConfig = sessionConfig;
             return this;
         }
     }
@@ -214,12 +208,10 @@ public class UwbConfig implements RangingSessionConfig.MulticastTechnologyConfig
                 + mParameters
                 + ", mCountryCode='"
                 + mCountryCode
-                + ", mDataNotificationConfig="
-                + mDataNotificationConfig
+                + ", mSessionConfig="
+                + mSessionConfig
                 + ", mDeviceRole="
                 + mDeviceRole
-                + ", mIsAoaNeeded="
-                + mIsAoaNeeded
                 + ", mPeerAddresses="
                 + mPeerAddresses
                 + " }";
