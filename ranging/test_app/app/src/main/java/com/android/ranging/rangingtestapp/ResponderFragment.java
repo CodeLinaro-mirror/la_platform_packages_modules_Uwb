@@ -56,7 +56,8 @@ public class ResponderFragment extends Fragment {
     private TextView mLogText;
 
     private BleConnectionPeripheralViewModel mBleConnectionViewModel;
-    private ResponderViewModel mResponderViewModel;
+    private DistanceMeasurementViewModel mDistanceMeasurementViewModel;
+    private LoggingListener mLoggingListener;
 
     @Override
     public View onCreateView(
@@ -79,6 +80,7 @@ public class ResponderFragment extends Fragment {
         mDistanceCanvasView = new CanvasView(getContext(), "Distance");
         mDistanceViewLayout.addView(mDistanceCanvasView);
         mDistanceViewLayout.setPadding(0, 0, 0, 600);
+        mLoggingListener = new LoggingListener(getActivity().getApplicationContext(), true);
         mLogText = (TextView) root.findViewById(R.id.text_log);
         return root;
     }
@@ -103,31 +105,32 @@ public class ResponderFragment extends Fragment {
         mDurationArrayAdapter.setDropDownViewResource(
                 android.R.layout.simple_spinner_dropdown_item);
         mSpinnerDuration.setAdapter(mDurationArrayAdapter);
-
-        mBleConnectionViewModel =
-                new ViewModelProvider(this).get(BleConnectionPeripheralViewModel.class);
-        mResponderViewModel = new ViewModelProvider(
-                this,
-                new ResponderViewModel.Factory(
-                        getActivity().getApplication(), mBleConnectionViewModel))
-                .get(ResponderViewModel.class);
-        mBleConnectionViewModel
+        mLoggingListener
                 .getLogText()
                 .observe(
                         getActivity(),
                         log -> {
                             mLogText.setText(log);
-                            Log.i("Responder", log);
                         });
+        mBleConnectionViewModel =
+                new ViewModelProvider(this,
+                        new BleConnectionPeripheralViewModel.Factory(
+                                getActivity().getApplication(), mLoggingListener))
+                        .get(BleConnectionPeripheralViewModel.class);
+        mDistanceMeasurementViewModel = new ViewModelProvider(
+                this,
+                new DistanceMeasurementViewModel.Factory(
+                        getActivity(), mBleConnectionViewModel,
+                        mLoggingListener, true))
+                .get(DistanceMeasurementViewModel.class);
         mBleConnectionViewModel
                 .getTargetDevice()
                 .observe(
                         getActivity(),
                         targetDevice -> {
-                            mResponderViewModel.setTargetDevice(targetDevice);
+                            mDistanceMeasurementViewModel.setTargetDevice(targetDevice);
                         });
-
-        mResponderViewModel
+        mDistanceMeasurementViewModel
                 .getSessionState()
                 .observe(
                         getActivity(),
@@ -152,16 +155,7 @@ public class ResponderFragment extends Fragment {
                                     break;
                             }
                         });
-        mResponderViewModel
-                .getLogText()
-                .observe(
-                        getActivity(),
-                        log -> {
-                            mLogText.setText(log);
-                            Log.i("Responder", log);
-                        });
-
-        mResponderViewModel
+        mDistanceMeasurementViewModel
                 .getDistanceResult()
                 .observe(
                         getActivity(),
@@ -171,9 +165,9 @@ public class ResponderFragment extends Fragment {
                                     DISTANCE_DECIMAL_FMT.format(distanceMeters) + " m");
                         });
 
-        mTechnologyArrayAdapter.addAll(mResponderViewModel.getSupportedTechnologies());
-        mFreqArrayAdapter.addAll(mResponderViewModel.getMeasurementFreqs());
-        mDurationArrayAdapter.addAll(mResponderViewModel.getMeasurementDurations());
+        mTechnologyArrayAdapter.addAll(mDistanceMeasurementViewModel.getSupportedTechnologies());
+        mFreqArrayAdapter.addAll(mDistanceMeasurementViewModel.getMeasurementFreqs());
+        mDurationArrayAdapter.addAll(mDistanceMeasurementViewModel.getMeasurementDurations());
         mButton.setOnClickListener(
                 v -> {
                     String methodName = mSpinnerTechnology.getSelectedItem().toString();
@@ -184,12 +178,12 @@ public class ResponderFragment extends Fragment {
                         printLog("the device doesn't support any distance measurement methods.");
                     }
 
-                    mResponderViewModel.toggleStartStop(methodName, freq, duration);
+                    mDistanceMeasurementViewModel.toggleStartStop(methodName, freq, duration);
                 });
     }
 
     private void printLog(String logMessage) {
-        mLogText.setText("LOG: " + logMessage);
+        mLoggingListener.log(logMessage);
     }
 
     @Override
