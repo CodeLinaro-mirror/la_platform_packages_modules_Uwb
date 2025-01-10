@@ -127,8 +127,7 @@ public class UwbConfig implements RangingSessionConfig.MulticastTechnologyConfig
                 (int) mParameters.getRangingUpdateRate(),
                 toBackend(dataNotificationConfig),
                 (int) mParameters.getSlotDuration(),
-                // RangingParameters has isAoaDisabled field, Inverting here.
-                !mSessionConfig.isAngleOfArrivalNeeded(),
+                mSessionConfig.isAngleOfArrivalNeeded(),
                 new UwbRangeLimitsConfig.Builder().setRangeMaxNumberOfMeasurements(
                         mSessionConfig.getRangingMeasurementsLimit()
                 ).build()
