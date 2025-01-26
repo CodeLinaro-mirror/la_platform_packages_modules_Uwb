@@ -21,10 +21,14 @@ python_defaults {
     name: "RangingMultiDevicePythonDefaults",
     libs: [
         "mobly",
+        "platform-test-py-annotations",
     ],
     test_suites: [
-        //"cts",
+        "cts",
+	"cts-interactive",
         "general-tests",
+        "mts-uwb",
+        "mcts-uwb",
     ],
     version: {
         py3: {

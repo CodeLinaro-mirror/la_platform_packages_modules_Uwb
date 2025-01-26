@@ -14,16 +14,21 @@
  * limitations under the License.
  */
 
-package com.android.server.ranging.oob;
+package com.android.ranging.rangingtestapp;
 
-import android.ranging.oob.OobHandle;
+import static com.google.common.truth.Truth.assertThat;
 
-public interface OobHandler {
-    void handleOobMessage(OobHandle oobHandle, byte[] data);
+import org.junit.Test;
 
-    void handleOobDeviceDisconnected(OobHandle oobHandle);
+/**
+ * Example local unit test, which will execute on the development machine (host).
+ *
+ * @see <a href="http://d.android.com/tools/testing">Testing documentation</a>
+ */
+public class ExampleUnitTest {
 
-    void handleOobDeviceReconnected(OobHandle oobHandle);
-
-    void handleOobClosed(OobHandle oobHandle);
+    @Test
+    public void addition_isCorrect() {
+        assertThat(2 + 2).isEqualTo(4);
+    }
 }
