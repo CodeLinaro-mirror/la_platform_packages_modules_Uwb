@@ -26,12 +26,16 @@ import android.ranging.RangingDevice;
 import android.ranging.SessionConfig;
 import android.ranging.SessionHandle;
 import android.ranging.ble.cs.BleCsRangingCapabilities;
+import android.ranging.ble.rssi.BleRssiRangingCapabilities;
 import android.ranging.oob.OobInitiatorRangingConfig;
 import android.ranging.uwb.UwbRangingCapabilities;
 import android.util.Log;
 
 import androidx.annotation.Nullable;
 
+import com.android.server.ranging.blerssi.BleRssiConfigSelector;
+import com.android.server.ranging.blerssi.BleRssiOobCapabilities;
+import com.android.server.ranging.blerssi.BleRssiOobConfig;
 import com.android.server.ranging.cs.CsConfigSelector;
 import com.android.server.ranging.cs.CsConfigSelector.SelectedCsConfig;
 import com.android.server.ranging.cs.CsOobCapabilities;
@@ -53,10 +57,13 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 
+import java.util.Arrays;
 import java.util.EnumSet;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 public class RangingEngine {
     private static final String TAG = RangingEngine.class.getSimpleName();
@@ -64,10 +71,12 @@ public class RangingEngine {
     private final OobInitiatorRangingConfig mOobConfig;
     private final EnumSet<RangingTechnology> mRequestedTechnologies;
     private final Map<RangingDevice, EnumSet<RangingTechnology>> mPeerTechnologies;
+    private final DeviceConfigFacade mDeviceConfigFacade;
 
     private @Nullable UwbConfigSelector mUwbConfigSelector = null;
     private @Nullable CsConfigSelector mCsConfigSelector = null;
     private @Nullable RttConfigSelector mRttConfigSelector = null;
+    private @Nullable BleRssiConfigSelector mBleRssiConfigSelector = null;
 
     public static class ConfigSelectionException extends Exception {
         public ConfigSelectionException(String message) {
@@ -103,6 +112,7 @@ public class RangingEngine {
         mOobConfig = oobConfig;
         mPeerTechnologies = new HashMap<>();
         mRequestedTechnologies = EnumSet.noneOf(RangingTechnology.class);
+        mDeviceConfigFacade = injector.getDeviceConfigFacade();
 
         RangingCapabilities localCapabilities = injector.getCapabilitiesProvider()
                 .getCapabilities();
@@ -125,6 +135,13 @@ public class RangingEngine {
                 mRequestedTechnologies.add(RangingTechnology.RTT);
                 mRttConfigSelector = new RttConfigSelector(sessionConfig, oobConfig);
             }
+            BleRssiRangingCapabilities bleRssiCapabilities =
+                    localCapabilities.getBleRssiCapabilities();
+            if (BleRssiConfigSelector.isCapableOfConfig(oobConfig, bleRssiCapabilities)) {
+                mRequestedTechnologies.add(RangingTechnology.RSSI);
+                mBleRssiConfigSelector = new BleRssiConfigSelector(
+                        sessionConfig, oobConfig, bleRssiCapabilities);
+            }
         }
 
         if (mRequestedTechnologies.isEmpty()) {
@@ -143,10 +160,12 @@ public class RangingEngine {
 
         EnumSet<RangingTechnology> selectedTechnologies =
                 selectTechnologiesToUseWithPeer(capabilities);
+        Log.v(TAG, "Selected technologies " + selectedTechnologies + " for peer " + device);
 
         UwbOobCapabilities uwbCapabilities = capabilities.getUwbCapabilities();
         CsOobCapabilities csCapabilities = capabilities.getCsCapabilities();
         RttOobCapabilities rttCapabilities = capabilities.getRttCapabilities();
+        BleRssiOobCapabilities bleRssiCapabilities = capabilities.getBleRssiCapabilities();
 
         for (RangingTechnology technology : selectedTechnologies) {
             if (technology == RangingTechnology.UWB
@@ -162,6 +181,11 @@ public class RangingEngine {
             } else if (technology == RangingTechnology.RTT && rttCapabilities != null
                     && mRttConfigSelector != null) {
                 mRttConfigSelector.restrictConfigToCapabilities(device, rttCapabilities);
+            } else if (technology == RangingTechnology.RSSI
+                    && bleRssiCapabilities != null
+                    && mBleRssiConfigSelector != null
+            ) {
+                mBleRssiConfigSelector.restrictConfigToCapabilities(device, bleRssiCapabilities);
             } else {
                 Log.e(TAG, "Technology " + technology + " was selected by us and peer " + device
                         + ", but one of us does not actually support it");
@@ -198,6 +222,14 @@ public class RangingEngine {
             rttConfigByPeer.putAll(rttConfig.getPeerConfigs());
         }
 
+        Map<RangingDevice, BleRssiOobConfig> bleRssiConfigsByPeer = new HashMap<>();
+        if (mBleRssiConfigSelector != null && mBleRssiConfigSelector.hasPeersToConfigure()) {
+            BleRssiConfigSelector.SelectedBleRssiConfig bleRssiConfig =
+                    mBleRssiConfigSelector.selectConfig();
+            localConfigs.addAll(bleRssiConfig.getLocalConfigs());
+            bleRssiConfigsByPeer.putAll(bleRssiConfig.getPeerConfigs());
+        }
+
         for (RangingDevice peer : mPeerTechnologies.keySet()) {
             ImmutableList<RangingTechnology> peerTechnologies =
                     ImmutableList.copyOf(mPeerTechnologies.get(peer));
@@ -213,11 +245,19 @@ public class RangingEngine {
             configMessage.setUwbConfig(uwbConfigsByPeer.get(peer));
             configMessage.setCsConfig(csConfigsByPeer.get(peer));
             configMessage.setRttConfig(rttConfigByPeer.get(peer));
+            configMessage.setBleRssiConfig(bleRssiConfigsByPeer.get(peer));
 
             configMessages.put(peer, configMessage.build());
         }
 
         return new SelectedConfig(localConfigs.build(), configMessages.build());
+    }
+
+    private List<RangingTechnology> getPreferredTechnologyList() {
+        String[] prefTechnologiesStringArray = mDeviceConfigFacade.getTechnologyPreferenceList();
+        return Arrays.stream(prefTechnologiesStringArray)
+                .map(str -> RangingTechnology.fromName(str))
+                .collect(Collectors.toUnmodifiableList());
     }
 
     private EnumSet<RangingTechnology> selectTechnologiesToUseWithPeer(
@@ -230,7 +270,7 @@ public class RangingEngine {
         switch (mOobConfig.getRangingMode()) {
             case RANGING_MODE_AUTO:
             case RANGING_MODE_HIGH_ACCURACY_PREFERRED: {
-                RangingTechnology.TECHNOLOGIES
+                getPreferredTechnologyList()
                         .stream()
                         .filter(technologiesSupportedByPeer::contains)
                         .findFirst()

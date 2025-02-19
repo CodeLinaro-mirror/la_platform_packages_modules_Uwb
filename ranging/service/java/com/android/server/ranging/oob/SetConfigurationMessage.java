@@ -17,6 +17,7 @@
 package com.android.server.ranging.oob;
 
 import com.android.server.ranging.RangingTechnology;
+import com.android.server.ranging.blerssi.BleRssiOobConfig;
 import com.android.server.ranging.cs.CsOobConfig;
 import com.android.server.ranging.rtt.RttOobConfig;
 import com.android.server.ranging.uwb.UwbOobConfig;
@@ -77,6 +78,7 @@ public abstract class SetConfigurationMessage {
         UwbOobConfig uwbConfig = null;
         CsOobConfig csConfig = null;
         RttOobConfig rttConfig = null;
+        BleRssiOobConfig bleRssiConfig = null;
         int countTechsParsed = 0;
         while (parseCursor < payload.length && countTechsParsed++ < rangingTechnologiesSet.size()) {
             byte[] remainingBytes = Arrays.copyOfRange(payload, parseCursor, payload.length);
@@ -109,6 +111,15 @@ public abstract class SetConfigurationMessage {
                     rttConfig = RttOobConfig.parseBytes(remainingBytes);
                     parseCursor += rttConfig.getSize();
                     break;
+                case RSSI:
+                    if (bleRssiConfig != null) {
+                        throw new IllegalArgumentException(
+                                "Failed to parse SetConfigurationMessage, BleRssiConfig already "
+                                        + "set. Bytes: " + Arrays.toString(payload));
+                    }
+                    bleRssiConfig = BleRssiOobConfig.parseBytes(remainingBytes);
+                    parseCursor += bleRssiConfig.getSize();
+                    break;
                 default:
                     parseCursor += techHeader.getSize();
             }
@@ -119,7 +130,9 @@ public abstract class SetConfigurationMessage {
                 .setRangingTechnologiesSet(rangingTechnologiesSet)
                 .setStartRangingList(startRangingList)
                 .setUwbConfig(uwbConfig)
+                .setCsConfig(csConfig)
                 .setRttConfig(rttConfig)
+                .setBleRssiConfig(bleRssiConfig)
                 .build();
     }
 
@@ -127,12 +140,20 @@ public abstract class SetConfigurationMessage {
     public final byte[] toBytes() {
         int size = MIN_SIZE_BYTES + getHeader().getSize();
         UwbOobConfig uwbConfig = getUwbConfig();
+        CsOobConfig csConfig = getCsConfig();
         RttOobConfig rttConfig = getRttConfig();
+        BleRssiOobConfig bleRssiConfig = getBleRssiConfig();
         if (uwbConfig != null) {
             size += uwbConfig.getSize();
         }
+        if (csConfig != null) {
+            size += csConfig.getSize();
+        }
         if (rttConfig != null) {
             size += rttConfig.getSize();
+        }
+        if (bleRssiConfig != null) {
+            size += bleRssiConfig.getSize();
         }
         ByteBuffer byteBuffer = ByteBuffer.allocate(size);
         byteBuffer
@@ -142,8 +163,14 @@ public abstract class SetConfigurationMessage {
         if (uwbConfig != null) {
             byteBuffer.put(uwbConfig.toBytes());
         }
+        if (csConfig != null) {
+            byteBuffer.put(csConfig.toBytes());
+        }
         if (rttConfig != null) {
             byteBuffer.put(rttConfig.toBytes());
+        }
+        if (bleRssiConfig != null) {
+            byteBuffer.put(bleRssiConfig.toBytes());
         }
         return byteBuffer.array();
     }
@@ -171,6 +198,9 @@ public abstract class SetConfigurationMessage {
     @Nullable
     public abstract RttOobConfig getRttConfig();
 
+    @Nullable
+    public abstract BleRssiOobConfig getBleRssiConfig();
+
     /** Returns a builder for {@link SetConfigurationMessage}. */
     public static Builder builder() {
         return new AutoValue_SetConfigurationMessage.Builder()
@@ -196,6 +226,8 @@ public abstract class SetConfigurationMessage {
         public abstract Builder setCsConfig(@Nullable CsOobConfig csConfig);
 
         public abstract Builder setRttConfig(@Nullable RttOobConfig rttConfig);
+
+        public abstract Builder setBleRssiConfig(@Nullable BleRssiOobConfig bleRssiConfig);
 
         abstract SetConfigurationMessage autoBuild();
 
@@ -224,6 +256,12 @@ public abstract class SetConfigurationMessage {
                             .contains(RangingTechnology.RTT)
                             == (setConfigurationMessage.getRttConfig() != null),
                     "rttConfig or rangingTechnologiesSet for Rtt not set properly.");
+            Preconditions.checkArgument(
+                    setConfigurationMessage
+                            .getRangingTechnologiesSet()
+                            .contains(RangingTechnology.RSSI)
+                            == (setConfigurationMessage.getBleRssiConfig() != null),
+                    "BleRssiConfig or rangingTechnologiesSet for BLE RSSI not set properly.");
             return setConfigurationMessage;
         }
     }
