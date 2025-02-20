@@ -16,9 +16,14 @@
 
 package com.android.server.ranging;
 
+import static android.ranging.raw.RawRangingDevice.UPDATE_RATE_FREQUENT;
+import static android.ranging.raw.RawRangingDevice.UPDATE_RATE_INFREQUENT;
+import static android.ranging.raw.RawRangingDevice.UPDATE_RATE_NORMAL;
+
 import static com.android.server.ranging.RangingAdapter.Callback.ClosedReason.ERROR;
+import static com.android.server.ranging.RangingAdapter.Callback.ClosedReason.LOCAL_REQUEST;
 import static com.android.server.ranging.RangingAdapter.Callback.ClosedReason.LOST_CONNECTION;
-import static com.android.server.ranging.RangingAdapter.Callback.ClosedReason.REQUESTED;
+import static com.android.server.ranging.RangingAdapter.Callback.ClosedReason.REMOTE_REQUEST;
 import static com.android.server.ranging.RangingAdapter.Callback.ClosedReason.SYSTEM_POLICY;
 import static com.android.server.ranging.RangingAdapter.Callback.ClosedReason.UNKNOWN;
 
@@ -27,15 +32,20 @@ import static java.lang.Math.min;
 import android.app.AlarmManager;
 import android.bluetooth.BluetoothStatusCodes;
 import android.os.SystemClock;
+import android.ranging.raw.RawRangingDevice.RangingUpdateRate;
+import android.util.Range;
 
 import com.google.common.base.Ascii;
 import com.google.common.base.Splitter;
 import com.google.common.collect.ImmutableList;
+import com.google.common.collect.ImmutableMap;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.time.Duration;
 import java.util.BitSet;
 import java.util.List;
+import java.util.Optional;
 
 /**
  * Utilities for {@link com.android.ranging}.
@@ -241,9 +251,8 @@ public class RangingUtils {
      */
     public static int convertBluetoothReasonCode(int bluetoothReasonCode) {
         return switch (bluetoothReasonCode) {
-            case BluetoothStatusCodes.REASON_LOCAL_APP_REQUEST,
-                    BluetoothStatusCodes.REASON_REMOTE_REQUEST ->
-                    REQUESTED;
+            case BluetoothStatusCodes.REASON_LOCAL_APP_REQUEST -> LOCAL_REQUEST;
+            case BluetoothStatusCodes.REASON_REMOTE_REQUEST -> REMOTE_REQUEST;
             case BluetoothStatusCodes.ERROR_TIMEOUT,
                     BluetoothStatusCodes.ERROR_REMOTE_OPERATION_NOT_SUPPORTED ->
                     SYSTEM_POLICY;
@@ -251,5 +260,29 @@ public class RangingUtils {
             case BluetoothStatusCodes.ERROR_BAD_PARAMETERS -> ERROR;
             default -> UNKNOWN;
         };
+    }
+
+    public static Optional<@RangingUpdateRate Integer> getUpdateRateFromDurationRange(
+            Range<Duration> preferred,
+            ImmutableMap<@RangingUpdateRate Integer, Duration> allowed
+    ) {
+        if (preferred.getLower().compareTo(allowed.get(UPDATE_RATE_INFREQUENT)) > 0) {
+            // Range of preferred durations lies entirely above allowed durations
+            return Optional.of(UPDATE_RATE_INFREQUENT);
+        }
+        if (preferred.getUpper().compareTo(allowed.get(UPDATE_RATE_FREQUENT)) < 0) {
+            // Range of preferred durations lies entirely below allowed durations
+            return Optional.of(UPDATE_RATE_FREQUENT);
+        }
+        // Otherwise, the intervals overlap. Pick fastest we can.
+        if (preferred.contains(allowed.get(UPDATE_RATE_FREQUENT))) {
+            return Optional.of(UPDATE_RATE_FREQUENT);
+        } else if (preferred.contains(allowed.get(UPDATE_RATE_NORMAL))) {
+            return Optional.of(UPDATE_RATE_NORMAL);
+        } else if (preferred.contains(allowed.get(UPDATE_RATE_INFREQUENT))) {
+            return Optional.of(UPDATE_RATE_INFREQUENT);
+        } else {
+            return Optional.empty();
+        }
     }
 }

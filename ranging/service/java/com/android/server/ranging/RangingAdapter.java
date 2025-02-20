@@ -27,6 +27,8 @@ import androidx.annotation.NonNull;
 
 import com.android.server.ranging.session.RangingSessionConfig;
 
+import com.google.common.collect.ImmutableSet;
+
 /** RangingAdapter representing a common ranging class for multiple ranging technologies. */
 public interface RangingAdapter {
 
@@ -80,17 +82,19 @@ public interface RangingAdapter {
          * be called after start if API failed to initialize, in that case onClosed with an
          * appropriate error code will be called instead.
          *
-         * @param peer that ranging was started with.
+         * @param peers that ranging was started with. Must be non-empty. Multicast technologies
+         *              may start ranging with multiple peers at once.
          */
-        void onStarted(@NonNull RangingDevice peer);
+        void onStarted(@NonNull ImmutableSet<RangingDevice> peers);
 
 
         /**
          * Notifies the caller that ranging has stopped with a particular peer.
          *
-         * @param peer that ranging was stopped with.
+         * @param peers that ranging was stopped with. Must be non-empty. Multicast technologies
+         *              may stop ranging with multiple peers at once.
          */
-        void onStopped(@NonNull RangingDevice peer);
+        void onStopped(@NonNull ImmutableSet<RangingDevice> peers);
 
         /**
          * Notifies the caller on each instance of ranging data received from the ranging
@@ -103,19 +107,21 @@ public interface RangingAdapter {
 
         @IntDef({
                 ClosedReason.UNKNOWN,
+                ClosedReason.ERROR,
                 ClosedReason.FAILED_TO_START,
-                ClosedReason.REQUESTED,
+                ClosedReason.LOCAL_REQUEST,
+                ClosedReason.REMOTE_REQUEST,
                 ClosedReason.LOST_CONNECTION,
                 ClosedReason.SYSTEM_POLICY,
-                ClosedReason.ERROR,
         })
         @interface ClosedReason {
             int UNKNOWN = 0;
             int ERROR = 1;
             int FAILED_TO_START = 2;
-            int REQUESTED = 3;
-            int LOST_CONNECTION = 4;
-            int SYSTEM_POLICY = 5;
+            int LOCAL_REQUEST = 3;
+            int REMOTE_REQUEST = 4;
+            int LOST_CONNECTION = 5;
+            int SYSTEM_POLICY = 6;
         }
 
         /**
