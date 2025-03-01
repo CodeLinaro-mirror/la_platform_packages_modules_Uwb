@@ -16,26 +16,34 @@
 
 package com.android.server.ranging.session;
 
+import static android.ranging.RangingPreference.DEVICE_ROLE_RESPONDER;
+
 import android.content.AttributionSource;
 import android.ranging.RangingCapabilities;
 import android.ranging.SessionHandle;
+import android.ranging.ble.cs.BleCsRangingCapabilities;
 import android.ranging.oob.OobHandle;
 import android.ranging.oob.OobResponderRangingConfig;
 import android.ranging.uwb.UwbAddress;
 import android.ranging.uwb.UwbRangingCapabilities;
+import android.ranging.wifi.rtt.RttRangingCapabilities;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
 
+import com.android.server.ranging.RangingEngine;
 import com.android.server.ranging.RangingInjector;
 import com.android.server.ranging.RangingServiceManager;
 import com.android.server.ranging.RangingTechnology;
+import com.android.server.ranging.cs.CsOobCapabilities;
 import com.android.server.ranging.oob.CapabilityRequestMessage;
 import com.android.server.ranging.oob.CapabilityResponseMessage;
 import com.android.server.ranging.oob.MessageType;
 import com.android.server.ranging.oob.OobController.ReceivedMessage;
 import com.android.server.ranging.oob.OobHeader;
 import com.android.server.ranging.oob.SetConfigurationMessage;
+import com.android.server.ranging.rtt.RttOobCapabilities;
+import com.android.server.ranging.rtt.RttOobConfig;
 import com.android.server.ranging.session.RangingSessionConfig.TechnologyConfig;
 import com.android.server.ranging.uwb.UwbOobCapabilities;
 import com.android.server.ranging.uwb.UwbOobConfig;
@@ -131,6 +139,24 @@ public class OobResponderRangingSession
                         UwbOobCapabilities.fromRangingCapabilities(uwbCapabilities, mMyUwbAddress));
             }
         }
+        if (request.getRequestedRangingTechnologies().contains(RangingTechnology.CS)) {
+            BleCsRangingCapabilities csCapabilities = myCapabilities.getCsCapabilities();
+            if (csCapabilities != null) {
+                supportedTechnologies.add(RangingTechnology.CS);
+                response.setCsCapabilities(
+                        CsOobCapabilities.fromRangingCapabilities(csCapabilities));
+            }
+        }
+
+        if (request.getRequestedRangingTechnologies().contains(RangingTechnology.RTT)) {
+            RttRangingCapabilities rttRangingCapabilities =
+                    myCapabilities.getRttRangingCapabilities();
+            if (rttRangingCapabilities != null) {
+                supportedTechnologies.add(RangingTechnology.RTT);
+                response.setRttCapabilities(
+                        RttOobCapabilities.fromRangingCapabilities(rttRangingCapabilities));
+            }
+        }
         // TODO: Other technologies
 
         return response
@@ -141,7 +167,7 @@ public class OobResponderRangingSession
 
     private ListenableFuture<ImmutableSet<TechnologyConfig>> handleSetConfiguration(
             ReceivedMessage message
-    ) {
+    ) throws RangingEngine.ConfigSelectionException {
         Log.i(TAG, "Received set configuration message");
 
         ImmutableSet.Builder<TechnologyConfig> configs = ImmutableSet.builder();
@@ -151,6 +177,12 @@ public class OobResponderRangingSession
         if (uwbConfig != null) {
             configs.add(uwbConfig.toTechnologyConfig(mMyUwbAddress, mPeer.getRangingDevice()));
         }
+        RttOobConfig rttOobConfig = body.getRttConfig();
+        if (rttOobConfig != null) {
+            configs.add(rttOobConfig.toTechnologyConfig(mPeer.getRangingDevice(),
+                    DEVICE_ROLE_RESPONDER));
+        }
+        // Skip CS because the CS responder side does not need to be configured.
 
         return Futures.immediateFuture(configs.build());
     }
