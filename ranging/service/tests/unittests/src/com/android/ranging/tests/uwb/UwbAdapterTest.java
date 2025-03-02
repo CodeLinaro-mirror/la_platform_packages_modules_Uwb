@@ -21,6 +21,7 @@ import static android.ranging.uwb.UwbRangingParams.CONFIG_MULTICAST_DS_TWR;
 import static android.ranging.uwb.UwbRangingParams.CONFIG_UNICAST_DS_TWR;
 
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
@@ -118,7 +119,6 @@ public class UwbAdapterTest {
         when(mMockContext.getPackageManager().hasSystemFeature(PackageManager.FEATURE_UWB))
                 .thenReturn(true);
         mUwbAdapter = new UwbAdapter(mMockContext, mMockRangingInjector, mMockAttributionSource,
-                MoreExecutors.newDirectExecutorService(),
                 MoreExecutors.newDirectExecutorService(), mMockUwbClient);
     }
 
@@ -131,8 +131,8 @@ public class UwbAdapterTest {
     public void start_failsWhenParamsInvalid() {
         mUwbAdapter.start(mock(CsConfig.class), null, mMockCallback);
         verify(mMockCallback, never()).onStarted(any());
-        verify(mMockCallback).onClosed(eq(RangingAdapter.Callback.ClosedReason.ERROR));
-        verify(mMockCallback, never()).onStopped(any());
+        verify(mMockCallback).onClosed(eq(RangingAdapter.Callback.Reason.ERROR));
+        verify(mMockCallback, never()).onStopped(any(), anyInt());
     }
 
     @Test
@@ -145,7 +145,7 @@ public class UwbAdapterTest {
 
         ArgumentCaptor<RangingSessionCallback> callback =
                 ArgumentCaptor.forClass(RangingSessionCallback.class);
-        verify(mMockUwbClient).startRanging(callback.capture(), any());
+        verify(mMockUwbClient).startRanging(callback.capture());
 
         callback.getValue().onRangingInitialized(mMockLocalDevice);
         verify(mMockCallback).onStarted(eq(ImmutableSet.of(peer)));
@@ -163,7 +163,7 @@ public class UwbAdapterTest {
 
         ArgumentCaptor<RangingSessionCallback> callback =
                 ArgumentCaptor.forClass(RangingSessionCallback.class);
-        verify(mMockUwbClient).startRanging(callback.capture(), any());
+        verify(mMockUwbClient).startRanging(callback.capture());
 
         callback.getValue().onRangingInitialized(mMockLocalDevice);
         verify(mMockCallback).onStarted(eq(ImmutableSet.copyOf(peers)));
@@ -181,7 +181,7 @@ public class UwbAdapterTest {
 
         ArgumentCaptor<RangingSessionCallback> callback =
                 ArgumentCaptor.forClass(RangingSessionCallback.class);
-        verify(mMockUwbClient).startRanging(callback.capture(), any());
+        verify(mMockUwbClient).startRanging(callback.capture());
 
         callback.getValue().onRangingInitialized(mMockLocalDevice);
 
@@ -191,8 +191,10 @@ public class UwbAdapterTest {
         callback.getValue().onRangingSuspended(
                 mMockLocalDevice,
                 RangingSessionCallback.REASON_STOP_RANGING_CALLED);
-        verify(mMockCallback).onStopped(eq(ImmutableSet.copyOf(peers)));
-        verify(mMockCallback).onClosed(eq(RangingAdapter.Callback.ClosedReason.LOCAL_REQUEST));
+        verify(mMockCallback).onStopped(
+                eq(ImmutableSet.copyOf(peers)),
+                eq(RangingAdapter.Callback.Reason.LOCAL_REQUEST));
+        verify(mMockCallback).onClosed(eq(RangingAdapter.Callback.Reason.LOCAL_REQUEST));
     }
 
     @Test
@@ -207,7 +209,7 @@ public class UwbAdapterTest {
 
         ArgumentCaptor<RangingSessionCallback> callback =
                 ArgumentCaptor.forClass(RangingSessionCallback.class);
-        verify(mMockUwbClient).startRanging(callback.capture(), any());
+        verify(mMockUwbClient).startRanging(callback.capture());
 
         callback.getValue().onRangingInitialized(mMockLocalDevice);
         callback.getValue().onPeerDisconnected(
@@ -218,8 +220,10 @@ public class UwbAdapterTest {
                 UwbDevice.createForAddress(peerAddress),
                 RangingSessionCallback.REASON_MAX_RANGING_ROUND_RETRY_REACHED);
 
-        verify(mMockCallback).onStopped(eq(ImmutableSet.of(peerDevice)));
-        verify(mMockCallback).onClosed(eq(RangingAdapter.Callback.ClosedReason.LOST_CONNECTION));
+        verify(mMockCallback).onStopped(
+                eq(ImmutableSet.of(peerDevice)),
+                eq(RangingAdapter.Callback.Reason.SYSTEM_POLICY));
+        verify(mMockCallback).onClosed(eq(RangingAdapter.Callback.Reason.LOST_CONNECTION));
     }
 
     @Test
@@ -234,7 +238,7 @@ public class UwbAdapterTest {
 
         ArgumentCaptor<RangingSessionCallback> callback =
                 ArgumentCaptor.forClass(RangingSessionCallback.class);
-        verify(mMockUwbClient).startRanging(callback.capture(), any());
+        verify(mMockUwbClient).startRanging(callback.capture());
 
         callback.getValue().onRangingInitialized(mMockLocalDevice);
 
