@@ -81,7 +81,6 @@ public final class UwbHwSwitchHelper {
 
         @Override
         public void onStateChanged(int state, int reason) {
-            Log.v(TAG, "Uwb adapter state = " + state + " reason = " + reason);
             if (mWaitForState != null) {
                 if (mWaitForState == state) {
                     mCountDownLatch.countDown();

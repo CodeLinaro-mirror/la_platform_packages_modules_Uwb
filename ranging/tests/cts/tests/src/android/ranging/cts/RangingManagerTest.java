@@ -176,10 +176,8 @@ public class RangingManagerTest {
                 try {
                     uwbManager.setUwbEnabled(true);
                     assertThat(countDownLatch.await(2, TimeUnit.SECONDS)).isTrue();
-                    if (!uwbManager.isUwbHwIdleTurnOffEnabled()) {
-                        assertThat(uwbManager.isUwbEnabled()).isEqualTo(true);
-                        assertThat(adapterStateCallback.state).isEqualTo(adapterState);
-                    }
+                    assertThat(uwbManager.isUwbEnabled()).isEqualTo(true);
+                    assertThat(adapterStateCallback.state).isEqualTo(adapterState);
                 } finally {
                     uwbManager.unregisterAdapterStateCallback(adapterStateCallback);
                 }
@@ -425,7 +423,7 @@ public class RangingManagerTest {
         assertEquals(preference.getRangingParams().getRangingSessionType(), RANGING_SESSION_RAW);
 
         rangingSession.start(preference);
-        assertThat(callback.mOnOpenedCalled.await(4, TimeUnit.SECONDS)).isTrue();
+        assertThat(callback.mOnOpenedCalled.await(1, TimeUnit.SECONDS)).isTrue();
 
         rangingSession.stop();
         assertThat(callback.mOnClosedCalled.await(2, TimeUnit.SECONDS)).isTrue();
@@ -475,7 +473,7 @@ public class RangingManagerTest {
 
         callback.replaceOnPeerRemovedLatch(new CountDownLatch(1));
         rangingSession.removeDeviceFromRangingSession(device);
-        assertThat(callback.mOnPeerRemoved.await(4, TimeUnit.SECONDS)).isTrue();
+        assertThat(callback.mOnPeerRemoved.await(2, TimeUnit.SECONDS)).isTrue();
 
         rangingSession.stop();
         assertThat(callback.mOnClosedCalled.await(3, TimeUnit.SECONDS)).isTrue();
@@ -638,8 +636,6 @@ public class RangingManagerTest {
 
         callback.reset(new CountDownLatch(1));
         UwbManager uwbManager = mContext.getSystemService(UwbManager.class);
-        // This test is not suitable if hw idle is enabled
-        assumeTrue(!uwbManager.isUwbHwIdleTurnOffEnabled());
         uwbManager.setUwbEnabled(!uwbManager.isUwbEnabled());
 
         assertThat(callback.mCountDownLatch.await(4, TimeUnit.SECONDS)).isTrue();
@@ -783,9 +779,6 @@ public class RangingManagerTest {
         rangingSession.stop();
         assertThat(callback.mOnClosedCalled.await(2, TimeUnit.SECONDS)).isTrue();
 
-        // Intentional sleep for NAN interface to clean up.
-        Thread.sleep(1000);
-
         mRangingManager.unregisterCapabilitiesCallback(capabilitiesCallback);
         uiAutomation.dropShellPermissionIdentity();
     }
@@ -829,9 +822,6 @@ public class RangingManagerTest {
         assertThat(callback.mOnOpenedCalled.await(2, TimeUnit.SECONDS)).isTrue();
         rangingSession.stop();
         assertThat(callback.mOnClosedCalled.await(2, TimeUnit.SECONDS)).isTrue();
-
-        // Intentional sleep for NAN interface to clean up.
-        Thread.sleep(1000);
 
         mRangingManager.unregisterCapabilitiesCallback(capabilitiesCallback);
         uiAutomation.dropShellPermissionIdentity();
