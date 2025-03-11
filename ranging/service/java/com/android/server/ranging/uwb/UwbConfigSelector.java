@@ -57,13 +57,13 @@ import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
 
-import java.time.Duration;
 import java.util.Collections;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Random;
 import java.util.Set;
 import java.util.function.Function;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 /** Selects a {@link UwbConfig} from local and peer device capabilities */
@@ -71,10 +71,9 @@ public class UwbConfigSelector {
     private static final String TAG = UwbConfigSelector.class.getSimpleName();
 
     private static final Set<@UwbComplexChannel.UwbPreambleCodeIndex Integer> HPRF_INDEXES =
-            Set.copyOf(
-                    IntStream.rangeClosed(UWB_PREAMBLE_CODE_INDEX_25, UWB_PREAMBLE_CODE_INDEX_32)
-                            .boxed()
-                            .toList());
+            IntStream.rangeClosed(UWB_PREAMBLE_CODE_INDEX_25, UWB_PREAMBLE_CODE_INDEX_32)
+                        .boxed()
+                        .collect(Collectors.toSet());
 
     private final SessionConfig mSessionConfig;
     private final OobInitiatorRangingConfig mOobConfig;
@@ -85,7 +84,8 @@ public class UwbConfigSelector {
     private final Set<@UwbComplexChannel.UwbChannel Integer> mChannels;
     private final Set<@UwbComplexChannel.UwbPreambleCodeIndex Integer> mPreambleIndexes;
     private @UwbRangingParams.SlotDuration int mMinSlotDurationMs;
-    private Range<Duration> mRangingIntervals;
+    private long mMinRangingIntervalMs;
+    private final String mCountryCode;
 
     public static boolean isCapableOfConfig(
             @NonNull SessionConfig sessionConfig, @NonNull OobInitiatorRangingConfig oobConfig,
@@ -117,10 +117,6 @@ public class UwbConfigSelector {
                         .getSupportedConfigIds().contains(CONFIG_PROVISIONED_UNICAST_DS_TWR)
         ) return false;
 
-        if (capabilities.getMinimumRangingInterval()
-                .compareTo(oobConfig.getSlowestRangingInterval()) > 0
-        ) return false;
-
         // TODO: If we add support for AoA via ARCore in the future, this will need to be changed.
         if (sessionConfig.isAngleOfArrivalNeeded() && !capabilities.isAzimuthalAngleSupported())
             return false;
@@ -142,9 +138,8 @@ public class UwbConfigSelector {
         mChannels = new HashSet<>(capabilities.getSupportedChannels());
         mPreambleIndexes = new HashSet<>(capabilities.getSupportedPreambleIndexes());
         mMinSlotDurationMs = Collections.min(capabilities.getSupportedSlotDurations());
-        mRangingIntervals = mOobConfig.getRangingIntervalRange().intersect(
-                capabilities.getMinimumRangingInterval(),
-                mOobConfig.getSlowestRangingInterval());
+        mMinRangingIntervalMs = capabilities.getMinimumRangingInterval().toMillis();
+        mCountryCode = capabilities.getCountryCode();
     }
 
     /**
@@ -164,14 +159,8 @@ public class UwbConfigSelector {
         mPreambleIndexes.retainAll(capabilities.getSupportedPreambleIndexes());
         mMinSlotDurationMs = Math.max(
                 mMinSlotDurationMs, capabilities.getMinimumSlotDurationMs());
-        try {
-            mRangingIntervals = mRangingIntervals.intersect(
-                    Duration.ofMillis(capabilities.getMinimumRangingIntervalMs()),
-                    mRangingIntervals.getUpper());
-        } catch (IllegalArgumentException unused) {
-            throw new ConfigSelectionException("Peer " + peer
-                    + " does not support a compatible ranging interval");
-        }
+        mMinRangingIntervalMs = Math.max(
+                mMinRangingIntervalMs, capabilities.getMinimumRangingIntervalMs());
     }
 
     public boolean hasPeersToConfigure() {
@@ -190,7 +179,6 @@ public class UwbConfigSelector {
         private final @UwbComplexChannel.UwbPreambleCodeIndex int mPreambleIndex;
         private final @RawRangingDevice.RangingUpdateRate int mRangingUpdateRate;
         private final byte[] mSessionKeyInfo;
-        private final String mCountryCode;
 
         SelectedUwbConfig() throws ConfigSelectionException {
             mSessionId = mSessionHandle.hashCode();
@@ -200,8 +188,6 @@ public class UwbConfigSelector {
             mPreambleIndex = selectPreambleIndex();
             mRangingUpdateRate = selectRangingUpdateRate();
             mSessionKeyInfo = selectSessionKeyInfo();
-            // TODO: Set based on geolocation
-            mCountryCode = "US";
         }
 
         // For now, each GRAPI responder will be a UWB initiator for a unicast session. In the
@@ -223,7 +209,6 @@ public class UwbConfigSelector {
                                     .build())
                             .setSessionConfig(mSessionConfig)
                             .setDeviceRole(DEVICE_ROLE_RESPONDER)
-                            .setCountryCode(mCountryCode)
                             .setPeerAddresses(ImmutableBiMap.of(device, mPeerAddresses.get(device)))
                             .build())
                     .collect(ImmutableSet.toImmutableSet());
@@ -313,18 +298,44 @@ public class UwbConfigSelector {
         @UwbRangingParams.ConfigId int configId = selectConfigId();
         RangingTimingParams timings = Utils.getRangingTimingParams((int) configId);
 
-        // Prioritize faster update rates
-        if (mRangingIntervals.contains(
-                Duration.ofMillis(timings.getRangingIntervalFast()))
-        ) {
+        Range<Long> intervalsMs;
+        try {
+            intervalsMs = Range.create(
+                    Math.max(mMinRangingIntervalMs, timings.getRangingIntervalFast()),
+                    (long) timings.getRangingIntervalInfrequent());
+        } catch (IllegalArgumentException unused) {
+            throw new ConfigSelectionException("Timings supported by selected config id " + configId
+                    + " are incompatible with local or peer ranging interval capabilities");
+        }
+
+        // The code below is a little hard to read, but there are 3 cases:
+        //   1. If configured range overlaps with the intervals that devices are capable of, select
+        //      fastest supported.
+        //   2. If configured range lies entirely above the intervals that devices are capable of,
+        //      select UPDATE_RATE_INFREQUENT.
+        //   3. If configured range lies entirely below the intervals that devices are capable of,
+        //      select fastest supported.
+        try {
+            intervalsMs = intervalsMs.intersect(
+                    mOobConfig.getFastestRangingInterval().toMillis(),
+                    mOobConfig.getSlowestRangingInterval().toMillis());
+        } catch (IllegalArgumentException ignored) {
+            if (mOobConfig.getFastestRangingInterval().toMillis() > intervalsMs.getUpper()) {
+                return UPDATE_RATE_INFREQUENT;
+            }
+        }
+
+        return getFastestUpdateRateInRange(intervalsMs, timings);
+    }
+
+    private @RawRangingDevice.RangingUpdateRate int getFastestUpdateRateInRange(
+            Range<Long> rangeMs, RangingTimingParams timings
+    ) throws ConfigSelectionException {
+        if (rangeMs.contains((long) timings.getRangingIntervalFast())) {
             return UPDATE_RATE_FREQUENT;
-        } else if (mRangingIntervals.contains(
-                Duration.ofMillis(timings.getRangingIntervalNormal()))
-        ) {
+        } else if (rangeMs.contains((long) timings.getRangingIntervalNormal())) {
             return UPDATE_RATE_NORMAL;
-        } else if (mRangingIntervals.contains(
-                Duration.ofMillis(timings.getRangingIntervalInfrequent()))
-        ) {
+        } else if (rangeMs.contains((long) timings.getRangingIntervalInfrequent())) {
             return UPDATE_RATE_INFREQUENT;
         } else {
             throw new ConfigSelectionException(

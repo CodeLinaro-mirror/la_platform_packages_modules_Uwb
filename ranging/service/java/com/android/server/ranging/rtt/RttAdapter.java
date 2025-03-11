@@ -52,6 +52,7 @@ import com.android.server.ranging.session.RangingSessionConfig;
 import com.android.server.ranging.util.DataNotificationManager;
 
 import com.google.common.annotations.VisibleForTesting;
+import com.google.common.collect.ImmutableSet;
 import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListeningExecutorService;
@@ -224,7 +225,7 @@ public class RttAdapter implements RangingAdapter {
             Log.i(TAG, "onRangingInitialized");
             synchronized (mStateMachine) {
                 if (mStateMachine.getState() == State.STARTED) {
-                    mCallbacks.onStarted(mPeerDevice);
+                    mCallbacks.onStarted(ImmutableSet.of(mPeerDevice));
                 }
             }
         }
@@ -259,14 +260,15 @@ public class RttAdapter implements RangingAdapter {
             }
         }
 
-        private static int convertReason(int reason) {
+        private static @Callback.ClosedReason int convertReason(@RttSuspendedReason int reason) {
             switch (reason) {
                 case REASON_WRONG_PARAMETERS:
                 case REASON_FAILED_TO_START:
                     return Callback.ClosedReason.FAILED_TO_START;
                 case REASON_STOPPED_BY_PEER:
+                    return Callback.ClosedReason.REMOTE_REQUEST;
                 case REASON_STOP_RANGING_CALLED:
-                    return Callback.ClosedReason.REQUESTED;
+                    return Callback.ClosedReason.LOCAL_REQUEST;
                 case REASON_MAX_RANGING_ROUND_RETRY_REACHED:
                     return Callback.ClosedReason.LOST_CONNECTION;
                 case REASON_SYSTEM_POLICY:
@@ -288,7 +290,7 @@ public class RttAdapter implements RangingAdapter {
         synchronized (mStateMachine) {
             mStateMachine.setState(State.STOPPED);
             if (mCallbacks != null) {
-                mCallbacks.onStopped(mPeerDevice);
+                mCallbacks.onStopped(ImmutableSet.of(mPeerDevice));
                 mCallbacks.onClosed(reason);
             }
             clear();
