@@ -22,9 +22,9 @@ import android.ranging.RangingData;
 import android.ranging.RangingDevice;
 import android.ranging.raw.RawResponderRangingConfig;
 
-import androidx.annotation.IntDef;
 import androidx.annotation.NonNull;
 
+import com.android.server.ranging.RangingUtils.InternalReason;
 import com.android.server.ranging.session.RangingSessionConfig;
 
 import com.google.common.collect.ImmutableSet;
@@ -93,8 +93,9 @@ public interface RangingAdapter {
          *
          * @param peers that ranging was stopped with. Must be non-empty. Multicast technologies
          *              may stop ranging with multiple peers at once.
+         * @param reason why ranging was stopped.
          */
-        void onStopped(@NonNull ImmutableSet<RangingDevice> peers);
+        void onStopped(@NonNull ImmutableSet<RangingDevice> peers, @InternalReason int reason);
 
         /**
          * Notifies the caller on each instance of ranging data received from the ranging
@@ -105,30 +106,11 @@ public interface RangingAdapter {
          */
         void onRangingData(@NonNull RangingDevice peer, @NonNull RangingData data);
 
-        @IntDef({
-                ClosedReason.UNKNOWN,
-                ClosedReason.ERROR,
-                ClosedReason.FAILED_TO_START,
-                ClosedReason.LOCAL_REQUEST,
-                ClosedReason.REMOTE_REQUEST,
-                ClosedReason.LOST_CONNECTION,
-                ClosedReason.SYSTEM_POLICY,
-        })
-        @interface ClosedReason {
-            int UNKNOWN = 0;
-            int ERROR = 1;
-            int FAILED_TO_START = 2;
-            int LOCAL_REQUEST = 3;
-            int REMOTE_REQUEST = 4;
-            int LOST_CONNECTION = 5;
-            int SYSTEM_POLICY = 6;
-        }
-
         /**
          * Notifies the caller that the ranging session was closed.
          *
          * @param reason why the session was closed.
          */
-        void onClosed(@ClosedReason int reason);
+        void onClosed(@InternalReason int reason);
     }
 }

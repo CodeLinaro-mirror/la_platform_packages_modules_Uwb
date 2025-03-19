@@ -379,6 +379,14 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
           not self.initiator.is_ranging_technology_supported(RangingTechnology.UWB),
           f"UWB not supported by initiator",
       )
+
+      asserts.skip_if(self.initiator.ad.uwb.getSpecificationInfo()["fira"]["uci_version"] < 2,
+          f"Measurements limit is supported from Fira 2.0",
+      )
+      asserts.skip_if(self.responder.ad.uwb.getSpecificationInfo()["fira"]["uci_version"] < 2,
+         f"Measurements limit in supported from Fira 2.0",
+      )
+
       initiator_preference = RangingPreference(
           device_role=DeviceRole.INITIATOR,
           ranging_params=RawInitiatorRangingParams(
@@ -457,7 +465,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
                       )
                   ],
               ),
-              measurement_limit=1,
+              measurement_limit=4,
           )
           self.initiator.start_ranging_and_assert_opened(
               SESSION_HANDLE, initiator_preference
