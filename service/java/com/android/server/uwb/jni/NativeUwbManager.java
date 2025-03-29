@@ -33,6 +33,7 @@ import com.android.server.uwb.data.UwbUciConstants;
 import com.android.server.uwb.data.UwbVendorUciResponse;
 import com.android.server.uwb.info.UwbPowerStats;
 import com.android.server.uwb.multchip.UwbMultichipData;
+import com.android.server.uwb.rftest.UwbTestPerRxResult;
 import com.android.server.uwb.rftest.UwbTestPeriodicTxResult;
 
 import java.util.Arrays;
@@ -135,6 +136,11 @@ public class NativeUwbManager {
     public void onPeriodicTxDataNotificationReceived(UwbTestPeriodicTxResult periodicTx) {
         Log.d(TAG, "onPeriodicTxDataNotificationReceived : " + periodicTx);
         mSessionListener.onRfTestNotificationReceived(periodicTx);
+    }
+
+    public void onPerRxDataNotificationReceived(UwbTestPerRxResult perRxResult) {
+        Log.d(TAG, "onPerRxDataNotificationReceived : " + perRxResult);
+        mSessionListener.onRfTestNotificationReceived(perRxResult);
     }
 
     /**
@@ -336,6 +342,19 @@ public class NativeUwbManager {
     public byte testPeriodicTx(byte[] psduData, String chipId) {
         synchronized (mNativeLock) {
             return nativeTestPeriodicTx(psduData, chipId);
+        }
+    }
+
+    /**
+     * Starts a Per Rx test
+     *
+     * @param psduData : PSDU data
+     * @param chipId   : Identifier of UWB chip for multi-HAL devices
+     * @return : {@link UwbUciConstants}  Status code
+     */
+    public byte testPerRx(byte[] psduData, String chipId) {
+        synchronized (mNativeLock) {
+            return nativeTestPerRx(psduData, chipId);
         }
     }
 
@@ -572,17 +591,16 @@ public class NativeUwbManager {
      *
      * @param sessionId : Primary session ID
      * @param numberOfPhases : Number of secondary sessions
-     * @param updateTime : Absolute time in UWBS Time domain
      * @param phaseList : list of secondary sessions which have been previously initialized and
      *                  configured
      * @param chipId : Identifier of UWB chip for multi-HAL devices
      * @return Byte representing the status of the operation
      */
-    public byte setHybridSessionControllerConfiguration(int sessionId, byte messageControl,
-            int numberOfPhases, byte[] updateTime, byte[] phaseList, String chipId) {
+    public byte setHybridSessionControllerConfiguration(int sessionId, int numberOfPhases,
+                byte[] phaseList, String chipId) {
         synchronized (mNativeLock) {
-            return nativeSetHybridSessionControllerConfigurations(sessionId, messageControl,
-                numberOfPhases, updateTime, phaseList, chipId);
+            return nativeSetHybridSessionControllerConfigurations(sessionId, numberOfPhases,
+                phaseList, chipId);
         }
     }
 
@@ -671,8 +689,7 @@ public class NativeUwbManager {
     private native int nativeGetSessionToken(int sessionId, String chipId);
 
     private native byte nativeSetHybridSessionControllerConfigurations(int sessionId,
-            byte messageControl, int noOfPhases, byte[] updateTime, byte[] phaseList,
-                String chipId);
+            int noOfPhases, byte[] phaseList, String chipId);
 
     private native byte nativeSetHybridSessionControleeConfigurations(int sessionId,
             int noOfPhases, byte[] phaseList, String chipId);
@@ -681,6 +698,8 @@ public class NativeUwbManager {
             int noOfParams, int appConfigParamLen, byte[] appConfigParams, String chipId);
 
     private native byte nativeTestPeriodicTx(byte[] psduData, String chipId);
+
+    private native byte nativeTestPerRx(byte[] psduData, String chipId);
 
     private native byte nativeStopRfTest(String chipId);
 }
