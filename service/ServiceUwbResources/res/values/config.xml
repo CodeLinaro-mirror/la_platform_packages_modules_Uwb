@@ -253,12 +253,19 @@
     <!-- ===== End of UWB stack overlay definitions ===== -->
 
     <!-- ===== Start of ranging stack overlay definitions ===== -->
-    <!-- Priority list of ranging technologies on a device -->
+    <!-- Priority list of ranging technologies on a device. OEM can add, remove or modify the order
+     of technology in device specific overlay.-->
     <string-array name="technology_preference_list">
         <item>UWB</item>
         <item>CS</item>
-        <item>RTT</item>
+        <!-- RTT is disabled by default, OEM should copy the full list and uncomment RTT too add.-->
+        <!--item>RTT</item-->
         <item>RSSI</item>
     </string-array>
+
+    <!-- The minimum guaranteed delay in milliseconds between a received Rtt ranging result and the
+    next Rtt ranging request. (This does not apply on periodic Nan-Rtt ranging)-->
+    <integer name="rtt_ranging_request_delay">500</integer>
+
     <!-- ===== End of ranging stack overlay definitions ===== -->
 </resources>

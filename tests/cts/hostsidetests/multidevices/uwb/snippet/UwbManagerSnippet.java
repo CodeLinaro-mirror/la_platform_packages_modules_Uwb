@@ -716,6 +716,9 @@ public class UwbManagerSnippet implements Snippet {
         if (j.has("rangingRoundUsage")) {
             builder.setRangingRoundUsage(j.getInt("rangingRoundUsage"));
         }
+        if (j.has("rframeConfig")) {
+            builder.setRframeConfig(j.getInt("rframeConfig"));
+        }
         if (j.has("sessionId")) {
             builder.setSessionId(j.getInt("sessionId"));
         }
@@ -727,6 +730,9 @@ public class UwbManagerSnippet implements Snippet {
         }
         if (j.has("slotsPerRangingRound")) {
             builder.setSlotsPerRangingRound(j.getInt("slotsPerRangingRound"));
+        }
+        if (j.has("rangeDataNtfConfig")) {
+            builder.setRangeDataNtfConfig(j.getInt("rangeDataNtfConfig"));
         }
         if (j.has("stsConfig")) {
             if (j.getInt("stsConfig") == FiraParams.STS_CONFIG_PROVISIONED) {

@@ -34,6 +34,7 @@ import com.android.server.ranging.session.RangingSessionConfig.UnicastTechnology
 import com.google.common.collect.ImmutableMap;
 
 import java.time.Duration;
+import java.util.Objects;
 
 /**
  * Only the CS initiator needs to be configured. The responder does not need to call into any API
@@ -46,9 +47,9 @@ public class CsConfig implements UnicastTechnologyConfig {
     //  sounding.
     public static final ImmutableMap<@RawRangingDevice.RangingUpdateRate Integer, Duration>
             CS_UPDATE_RATE_DURATIONS = ImmutableMap.of(
-                    UPDATE_RATE_NORMAL, Duration.ofSeconds(3),
+                    UPDATE_RATE_NORMAL, Duration.ofMillis(200),
                     UPDATE_RATE_INFREQUENT, Duration.ofSeconds(5),
-                    UPDATE_RATE_FREQUENT, Duration.ofMillis(200));
+                    UPDATE_RATE_FREQUENT, Duration.ofMillis(100));
 
     private final SessionConfig mSessionConfig;
     private final BleCsRangingParams mRangingParams;
@@ -97,5 +98,19 @@ public class CsConfig implements UnicastTechnologyConfig {
                 + ", mPeerDevice="
                 + mPeerDevice
                 + " }";
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof CsConfig csConfig)) return false;
+        return Objects.equals(mSessionConfig, csConfig.mSessionConfig)
+                && Objects.equals(mRangingParams, csConfig.mRangingParams)
+                && Objects.equals(mPeerDevice, csConfig.mPeerDevice);
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(mSessionConfig, mRangingParams, mPeerDevice);
     }
 }

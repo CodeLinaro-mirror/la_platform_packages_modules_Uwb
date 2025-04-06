@@ -57,24 +57,44 @@ public class AliroEncoder extends TlvEncoder {
         AliroOpenRangingParams params = (AliroOpenRangingParams) baseParam;
         int hoppingConfig = params.getHoppingConfigMode();
         int hoppingSequence = params.getHoppingSequence();
-
-        int hoppingMode = AliroParams.HOPPING_CONFIG_MODE_NONE;
+        boolean isFiraExtensionSupported =
+                mUwbInjector.getDeviceConfigFacade().isFiraSupportedExtensionForCCC();
+        int hoppingMode = isFiraExtensionSupported
+                ? UwbAliroConstants.ALIRO_EXTENSION_HOPPING_CONFIG_MODE_NONE :
+                AliroParams.HOPPING_CONFIG_MODE_NONE;
         byte[] protocolVer = params.getProtocolVersion().toBytes();
 
         switch (hoppingConfig) {
 
             case AliroParams.HOPPING_CONFIG_MODE_CONTINUOUS:
                 if (hoppingSequence == AliroParams.HOPPING_SEQUENCE_DEFAULT) {
-                    hoppingMode = UwbAliroConstants.HOPPING_CONFIG_MODE_CONTINUOUS_DEFAULT;
+                    hoppingMode =
+                            isFiraExtensionSupported
+                                    ? UwbAliroConstants
+                                    .ALIRO_EXTENSION_HOPPING_CONFIG_MODE_CONTINUOUS_DEFAULT :
+                                    UwbAliroConstants.HOPPING_CONFIG_MODE_CONTINUOUS_DEFAULT;
+
                 } else {
-                    hoppingMode = UwbAliroConstants.HOPPING_CONFIG_MODE_CONTINUOUS_AES;
+                    hoppingMode =
+                            isFiraExtensionSupported
+                                    ? UwbAliroConstants
+                                    .ALIRO_EXTENSION_HOPPING_CONFIG_MODE_CONTINUOUS_AES :
+                                    UwbAliroConstants.HOPPING_CONFIG_MODE_CONTINUOUS_AES;
                 }
                 break;
             case AliroParams.HOPPING_CONFIG_MODE_ADAPTIVE:
                 if (hoppingSequence == AliroParams.HOPPING_SEQUENCE_DEFAULT) {
-                    hoppingMode = UwbAliroConstants.HOPPING_CONFIG_MODE_MODE_ADAPTIVE_DEFAULT;
+                    hoppingMode =
+                            isFiraExtensionSupported
+                                    ? UwbAliroConstants
+                                    .ALIRO_EXTENSION_HOPPING_CONFIG_MODE_ADAPTIVE_DEFAULT :
+                                    UwbAliroConstants.HOPPING_CONFIG_MODE_ADAPTIVE_DEFAULT;
                 } else {
-                    hoppingMode = UwbAliroConstants.HOPPING_CONFIG_MODE_MODE_ADAPTIVE_AES;
+                    hoppingMode =
+                            isFiraExtensionSupported
+                                    ? UwbAliroConstants
+                                    .ALIRO_EXTENSION_HOPPING_CONFIG_MODE_ADAPTIVE_AES :
+                                    UwbAliroConstants.HOPPING_CONFIG_MODE_ADAPTIVE_AES;
                 }
                 break;
         }
@@ -114,8 +134,13 @@ public class AliroEncoder extends TlvEncoder {
                         (byte) params.getSyncCodeIndex()) // PREAMBLE_CODE_INDEX
                 .putByte(ConfigParam.ALIRO_MAC_MODE,
                         (byte) (params.getMacModeRound() << 6
-                                | params.getMacModeOffset())) // MAC_MODE
-                .putByteArray(ConfigParam.SESSION_KEY, params.getSessionKey()); // SESSION_KEY
+                                | params.getMacModeOffset())); // MAC_MODE
+
+        byte[] sessionKey = params.getSessionKey();
+        if (sessionKey != null) {
+            tlvBufferBuilder.putByteArray(ConfigParam.SESSION_KEY, sessionKey);
+        }
+
         if (params.getStsIndex() != AliroParams.STS_INDEX_UNSET) {
             tlvBufferBuilder.putInt(ConfigParam.STS_INDEX, params.getStsIndex());
         }

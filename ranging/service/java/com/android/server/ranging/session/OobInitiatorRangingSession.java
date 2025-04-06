@@ -16,10 +16,8 @@
 
 package com.android.server.ranging.session;
 
-import static android.ranging.RangingSession.Callback.REASON_NO_PEERS_FOUND;
-import static android.ranging.RangingSession.Callback.REASON_UNSUPPORTED;
-
 import android.content.AttributionSource;
+import android.ranging.RangingConfig;
 import android.ranging.SessionHandle;
 import android.ranging.oob.DeviceHandle;
 import android.ranging.oob.OobHandle;
@@ -32,6 +30,7 @@ import com.android.server.ranging.RangingEngine;
 import com.android.server.ranging.RangingInjector;
 import com.android.server.ranging.RangingServiceManager;
 import com.android.server.ranging.RangingTechnology;
+import com.android.server.ranging.RangingUtils.InternalReason;
 import com.android.server.ranging.oob.CapabilityRequestMessage;
 import com.android.server.ranging.oob.CapabilityResponseMessage;
 import com.android.server.ranging.oob.MessageType;
@@ -55,11 +54,9 @@ import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
-public class OobInitiatorRangingSession
-        extends BaseRangingSession
-        implements RangingSession<OobInitiatorRangingConfig> {
-
+public class OobInitiatorRangingSession extends BaseRangingSession implements RangingSession {
     private static final String TAG = OobInitiatorRangingSession.class.getSimpleName();
 
     private static final long MESSAGE_TIMEOUT_MS = 4000;
@@ -84,13 +81,20 @@ public class OobInitiatorRangingSession
     }
 
     @Override
-    public void start(@NonNull OobInitiatorRangingConfig config) {
+    public void start(@NonNull RangingConfig rangingConfig) {
+        if (!(rangingConfig instanceof OobInitiatorRangingConfig config)) {
+            Log.e(TAG, "Unexpected configuration object for oob initiator session "
+                    + rangingConfig.getClass());
+            mSessionListener.onSessionClosed(InternalReason.INTERNAL_ERROR);
+            return;
+        }
+
         try {
             mRangingEngine = new RangingEngine(
-                    mConfig.getSessionConfig(), config, mSessionHandle, mInjector);
+                    mSessionConfig.getSessionConfig(), config, mSessionHandle, mInjector);
         } catch (RangingEngine.ConfigSelectionException e) {
             Log.w(TAG, "Provided config incompatible with local capabilities: ", e);
-            mSessionListener.onSessionStopped(REASON_UNSUPPORTED);
+            mSessionListener.onSessionClosed(InternalReason.UNSUPPORTED);
             return;
         }
 
@@ -106,9 +110,17 @@ public class OobInitiatorRangingSession
 
                     @Override
                     public void onFailure(@NonNull Throwable t) {
-                        Log.i(TAG, "Oob failed: ", t);
-                        mOobConnections.values().forEach(OobConnection::close);
-                        mSessionListener.onSessionStopped(REASON_NO_PEERS_FOUND);
+                        Log.w(TAG, "Oob failed: ", t);
+                        switch (t) {
+                            case RangingEngine.ConfigSelectionException e ->
+                                    mSessionListener.onSessionClosed(e.getReason());
+                            case OobController.ConnectionClosedException e ->
+                                    mSessionListener.onSessionClosed(InternalReason.NO_PEERS_FOUND);
+                            case TimeoutException unused ->
+                                    mSessionListener.onSessionClosed(InternalReason.NO_PEERS_FOUND);
+                            default ->
+                                    mSessionListener.onSessionClosed(InternalReason.INTERNAL_ERROR);
+                        }
                     }
                 }, mOobExecutor);
     }
@@ -135,12 +147,13 @@ public class OobInitiatorRangingSession
                             .toBytes()));
         });
 
-        FluentFuture.from(
-                        Futures.whenAllComplete(pendingSends.values())
-                                .call(() -> handleFailedFutures(pendingSends), mOobExecutor))
+        FluentFuture.from(Futures
+                        .whenAllComplete(pendingSends.values())
+                        .call(() -> handleFailedFutures(pendingSends), mOobExecutor))
                 .addCallback(new FutureCallback<>() {
                     @Override
                     public void onSuccess(Map<OobHandle, Void> result) {
+                        Log.i(TAG, "Sent stop ranging on OOB handles " + result.keySet());
                         OobInitiatorRangingSession.super.stop();
                     }
 
@@ -204,7 +217,10 @@ public class OobInitiatorRangingSession
                 pendingSends.put(
                         oobHandle,
                         FluentFuture.from(Futures.immediateFailedFuture(
-                                new RangingEngine.ConfigSelectionException("No config selected"))));
+                                new RangingEngine.ConfigSelectionException(
+                                        "No set configuration message was selected to send on "
+                                                + "handle " + oobHandle,
+                                        InternalReason.NO_PEERS_FOUND))));
             } else {
                 pendingSends.put(
                         oobHandle,

@@ -21,7 +21,7 @@ from mobly.controllers import android_device
 WAIT_TIME_SEC = 3
 
 
-def initialize_uwb_country_code_and_verify(ad: android_device.AndroidDevice):
+def initialize_uwb_country_code(ad: android_device.AndroidDevice):
   """Sets UWB country code to US if the device does not have it set.
 
   Note: This intentionally relies on an unstable API (shell command) since we
@@ -32,19 +32,22 @@ def initialize_uwb_country_code_and_verify(ad: android_device.AndroidDevice):
     ad: android device object.
     handler: callback handler.
   """
-  if not ad.ranging.isTechnologySupported(RangingTechnology.UWB):
+  if not ad.ranging.isTechnologySupported(RangingTechnology.UWB) and \
+    ad.ranging.isTechnologyEnabled(RangingTechnology.UWB):
     return
 
   try:
     ad.adb.shell(["cmd", "uwb", "force-country-code", "enabled", "US"])
-  except ad.adb.AdbError:
+  except Exception as e:
     ad.log.warning("Unable to force uwb country code")
 
-  # Unable to get UWB enabled even after setting country code, abort!
-  asserts.assert_true(
-      is_technology_enabled(ad, RangingTechnology.UWB, timeout_s=60),
-      "Uwb was not enabled after setting country code",
-  )
+  #For Wear OS, this call will not enable uwb. So ignore verification whether the stack was enabled.
+  time.sleep(1)
+
+
+def request_hw_idle_vote(ad: android_device.AndroidDevice, enabled : bool):
+  if ad.uwb.isUwbHwIdleTurnOffEnabled():
+    ad.uwb.requestUwbHwEnabled(enabled)
 
 def _is_technology_state(
     ad: android_device.AndroidDevice,
@@ -123,28 +126,8 @@ def set_uwb_state_and_verify(
   """
   failure_msg = "enabled" if state else "disabled"
   ad.uwb.setUwbEnabled(state)
-  asserts.assert_true(_is_technology_state(ad, RangingTechnology.UWB, state, timeout_s=30),
+  asserts.assert_true(_is_technology_state(ad, RangingTechnology.UWB, state, timeout_s=10),
                       "Uwb is not %s" % failure_msg)
-
-def reset_bt_state(
-    ad: android_device.AndroidDevice
-):
-  """Reset BT state to off and then on before each test.
-
-  Args:
-    ad: android device object.
-  """
-  ad.bluetooth.disableBluetooth()
-  time.sleep(2)
-  asserts.assert_false(ad.bluetooth.isBluetoothOn(), 'Bluetooth did not stop')
-  ad.bluetooth.enableBluetooth()
-  time.sleep(2)
-  asserts.assert_true(ad.bluetooth.isBluetoothOn(), 'Bluetooth did not stop')
-  # Check for BLE RSSI or BLE CS availability
-  asserts.assert_true(_is_technology_state(ad, RangingTechnology.BLE_RSSI, True, timeout_s=60),
-                      "BT is not enabled in ranging API")
-  ad.bluetooth.reset()
-
 
 def set_bt_state_and_verify(
     ad: android_device.AndroidDevice,
@@ -157,16 +140,17 @@ def set_bt_state_and_verify(
     state: bool, True for BT on, False for off.
   """
   failure_msg = "enabled" if state else "disabled"
-  if state:
+  if state and not ad.bluetooth.isBluetoothOn():
     ad.bluetooth.enableBluetooth()
-  else:
+    time.sleep(3)
+  elif not state and ad.bluetooth.isBluetoothOn() :
     ad.bluetooth.disableBluetooth()
-  time.sleep(1)
+    time.sleep(3)
   asserts.assert_equal(ad.bluetooth.isBluetoothOn(), state, 'Bluetooth state change failed')
   # Check for BLE RSSI or BLE CS availability
   asserts.assert_true(_is_technology_state(ad, RangingTechnology.BLE_RSSI, state, timeout_s=60),
                       "BT is not %s in ranging API" % failure_msg)
-
+  ad.bluetooth.reset()
 
 def reset_wifi_state(
     ad: android_device.AndroidDevice
