@@ -35,6 +35,7 @@ import android.os.RemoteException;
 import android.os.UserManager;
 import android.provider.Settings;
 import android.util.Log;
+import android.uwb.IChannelUsageCallback;
 import android.uwb.IOnUwbActivityEnergyInfoListener;
 import android.uwb.IUwbAdapter;
 import android.uwb.IUwbAdapterStateCallbacks;
@@ -42,12 +43,15 @@ import android.uwb.IUwbAdfProvisionStateCallbacks;
 import android.uwb.IUwbOemExtensionCallback;
 import android.uwb.IUwbRangingCallbacks;
 import android.uwb.IUwbVendorUciCallback;
+import android.uwb.LogicalLinkConnectionParams;
+import android.uwb.LogicalLinkParams;
 import android.uwb.SessionHandle;
 import android.uwb.UwbAddress;
 
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.modules.utils.build.SdkLevel;
 import com.android.server.uwb.data.UwbUciConstants;
+import com.android.uwb.flags.Flags;
 
 import com.google.uwb.support.generic.GenericSpecificationParams;
 import com.google.uwb.support.multichip.ChipInfoParams;
@@ -232,6 +236,22 @@ public class UwbServiceImpl extends IUwbAdapter.Stub {
         mUwbServiceCore.unregisterVendorExtensionCallback(callbacks);
     }
 
+    @Override
+    public void registerChannelUsageCallback(IChannelUsageCallback callback)
+            throws RemoteException {
+        Log.i(TAG, "Register channel usage callback");
+        enforceUwbPrivilegedPermission();
+        mUwbServiceCore.registerChannelUsageCallback(callback);
+    }
+
+    @Override
+    public void unregisterChannelUsageCallback(IChannelUsageCallback callback)
+            throws RemoteException {
+        Log.i(TAG, "Unregister channel usage callback");
+        enforceUwbPrivilegedPermission();
+        mUwbServiceCore.unregisterChannelUsageCallback(callback);
+    }
+
 
     @Override
     public void unregisterAdapterStateCallbacks(IUwbAdapterStateCallbacks adapterStateCallbacks)
@@ -400,6 +420,15 @@ public class UwbServiceImpl extends IUwbAdapter.Stub {
     }
 
     @Override
+    public int queryLogicalLinkMaxDataSizeBytes(SessionHandle sessionHandle, int connectId) {
+        if (!Flags.uwbFira3025q4()) {
+            throw new UnsupportedOperationException();
+        }
+        enforceUwbPrivilegedPermission();
+        return mUwbServiceCore.queryLogicalLinkMaxDataSizeBytes(sessionHandle, connectId);
+    }
+
+    @Override
     public synchronized int getAdapterState() throws RemoteException {
         return mUwbServiceCore.getAdapterState();
     }
@@ -425,6 +454,34 @@ public class UwbServiceImpl extends IUwbAdapter.Stub {
     }
 
     @Override
+    public void createLogicalLink(SessionHandle sessionHandle,
+            LogicalLinkParams params) throws RemoteException {
+        if (!Flags.uwbFira3025q4()) {
+            throw new UnsupportedOperationException();
+        }
+        enforceUwbPrivilegedPermission();
+        mUwbServiceCore.createLogicalLink(sessionHandle, params);
+    }
+
+    @Override
+    public void closeLogicalLink(SessionHandle sessionHandle, int connectId) {
+        if (!Flags.uwbFira3025q4()) {
+            throw new UnsupportedOperationException();
+        }
+        enforceUwbPrivilegedPermission();
+        mUwbServiceCore.closeLogicalLink(sessionHandle, connectId);
+    }
+
+    @Override
+    public LogicalLinkConnectionParams getLogicalLinkParams(SessionHandle sessionHandle,
+            int connectId) {
+        if (!Flags.uwbFira3025q4()) {
+            throw new UnsupportedOperationException();
+        }
+        enforceUwbPrivilegedPermission();
+        return mUwbServiceCore.getLogicalLinkParams(sessionHandle, connectId);
+    }
+
     public synchronized void setEnabled(boolean enabled) throws RemoteException {
         enforceUwbPrivilegedPermission();
         if (mUwbInjector.getDeviceConfigFacade().isUwbDisabledUntilFirstToggle()) {
@@ -731,5 +788,4 @@ public class UwbServiceImpl extends IUwbAdapter.Stub {
         enforceUwbPrivilegedPermission();
         mUwbServiceCore.reportUwbActivityEnergyInfo(listener);
     }
-
 }

@@ -38,11 +38,15 @@ import android.os.Trace;
 import android.util.ArraySet;
 import android.util.Log;
 import android.util.Pair;
+import android.uwb.ChannelUsage;
+import android.uwb.IChannelUsageCallback;
 import android.uwb.IOnUwbActivityEnergyInfoListener;
 import android.uwb.IUwbAdapterStateCallbacks;
 import android.uwb.IUwbOemExtensionCallback;
 import android.uwb.IUwbRangingCallbacks;
 import android.uwb.IUwbVendorUciCallback;
+import android.uwb.LogicalLinkConnectionParams;
+import android.uwb.LogicalLinkParams;
 import android.uwb.RangingChangeReason;
 import android.uwb.SessionHandle;
 import android.uwb.StateChangeReason;
@@ -87,13 +91,17 @@ import com.google.uwb.support.rftest.RfTestStartSessionParams;
 
 import java.io.FileDescriptor;
 import java.io.PrintWriter;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.NoSuchElementException;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Random;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeoutException;
@@ -144,8 +152,13 @@ public class UwbServiceCore implements INativeUwbManager.DeviceNotification,
     private Map<String, UwbDeviceInfoResponse> mChipIdToDeviceInfoResponseMap = new HashMap<>();
     private @StateChangeReason int mLastAdapterStateChangedReason = StateChangeReason.UNKNOWN;
     private @AdapterStateCallback.State int mLastAdapterStateNotification = -1;
-    private  IUwbVendorUciCallback mCallBack = null;
+    private IUwbVendorUciCallback mCallBack = null;
     private IUwbOemExtensionCallback mOemExtensionCallback = null;
+    private final Map<Integer, Integer> mChannelSessionCounter = Collections.synchronizedSortedMap(
+            new TreeMap<>());
+    private List<ChannelUsage> mLastChannelUsageList = new ArrayList<>();
+    private final RemoteCallbackList<IChannelUsageCallback>
+            mChannelUsageCbList = new RemoteCallbackList<>();
     private final Handler mHandler;
     private GenericSpecificationParams mCachedSpecificationParams;
     private boolean mNeedCachedSpecParamsUpdate = true;
@@ -313,6 +326,9 @@ public class UwbServiceCore implements INativeUwbManager.DeviceNotification,
 
         mUwbTask = new UwbTask(serviceLooper);
         mHandler = new Handler(serviceLooper);
+        mChannelSessionCounter.put(FiraParams.UWB_CHANNEL_9, 0);
+        mChannelSessionCounter.put(FiraParams.UWB_CHANNEL_5, 0);
+        mLastChannelUsageList = getChannelUsageState();
     }
 
     /**
@@ -566,6 +582,67 @@ public class UwbServiceCore implements INativeUwbManager.DeviceNotification,
     public synchronized void unregisterOemExtensionCallback(IUwbOemExtensionCallback callback) {
         Log.e(TAG, "Unregister Oem Extension callback");
         mOemExtensionCallback = null;
+    }
+
+    public synchronized void registerChannelUsageCallback(IChannelUsageCallback callback) {
+        synchronized (mChannelUsageCbList) {
+            mChannelUsageCbList.register(callback);
+        }
+        try {
+            callback.onChannelUsageUpdated(getChannelUsageState());
+        } catch (RemoteException e) {
+            Log.e(TAG, "Failed to update channel usage");
+        }
+    }
+
+    public synchronized void unregisterChannelUsageCallback(IChannelUsageCallback callback) {
+        synchronized (mChannelUsageCbList) {
+            mChannelUsageCbList.unregister(callback);
+        }
+    }
+
+    private List<ChannelUsage> getChannelUsageState() {
+        List<ChannelUsage> channelUsageList = new ArrayList<>();
+        for (Map.Entry<Integer, Integer> entry : mChannelSessionCounter.entrySet()) {
+            channelUsageList.add(new ChannelUsage(entry.getKey(), (entry.getValue() != 0)));
+        }
+        return channelUsageList;
+    }
+
+    public void updateChannelStateIfNeeded() {
+        if (mLastChannelUsageList.equals(getChannelUsageState())) {
+            return;
+        }
+        Log.i(TAG, "Channel usage status updated: " + getChannelUsageState()
+                + ", previous: " + mLastChannelUsageList);
+        mLastChannelUsageList = getChannelUsageState();
+        synchronized (mChannelUsageCbList) {
+            if (mChannelUsageCbList.getRegisteredCallbackCount() > 0) {
+                final int count = mChannelUsageCbList.beginBroadcast();
+                for (int i = 0; i < count; i++) {
+                    try {
+                        mChannelUsageCbList.getBroadcastItem(i)
+                                .onChannelUsageUpdated(mLastChannelUsageList);
+                    } catch (RemoteException e) {
+                        Log.e(TAG, "onChannelUsageUpdated failed");
+                    }
+                }
+                mChannelUsageCbList.finishBroadcast();
+            }
+        }
+    }
+
+    public void updateChannelUsageOnRangingStarted(int channel) {
+        mChannelSessionCounter.put(channel, mChannelSessionCounter.getOrDefault(channel, 0) + 1);
+        updateChannelStateIfNeeded();
+    }
+
+    public void updateChannelUsageOnRangingStopped(int channel) {
+        if (mChannelSessionCounter.containsKey(channel)
+                && mChannelSessionCounter.get(channel) != 0) {
+            mChannelSessionCounter.put(channel, mChannelSessionCounter.get(channel) - 1);
+        }
+        updateChannelStateIfNeeded();
     }
 
     /**
@@ -1082,6 +1159,57 @@ public class UwbServiceCore implements INativeUwbManager.DeviceNotification,
         }
 
         return mSessionManager.queryMaxDataSizeBytes(sessionHandle);
+    }
+
+    /**
+     * Query max application data size which can be sent by UWBS in one ranging round
+     * during logical link data exchange.
+     */
+    public int queryLogicalLinkMaxDataSizeBytes(SessionHandle sessionHandle, int connectId) {
+        if (!isUwbEnabled()) {
+            throw new IllegalStateException("Uwb is not enabled");
+        }
+
+        return mSessionManager.queryLogicalLinkMaxDataSizeBytes(sessionHandle, connectId);
+    }
+
+    /**
+     * Create a linker layer with remote device which is part of this ongoing session
+     */
+    public void createLogicalLink(SessionHandle sessionHandle, LogicalLinkParams params)
+            throws RemoteException {
+        if (!isUwbEnabled()) {
+            throw new IllegalStateException("Uwb is not enabled");
+        }
+
+        mSessionManager.createLogicalLink(sessionHandle, params);
+    }
+
+    /**
+     * Sends a request to close an existing logical link identified by {@code connectId}.
+     */
+    public void closeLogicalLink(SessionHandle sessionHandle, int connectId) {
+        if (!isUwbEnabled()) {
+            throw new IllegalStateException("Uwb is not enabled");
+        }
+        mSessionManager.closeLogicalLink(sessionHandle, connectId);
+    }
+
+    /**
+     * The Host shall use the get logical link param command to get the Logical Link parameters
+     * associated with the LL_CONNECT_ID or SessionHandle.
+     */
+    public LogicalLinkConnectionParams getLogicalLinkParams(SessionHandle sessionHandle,
+            int connectId) {
+        if (!isUwbEnabled()) {
+            throw new IllegalStateException("Uwb is not enabled");
+        }
+        try {
+            return mSessionManager.getLogicalLinkParams(sessionHandle, connectId);
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to get logical link parameters", e);
+            return null;
+        }
     }
 
     /**

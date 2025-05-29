@@ -651,18 +651,23 @@ public abstract class FiraParams extends Params {
     public static final int STATUS_CODE_DATA_TRANSFER_NTF_STATUS_INVALID_FORMAT = 7;
 
     /**
-     * Table TBD: Status codes in the SESSION_DATA_TRANSFER_PHASE_CONFIGURATION_NTF.
+     * Status codes for Data Transfer configuration as per Table 56 of the FiRa specification.
+     *
+     * <p>These codes indicate the result of DTPCM (Data Transfer Protocol Control Message)
+     * configuration.
      */
     @IntDef(
             value = {
                     STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_DTPCM_CONFIG_SUCCESS,
-                    STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_ERROR_DUPLICATE_SLOT_ASSIGNMENT
+                    STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_ERROR_DUPLICATE_SLOT_ASSIGNMENT,
+                    STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_ERROR_DTPML_OVERSIZE,
             })
     public @interface DataTransferPhaseConfigNtfStatusCode {}
 
     public static final int STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_DTPCM_CONFIG_SUCCESS = 0;
     public static final int
             STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_ERROR_DUPLICATE_SLOT_ASSIGNMENT = 1;
+    public static final int STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_ERROR_DTPML_OVERSIZE = 2;
 
     /** State change reason codes defined in UCI table-15 */
     @IntDef(
@@ -1154,6 +1159,7 @@ public abstract class FiraParams extends Params {
     public static final int SESSION_OFFSET_TIME_LEN = 4;
     public static final int SEQUENCE_NUMBER_LENGTH = 2;
     public static final int DATA_MSG_LENGTH = 2;
+    public static final int CONNECTION_IDENTIFIER_LENGTH = 4;
 
     // Default value (Host as the both secure & non-secure endpoint).
     public static final int APPLICATION_DATA_ENDPOINT_DEFAULT = 0;
@@ -1174,6 +1180,23 @@ public abstract class FiraParams extends Params {
     public static final int ANTENNA_MODE_OMNI = 0;
     /** The patch antenna is used for both Tx and Rx. **/
     public static final int ANTENNA_MODE_DIRECTIONAL = 1;
+
+    /**
+     * Link Layer Mode
+     */
+    @IntDef(
+        value = {
+                LINK_LAYER_MODE_BYPASS,
+                LINK_LAYER_MODE_LOGICAL_LINK,
+        })
+    @Retention(RetentionPolicy.SOURCE)
+    public @interface LinkLayerMode {}
+
+    /** (Default) Bypass Logical Link Mode. */
+    public static final int LINK_LAYER_MODE_BYPASS = 0x00;
+
+    /** Logical Link Mode. */
+    public static final int LINK_LAYER_MODE_LOGICAL_LINK = 0x01;
 
     private static final byte[] sShortForbiddenUwbAddress = {(byte) 0xFF, (byte) 0xFF};
     private static final byte[] sExtendedForbiddenUwbAddress = {
