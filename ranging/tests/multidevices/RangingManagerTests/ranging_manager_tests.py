@@ -33,7 +33,6 @@ from mobly.controllers import android_device
 from android.platform.test.annotations import ApiTest
 
 
-
 _TEST_CASES = [
     "test_one_to_one_uwb_ranging_unicast_static_sts",
     "test_one_to_one_uwb_ranging_multicast_provisioned_sts",
@@ -52,6 +51,9 @@ _TEST_CASES = [
     "test_one_to_one_ble_rssi_ranging_with_oob",
     "test_oob_responder_persists_until_explicitly_stopped",
     "test_dynamic_peer_uwb_ranging",
+    "test_uwb_ranging_move_to_bg_and_fg",
+    "test_ble_rssi_ranging_move_to_bg_and_fg",
+    "test_ble_cs_ranging_move_to_bg_and_fg",
 ]
 
 
@@ -75,9 +77,10 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     super().__init__(configs)
     self.tests = _TEST_CASES
 
-  def _is_cuttlefish_device(self, ad: android_device.AndroidDevice) -> bool:
+  def _is_emulator_device(self, ad: android_device.AndroidDevice) -> bool:
     product_name = ad.adb.getprop("ro.product.name")
-    return "cf_x86" in product_name
+    product_board = ad.adb.getprop("ro.product.board")
+    return ("cf_x86" in product_name) or ("goldfish" in product_board)
 
   def setup_class(self):
     super().setup_class()
@@ -391,6 +394,225 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
     self.responder.stop_ranging_and_assert_closed(SESSION_HANDLE)
 
+  def test_uwb_ranging_move_to_bg_and_fg(self):
+      """ verifies Uwb ranging with foreground and background"""
+      SESSION_HANDLE = str(uuid4())
+      UWB_SESSION_ID = 5
+      TECHNOLOGIES = {RangingTechnology.UWB}
+
+      asserts.skip_if(
+          not self.responder.is_ranging_technology_supported(RangingTechnology.UWB),
+          f"UWB not supported by responder",
+      )
+      asserts.skip_if(
+          not self.initiator.is_ranging_technology_supported(RangingTechnology.UWB),
+          f"UWB not supported by initiator",
+      )
+      initiator_preference = RangingPreference(
+          device_role=DeviceRole.INITIATOR,
+          ranging_params=RawInitiatorRangingParams(
+              peer_params=[
+                  DeviceParams(
+                      peer_id=self.responder.id,
+                      uwb_params=uwb.UwbRangingParams(
+                          session_id=UWB_SESSION_ID,
+                          config_id=uwb.ConfigId.UNICAST_DS_TWR,
+                          device_address=self.initiator.uwb_address,
+                          peer_address=self.responder.uwb_address,
+                      ),
+                  )
+              ],
+          ),
+      )
+
+      responder_preference = RangingPreference(
+          device_role=DeviceRole.RESPONDER,
+          ranging_params=RawResponderRangingParams(
+              peer_params=DeviceParams(
+                  peer_id=self.initiator.id,
+                  uwb_params=uwb.UwbRangingParams(
+                      session_id=UWB_SESSION_ID,
+                      config_id=uwb.ConfigId.UNICAST_DS_TWR,
+                      device_address=self.responder.uwb_address,
+                      peer_address=self.initiator.uwb_address,
+                  ),
+              ),
+          ),
+      )
+      self.initiator.start_ranging_and_assert_opened(
+          SESSION_HANDLE, initiator_preference
+      )
+      self.responder.start_ranging_and_assert_opened(
+          SESSION_HANDLE, responder_preference
+      )
+      """Moving app to background"""
+      self.initiator.move_snippet_to_bg()
+      time.sleep(2)
+      self.initiator.clear_event_cache()
+      asserts.assert_false(
+          self.initiator.verify_received_data_from_peer_using_technologies(
+              SESSION_HANDLE, self.responder.id, TECHNOLOGIES,
+          ),
+          "Initiator should not receive in bg",
+      )
+
+      self.responder.move_snippet_to_bg()
+      time.sleep(2)
+      self.responder.clear_event_cache()
+      asserts.assert_false(
+          self.responder.verify_received_data_from_peer_using_technologies(
+              SESSION_HANDLE, self.initiator.id, TECHNOLOGIES,
+          ),
+          "Responder should not receive in bg",
+      )
+
+      """Moving app to foreground"""
+      self.initiator.move_snippet_to_fg()
+      self.initiator.clear_event_cache()
+      asserts.assert_true(
+          self.initiator.verify_received_data_from_peer_using_technologies(
+              SESSION_HANDLE, self.responder.id, TECHNOLOGIES,
+          ),
+          "Initiator should not receive in fg",
+      )
+
+      self.responder.move_snippet_to_fg()
+      asserts.assert_true(
+          self.responder.verify_received_data_from_peer_using_technologies(
+               SESSION_HANDLE, self.initiator.id, TECHNOLOGIES,
+          ),
+          "Responder should receive in fg",
+      )
+
+      self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
+      self.responder.stop_ranging_and_assert_closed(SESSION_HANDLE)
+
+  def test_ble_rssi_ranging_move_to_bg_and_fg(self):
+      """ verifies ble rssi ranging with foreground and background"""
+      SESSION_HANDLE = str(uuid4())
+      TECHNOLOGIES = {RangingTechnology.BLE_RSSI}
+      asserts.skip_if(self._is_emulator_device(self.initiator.ad),
+                      "Skipping BLE RSSI test on emulator")
+
+      asserts.skip_if(
+          not self.responder.is_ranging_technology_supported(RangingTechnology.BLE_RSSI),
+          f"BLE_RSSI not supported by responder",
+      )
+      asserts.skip_if(
+          not self.initiator.is_ranging_technology_supported(RangingTechnology.BLE_RSSI),
+          f"BLE_RSSI not supported by initiator",
+      )
+      self._enable_bt()
+
+      try:
+          self._ble_connect()
+      except Exception as e:
+          asserts.skip("Failed to create ble connection", str(e))
+
+      try:
+          initiator_preference = RangingPreference(
+              device_role=DeviceRole.INITIATOR,
+              ranging_params=RawInitiatorRangingParams(
+                  peer_params=[
+                      DeviceParams(
+                          peer_id=self.responder.id,
+                          rssi_params=rssi.BleRssiRangingParams(
+                              peer_address=self.responder.bt_addr,
+                              ranging_update_rate=rssi.RangingUpdateRate.FREQUENT,
+                          ),
+                      )
+                  ],
+              ),
+          )
+          self.initiator.start_ranging_and_assert_opened(
+              SESSION_HANDLE, initiator_preference
+          )
+          """Moving app to background"""
+          self.initiator.move_snippet_to_bg()
+          time.sleep(2)
+          self.initiator.clear_event_cache()
+          asserts.assert_false(
+                  self.initiator.verify_received_data_from_peer_using_technologies(
+                         SESSION_HANDLE, self.responder.id, TECHNOLOGIES,
+                  ),
+                  " Initiator should not receive in bg",
+          )
+          """Moving app to foreground"""
+          self.initiator.move_snippet_to_fg()
+          asserts.assert_true(
+                  self.initiator.verify_received_data_from_peer_using_technologies(
+                         SESSION_HANDLE, self.responder.id, TECHNOLOGIES,
+                  ),
+                  "Initiator should receive in fg",
+          )
+
+      finally:
+          self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
+          self._ble_disconnect()
+
+  def test_ble_cs_ranging_move_to_bg_and_fg(self):
+      """ verifies ble cs ranging with foreground and background"""
+      SESSION_HANDLE = str(uuid4())
+      TECHNOLOGIES = {RangingTechnology.BLE_CS}
+      asserts.skip_if(self._is_emulator_device(self.initiator.ad),
+                      "Skipping BLE RSSI test on emulator")
+
+      asserts.skip_if(
+          not self.responder.is_ranging_technology_supported(RangingTechnology.BLE_CS),
+          f"BLE_CS not supported by responder",
+      )
+      asserts.skip_if(
+          not self.initiator.is_ranging_technology_supported(RangingTechnology.BLE_CS),
+          f"BLE_CS not supported by initiator",
+      )
+      self._enable_bt()
+
+      try:
+          self._ble_bond()
+      except Exception as e:
+          asserts.skip("Failed to create ble bond", str(e))
+
+      try:
+          initiator_preference = RangingPreference(
+              device_role=DeviceRole.INITIATOR,
+              ranging_params=RawInitiatorRangingParams(
+                  peer_params=[
+                      DeviceParams(
+                          peer_id=self.responder.id,
+                          cs_params=cs.CsRangingParams(
+                              peer_address=self.responder.bt_addr,
+                          ),
+                      )
+                  ],
+              ),
+          )
+          self.initiator.start_ranging_and_assert_opened(
+              SESSION_HANDLE, initiator_preference
+          )
+          """Moving app to background"""
+          self.initiator.move_snippet_to_bg()
+          time.sleep(2)
+          self.initiator.clear_event_cache()
+          asserts.assert_false(
+              self.initiator.verify_received_data_from_peer_using_technologies(
+                  SESSION_HANDLE, self.responder.id, TECHNOLOGIES,
+              ),
+              " Initiator should not receive in bg",
+          )
+
+          """Moving app to foreground"""
+          self.initiator.move_snippet_to_fg()
+          asserts.assert_true(
+              self.initiator.verify_received_data_from_peer_using_technologies(
+                  SESSION_HANDLE, self.responder.id, TECHNOLOGIES,
+              ),
+              "Initiator should receive in fg",
+          )
+
+      finally:
+          self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
+          self._ble_unbond()
+
   def test_dynamic_peer_uwb_ranging(self):
       """verifies dynamic peer with UWB"""
 
@@ -480,7 +702,6 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
       # Responder will stop ranging due to inband signal from controlee
       self.responder.assert_close_ranging_event_received(SESSION_HANDLE)
       logging.info("remove a device %s", self.initiator.uwb_address)
-
       self.initiator.clear_event_cache()
 
       asserts.assert_false(
@@ -496,6 +717,8 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
       """Verifies device does not receive range data after measurement limit."""
       SESSION_HANDLE = str(uuid4())
       UWB_SESSION_ID = 5
+      asserts.skip_if(self._is_emulator_device(self.initiator.ad),
+                      "Skipping ranging measurement limit test on emulator")
       asserts.skip_if(
           not self.responder.is_ranging_technology_supported(RangingTechnology.UWB),
           f"UWB not supported by responder",
@@ -561,8 +784,8 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
   def test_ble_rssi_ranging_measurement_limit(self):
       """Verifies ble rssi ranging with measurement limit.
       """
-      asserts.skip_if(self._is_cuttlefish_device(self.initiator.ad),
-                      "Skipping BLE RSSI test on Cuttlefish")
+      asserts.skip_if(self._is_emulator_device(self.initiator.ad),
+                      "Skipping BLE RSSI test on emulator")
       SESSION_HANDLE = str(uuid4())
 
       asserts.skip_if(
@@ -605,8 +828,8 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
   def test_one_to_one_wifi_rtt_ranging(self):
     """Verifies wifi rtt ranging with peer device, devices range for 10 seconds."""
-    asserts.skip_if(self._is_cuttlefish_device(self.initiator.ad),
-                    "Skipping WiFi RTT test on Cuttlefish")
+    asserts.skip_if(self._is_emulator_device(self.initiator.ad),
+                    "Skipping WiFi RTT test on emulator")
     SESSION_HANDLE = str(uuid4())
     TECHNOLOGIES = {RangingTechnology.WIFI_RTT}
 
@@ -678,8 +901,8 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
   def test_one_to_one_wifi_periodic_rtt_ranging(self):
     """Verifies wifi periodic rtt ranging with peer device, devices range for 10 seconds."""
-    asserts.skip_if(self._is_cuttlefish_device(self.initiator.ad),
-                    "Skipping WiFi periodic RTT test on Cuttlefish")
+    asserts.skip_if(self._is_emulator_device(self.initiator.ad),
+                    "Skipping WiFi periodic RTT test on emulator")
     SESSION_HANDLE = str(uuid4())
     TECHNOLOGIES = {RangingTechnology.WIFI_RTT}
 
@@ -767,8 +990,8 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
   ])
   def test_one_to_one_ble_rssi_ranging(self):
     """Verifies rssi ranging with peer device, devices range for 10 seconds."""
-    asserts.skip_if(self._is_cuttlefish_device(self.initiator.ad),
-                    "Skipping BLE RSSI test on Cuttlefish")
+    asserts.skip_if(self._is_emulator_device(self.initiator.ad),
+                    "Skipping BLE RSSI test on emulator")
     SESSION_HANDLE = str(uuid4())
     TECHNOLOGIES = {RangingTechnology.BLE_RSSI}
 
@@ -854,8 +1077,8 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     Verifies cs ranging with peer device, devices range for 10 seconds.
     This test is only one way since we don't test if responder also can simultaneously get the data.
     """
-    asserts.skip_if(self._is_cuttlefish_device(self.initiator.ad),
-                    "Skipping BLE CS test on Cuttlefish")
+    asserts.skip_if(self._is_emulator_device(self.initiator.ad),
+                    "Skipping BLE CS test on emulator")
     SESSION_HANDLE = str(uuid4())
     TECHNOLOGIES = {RangingTechnology.BLE_CS}
 
@@ -945,6 +1168,8 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     session.stop_and_assert_closed()
 
   def test_one_to_one_ble_cs_ranging_with_oob(self):
+    asserts.skip_if(self._is_emulator_device(self.initiator.ad),
+                      "Skipping BLE CS test on emulator")
     asserts.skip_if(
         not self.responder.is_ranging_technology_supported(RangingTechnology.BLE_CS),
         f"BLE_CS not supported by responder",
@@ -993,8 +1218,8 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
   def test_ble_cs_ranging_measurement_limit(self):
       """Verifies ble cs ranging with measurement limit."""
-      asserts.skip_if(self._is_cuttlefish_device(self.initiator.ad),
-                      "Skipping BLE CS test on Cuttlefish")
+      asserts.skip_if(self._is_emulator_device(self.initiator.ad),
+                      "Skipping BLE CS test on emulator")
       SESSION_HANDLE = str(uuid4())
       TECHNOLOGIES = {RangingTechnology.BLE_CS}
 
@@ -1036,7 +1261,6 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
       finally:
         self._ble_unbond()
-
 
 
 
