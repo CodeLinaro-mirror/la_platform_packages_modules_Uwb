@@ -383,7 +383,9 @@ impl UciManager for UciManagerImpl {
         &self,
         connect_id: ConnectId,
     ) -> Result<GetLogicalLinkParamResponse> {
-        let cmd = UciCommand::GetLogicalLinkParams { connect_id };
+        let cmd = UciCommand::GetLogicalLinkParams {
+            connect_id: self.get_session_token(&connect_id).await?,
+        };
         match self.send_cmd(UciManagerCmd::SendUciCommand { cmd }).await {
             Ok(UciResponse::GetLogicalLinkParams(resp)) => resp,
             Ok(_) => Err(Error::Unknown),
@@ -1974,7 +1976,8 @@ mod tests {
     // Construct a UCI packet, with the header fields and payload bytes.
     fn build_uci_packet(mt: u8, pbf: u8, gid: u8, oid: u8, mut payload: Vec<u8>) -> Vec<u8> {
         let len: u16 = payload.len() as u16;
-        let mut bytes: Vec<u8> = vec![(mt & 0x7) << 5 | (pbf & 0x1) << 4 | (gid & 0xF), oid & 0x3F];
+        let mut bytes: Vec<u8> =
+            vec![((mt & 0x7) << 5) | ((pbf & 0x1) << 4) | (gid & 0xF), oid & 0x3F];
         if mt == 0 {
             // UCI Data packet
             // Store 16-bit payload length in LSB format.
