@@ -456,7 +456,7 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
     public void onDataSendStatus(
             long connectId, int dataTransferStatus, long sequenceNum, int txCount) {
         Log.d(TAG, "onDataSendStatus(): Received data send status - "
-                + ", connectId: " + connectId
+                + "connectId: " + connectId
                 + ", status: " + dataTransferStatus
                 + ", sequenceNum: " + sequenceNum
                 + ", txCount: " + txCount);
@@ -994,21 +994,12 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
         int currentSessionState = getCurrentSessionState(sessionId);
         if (currentSessionState == UwbUciConstants.UWB_SESSION_STATE_IDLE) {
             if (uwbSession.getProtocolName().equals(AliroParams.PROTOCOL_NAME)
-                    && params instanceof AliroStartRangingParams) {
+                    && (params == null || params instanceof AliroStartRangingParams)) {
                 AliroStartRangingParams aliroStartRangingParams = (AliroStartRangingParams) params;
-                Log.i(TAG, "startRanging() - update RAN multiplier: "
-                        + aliroStartRangingParams.getRanMultiplier()
-                        + ", stsIndex: " + aliroStartRangingParams.getStsIndex());
-                // Need to update the RAN multiplier from the AliroStartRangingParams for an
-                // ALIRO session.
                 uwbSession.updateAliroParamsOnStart(aliroStartRangingParams);
             } else if (uwbSession.getProtocolName().equals(CccParams.PROTOCOL_NAME)
-                    && params instanceof CccStartRangingParams) {
+                    && (params == null || params instanceof CccStartRangingParams)) {
                 CccStartRangingParams cccStartRangingParams = (CccStartRangingParams) params;
-                Log.i(TAG, "startRanging() - update RAN multiplier: "
-                        + cccStartRangingParams.getRanMultiplier()
-                        + ", stsIndex: " + cccStartRangingParams.getStsIndex());
-                // Need to update the RAN multiplier from the CccStartRangingParams for CCC session.
                 uwbSession.updateCccParamsOnStart(cccStartRangingParams);
             } else if (uwbSession.getProtocolName().equals(FiraParams.PROTOCOL_NAME)) {
                 // Need to update session priority if it changed.
@@ -3009,16 +3000,10 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                     if (!isValidUwbSessionForApplicationDataTransfer(uwbSession)) {
                         sendDataStatus = UwbUciConstants.STATUS_CODE_FAILED;
                         Log.i(TAG, "UwbSession not in active state");
-                        mSessionNotificationManager.onDataSendFailed(
-                                uwbSession, sendDataInfo.remoteDeviceAddress, sendDataStatus,
-                                sendDataInfo.params);
                         return sendDataStatus;
                     }
                     if (!isValidSendDataInfo(linkLayerMode, sendDataInfo, uwbSession.getChipId())) {
                         sendDataStatus = UwbUciConstants.STATUS_CODE_INVALID_PARAM;
-                        mSessionNotificationManager.onDataSendFailed(
-                                uwbSession, sendDataInfo.remoteDeviceAddress, sendDataStatus,
-                                sendDataInfo.params);
                         return sendDataStatus;
                     }
 
@@ -3037,8 +3022,12 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                         }
 
                         LogicalLinkInfo logicalLinkInfo = uwbSession.getLogicalLinkInfo(connectId);
-                        sequenceNum = logicalLinkInfo.sequenceNumber;
-                        logicalLinkInfo.sequenceNumber++;
+                        if (logicalLinkInfo == null) {
+                            Log.e(TAG, "No logical link found for connectId = " + connectId);
+                            return sendDataStatus;
+                        }
+
+                        sequenceNum = logicalLinkInfo.sequenceNumber++;
                     } else {
                         Log.e(TAG, "Unknown link layer mode: " + linkLayerMode);
                         return sendDataStatus;
@@ -3049,18 +3038,15 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                                 sendDataInfo.remoteDeviceAddress.toBytes()),
                             sequenceNum, sendDataInfo.data, uwbSession.getChipId());
 
-                    uwbSession.addSendDataInfo(sequenceNum, sendDataInfo);
-
-                    mUwbMetrics.logDataTx(uwbSession, sendDataStatus);
-                    if (sendDataStatus != STATUS_CODE_OK) {
+                    if (sendDataStatus == STATUS_CODE_OK) {
+                        uwbSession.addSendDataInfo(sequenceNum, sendDataInfo);
+                    } else {
                         Log.e(TAG, "MSG_SESSION_SEND_DATA error status: " + sendDataStatus
                                 + " for data packet sessionId: " + sessionId
                                 + ", sequence number: " + sequenceNum);
-                        mSessionNotificationManager.onDataSendFailed(
-                                uwbSession, sendDataInfo.remoteDeviceAddress, sendDataStatus,
-                                sendDataInfo.params);
-                        uwbSession.removeSendDataInfo(sequenceNum);
                     }
+                    mUwbMetrics.logDataTx(uwbSession, sendDataStatus);
+
                     return sendDataStatus;
                 }
             });
@@ -3069,6 +3055,11 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
             try {
                 status = mUwbInjector.runTaskOnSingleThreadExecutor(sendDataTask,
                         IUwbAdapter.RANGING_SESSION_OPEN_THRESHOLD_MS);
+
+                if (status != UwbUciConstants.STATUS_CODE_OK) {
+                    mSessionNotificationManager.onDataSendFailed(uwbSession,
+                            sendDataInfo.remoteDeviceAddress, status, sendDataInfo.params);
+                }
             } catch (TimeoutException e) {
                 Log.i(TAG, "Failed to Send data - status : TIMEOUT");
                 mSessionNotificationManager.onDataSendFailed(uwbSession,
@@ -3824,37 +3815,67 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
         }
 
         public void updateAliroParamsOnStart(AliroStartRangingParams rangingStartParams) {
-            setNeedsQueryUwbsTimestamp(rangingStartParams);
+            if (rangingStartParams != null) {
+                Log.i(TAG, "startRanging() - update RAN multiplier: "
+                        + rangingStartParams.getRanMultiplier()
+                        + ", stsIndex: " + rangingStartParams.getStsIndex());
 
-            // Need to update the RAN multiplier and initiation time
-            // from the AliroStartRangingParams for CCC session.
-            AliroOpenRangingParams newParams =
-                    new AliroOpenRangingParams.Builder((AliroOpenRangingParams) mParams)
-                            .setRanMultiplier(rangingStartParams.getRanMultiplier())
-                            .setInitiationTimeMs(rangingStartParams.getInitiationTimeMs())
-                            .setAbsoluteInitiationTimeUs(rangingStartParams
-                                    .getAbsoluteInitiationTimeUs())
-                            .setStsIndex(rangingStartParams.getStsIndex())
-                            .build();
-            this.mParams = newParams;
-            this.mNeedsAppConfigUpdate = true;
+                // Need to update the RAN multiplier and initiation time
+                // from the AliroStartRangingParams for CCC session.
+                AliroOpenRangingParams.Builder builder =
+                        new AliroOpenRangingParams.Builder((AliroOpenRangingParams) mParams)
+                                .setRanMultiplier(rangingStartParams.getRanMultiplier())
+                                .setStsIndex(rangingStartParams.getStsIndex());
+
+                long initiationTimeMs = rangingStartParams.getInitiationTimeMs();
+                if (initiationTimeMs != 0) {
+                    builder.setInitiationTimeMs(initiationTimeMs);
+                }
+                long absoluteInitiationTimeUs = rangingStartParams.getAbsoluteInitiationTimeUs();
+                if (absoluteInitiationTimeUs != 0) {
+                    builder.setAbsoluteInitiationTimeUs(absoluteInitiationTimeUs);
+                }
+
+                this.mParams = builder.build();
+                this.mNeedsAppConfigUpdate = true;
+            }
+
+            setNeedsQueryUwbsTimestamp(null /* rangingStartParams */);
+            if (this.mNeedsQueryUwbsTimestamp) {
+                this.mNeedsAppConfigUpdate = true;
+            }
         }
 
         public void updateCccParamsOnStart(CccStartRangingParams rangingStartParams) {
-            setNeedsQueryUwbsTimestamp(rangingStartParams);
+            if (rangingStartParams != null) {
+                Log.i(TAG, "startRanging() - update RAN multiplier: "
+                        + rangingStartParams.getRanMultiplier()
+                        + ", stsIndex: " + rangingStartParams.getStsIndex());
 
-            // Need to update the RAN multiplier and initiation time
-            // from the CccStartRangingParams for CCC session.
-            CccOpenRangingParams newParams =
-                    new CccOpenRangingParams.Builder((CccOpenRangingParams) mParams)
-                            .setRanMultiplier(rangingStartParams.getRanMultiplier())
-                            .setInitiationTimeMs(rangingStartParams.getInitiationTimeMs())
-                            .setAbsoluteInitiationTimeUs(rangingStartParams
-                                    .getAbsoluteInitiationTimeUs())
-                            .setStsIndex(rangingStartParams.getStsIndex())
-                            .build();
-            this.mParams = newParams;
-            this.mNeedsAppConfigUpdate = true;
+                // Need to update the RAN multiplier and initiation time
+                // from the CccStartRangingParams for CCC session.
+                CccOpenRangingParams.Builder builder =
+                        new CccOpenRangingParams.Builder((CccOpenRangingParams) mParams)
+                                .setRanMultiplier(rangingStartParams.getRanMultiplier())
+                                .setStsIndex(rangingStartParams.getStsIndex());
+
+                long initiationTimeMs = rangingStartParams.getInitiationTimeMs();
+                if (initiationTimeMs != 0) {
+                    builder.setInitiationTimeMs(initiationTimeMs);
+                }
+                long absoluteInitiationTimeUs = rangingStartParams.getAbsoluteInitiationTimeUs();
+                if (absoluteInitiationTimeUs != 0) {
+                    builder.setAbsoluteInitiationTimeUs(absoluteInitiationTimeUs);
+                }
+
+                this.mParams = builder.build();
+                this.mNeedsAppConfigUpdate = true;
+            }
+
+            setNeedsQueryUwbsTimestamp(null /* rangingStartParams */);
+            if (this.mNeedsQueryUwbsTimestamp) {
+                this.mNeedsAppConfigUpdate = true;
+            }
         }
 
         /**
@@ -3871,6 +3892,9 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
             }
 
             setNeedsQueryUwbsTimestamp(null /* rangingStartParams */);
+            if (this.mNeedsQueryUwbsTimestamp) {
+                this.mNeedsAppConfigUpdate = true;
+            }
         }
 
         /**
