@@ -27,9 +27,9 @@ from lib.params import *
 from lib.ranging_decorator import *
 from mobly import asserts
 from mobly import config_parser
-from mobly import signals
 from mobly import suite_runner
 from mobly.controllers import android_device
+from mobly.base_test import retry
 from android.platform.test.annotations import ApiTest
 
 
@@ -491,10 +491,6 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
       try:
           self._ble_connect()
-      except Exception as e:
-          asserts.skip("Failed to create ble connection", str(e))
-
-      try:
           initiator_preference = RangingPreference(
               device_role=DeviceRole.INITIATOR,
               ranging_params=RawInitiatorRangingParams(
@@ -535,6 +531,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
           self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
           self._ble_disconnect()
 
+  @retry(max_count=2)
   def test_ble_cs_ranging_move_to_bg_and_fg(self):
       """ verifies ble cs ranging with foreground and background"""
       SESSION_HANDLE = str(uuid4())
@@ -808,6 +805,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
               SESSION_HANDLE, initiator_preference
           )
           self.initiator.assert_close_ranging_event_received(SESSION_HANDLE)
+
       finally:
           self._ble_disconnect()
 
@@ -991,11 +989,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     self._enable_bt()
 
     try:
-        self._ble_connect()
-    except Exception as e:
-        asserts.skip("Failed to create ble connection", str(e))
-
-    try:
+      self._ble_connect()
       initiator_preference = RangingPreference(
           device_role=DeviceRole.INITIATOR,
           ranging_params=RawInitiatorRangingParams(
@@ -1057,6 +1051,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
       'android.bluetooth.le.DistanceMeasurementSession#stopSession',
       'android.bluetooth.le.DistanceMeasurementParams#getMaxDurationSeconds',
   ])
+  @retry(max_count=2)
   def test_one_to_one_ble_cs_ranging(self):
     """
     Verifies cs ranging with peer device, devices range for 10 seconds.
@@ -1078,11 +1073,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     self._enable_bt()
 
     try:
-        self._ble_bond()
-    except Exception as e:
-        asserts.skip("Failed to create ble bond", str(e))
-
-    try:
+      self._ble_bond()
       initiator_preference = RangingPreference(
           device_role=DeviceRole.INITIATOR,
           ranging_params=RawInitiatorRangingParams(
@@ -1152,6 +1143,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     session.assert_received_data()
     session.stop_and_assert_closed()
 
+  @retry(max_count=2)
   def test_one_to_one_ble_cs_ranging_with_oob(self):
     asserts.skip_if(self.initiator.ad.adb.getprop("ro.build.type") == "user",
                     "Skipping OOB CS test on user build because BLE address is masked")
@@ -1192,17 +1184,14 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     self._enable_bt()
 
     try:
-        self._ble_bond()
-    except Exception as e:
-        asserts.skip("Failed to create ble bond", str(e))
-
-    try:
+      self._ble_bond()
       session.start_and_assert_opened(check_responders=False)
       session.assert_received_data(technologies=[RangingTechnology.BLE_CS], check_responders=False)
     finally:
       session.stop_and_assert_closed(check_responders=False)
       self._ble_unbond()
 
+  @retry(max_count=2)
   def test_ble_cs_ranging_measurement_limit(self):
       """Verifies ble cs ranging with measurement limit."""
       asserts.skip_if(self._is_emulator_device(self.initiator.ad),
@@ -1330,11 +1319,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     self._enable_bt()
 
     try:
-        self._ble_connect()
-    except Exception as e:
-        asserts.skip("Failed to create ble connection", str(e))
-
-    try:
+      self._ble_connect()
       initiator_preference = RangingPreference(
           device_role=DeviceRole.INITIATOR,
           ranging_params=OobInitiatorRangingParams(
