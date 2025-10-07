@@ -17,6 +17,7 @@
 package com.android.server.uwb;
 
 import static android.content.pm.PackageManager.PERMISSION_GRANTED;
+import static android.uwb.UwbManager.AdapterStateCallback.STATE_ENABLED_HW_IDLE;
 
 import android.annotation.NonNull;
 import android.content.AttributionSource;
@@ -44,9 +45,10 @@ import android.uwb.IUwbOemExtensionCallback;
 import android.uwb.IUwbRangingCallbacks;
 import android.uwb.IUwbVendorUciCallback;
 import android.uwb.LogicalLinkConnectionParams;
-import android.uwb.LogicalLinkParams;
+import android.uwb.LogicalLinkCreationParams;
 import android.uwb.SessionHandle;
 import android.uwb.UwbAddress;
+import android.uwb.UwbManager;
 
 import com.android.internal.annotations.VisibleForTesting;
 import com.android.modules.utils.build.SdkLevel;
@@ -166,7 +168,9 @@ public class UwbServiceImpl extends IUwbAdapter.Stub {
         pw.println();
         mUwbInjector.getUwbConfigStore().dump(fd, pw, args);
         pw.println();
-        if (isUwbEnabled()) {
+        if (isUwbEnabled() && (mUwbServiceCore.getAdapterState()
+                != UwbManager.AdapterStateCallback.STATE_DISABLED
+                    && mUwbServiceCore.getAdapterState() != STATE_ENABLED_HW_IDLE)) {
             dumpPowerStats(fd, pw, args);
         }
     }
@@ -455,7 +459,7 @@ public class UwbServiceImpl extends IUwbAdapter.Stub {
 
     @Override
     public void createLogicalLink(SessionHandle sessionHandle,
-            LogicalLinkParams params) throws RemoteException {
+            LogicalLinkCreationParams params) throws RemoteException {
         if (!Flags.uwbFira3025q4()) {
             throw new UnsupportedOperationException();
         }
@@ -473,13 +477,13 @@ public class UwbServiceImpl extends IUwbAdapter.Stub {
     }
 
     @Override
-    public LogicalLinkConnectionParams getLogicalLinkParams(SessionHandle sessionHandle,
+    public LogicalLinkConnectionParams getLogicalLinkCreationParams(SessionHandle sessionHandle,
             int connectId) {
         if (!Flags.uwbFira3025q4()) {
             throw new UnsupportedOperationException();
         }
         enforceUwbPrivilegedPermission();
-        return mUwbServiceCore.getLogicalLinkParams(sessionHandle, connectId);
+        return mUwbServiceCore.getLogicalLinkCreationParams(sessionHandle, connectId);
     }
 
     public synchronized void setEnabled(boolean enabled) throws RemoteException {

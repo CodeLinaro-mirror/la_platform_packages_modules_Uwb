@@ -667,6 +667,54 @@ fn native_rf_test_loopback(
     uci_manager.rf_test_loopback(psdu_data_bytearray)
 }
 
+/// Test RF rx test. Return value defined by uci_packets.pdl
+#[no_mangle]
+pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeTestRx(
+    env: JNIEnv,
+    obj: JObject,
+    chip_id: JString,
+) -> jbyte {
+    debug!("{}: enter", function_name!());
+    byte_result_helper(native_test_rx(env, obj, chip_id), function_name!())
+}
+
+fn native_test_rx(env: JNIEnv, obj: JObject, chip_id: JString) -> Result<()> {
+    let uci_manager = Dispatcher::get_uci_manager(env, obj, chip_id)?;
+    uci_manager.rf_test_rx()
+}
+
+/// Test RF SR rx test. Return value defined by uci_packets.pdl
+#[no_mangle]
+pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeTestSrRx(
+    env: JNIEnv,
+    obj: JObject,
+    chip_id: JString,
+) -> jbyte {
+    debug!("{}: enter", function_name!());
+    byte_result_helper(native_test_sr_rx(env, obj, chip_id), function_name!())
+}
+
+fn native_test_sr_rx(env: JNIEnv, obj: JObject, chip_id: JString) -> Result<()> {
+    let uci_manager = Dispatcher::get_uci_manager(env, obj, chip_id)?;
+    uci_manager.rf_test_sr_rx()
+}
+
+/// Test RF SS TWR test. Return value defined by uci_packets.pdl
+#[no_mangle]
+pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeTestSsTwr(
+    env: JNIEnv,
+    obj: JObject,
+    chip_id: JString,
+) -> jbyte {
+    debug!("{}: enter", function_name!());
+    byte_result_helper(native_test_ss_twr(env, obj, chip_id), function_name!())
+}
+
+fn native_test_ss_twr(env: JNIEnv, obj: JObject, chip_id: JString) -> Result<()> {
+    let uci_manager = Dispatcher::get_uci_manager(env, obj, chip_id)?;
+    uci_manager.rf_test_ss_twr()
+}
+
 /// Set radar app configurations on a single UWB device. Return null JObject if failed.
 #[no_mangle]
 pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeSetRadarAppConfigurations(
@@ -1227,7 +1275,7 @@ fn native_set_country_code(
     let uci_manager = Dispatcher::get_uci_manager(env, obj, chip_id)?;
     let country_code =
         env.convert_byte_array(country_code).map_err(|_| Error::ForeignFunctionInterface)?;
-    debug!("Country code: {:?}", country_code);
+    debug!("Country code: {country_code:?}");
     if country_code.len() != 2 {
         return Err(Error::BadParameters);
     }
@@ -1669,7 +1717,7 @@ pub extern "system" fn Java_com_android_server_uwb_jni_NativeUwbManager_nativeCr
     chip_id: JString,
 ) -> jobject {
     let func_name = function_name!();
-    debug!("{}: enter", func_name);
+    debug!("{func_name}: enter");
     match option_result_helper(
         native_create_logical_layer(
             env,

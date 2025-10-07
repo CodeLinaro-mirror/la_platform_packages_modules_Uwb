@@ -16,14 +16,20 @@
 
 package com.android.server.uwb.params;
 
-import com.android.server.uwb.config.ConfigParam;
+import static com.google.uwb.support.fira.FiraParams.SECURE_RANGING_CSW_LENGTH_DEFAULT;
+import static com.google.uwb.support.fira.FiraParams.SECURE_RANGING_NEFA_LEVEL_DEFAULT;
 
-import com.google.uwb.support.base.Params;
-import com.google.uwb.support.rftest.RfTestOpenSessionParams;
-import com.google.uwb.support.base.ProtocolVersion;
 import android.uwb.UwbAddress;
 
 import com.android.modules.utils.build.SdkLevel;
+import com.android.server.uwb.config.ConfigParam;
+
+import com.google.uwb.support.base.Params;
+import com.google.uwb.support.base.ProtocolVersion;
+import com.google.uwb.support.rftest.RfTestOpenSessionParams;
+
+import java.nio.ByteBuffer;
+import java.util.Arrays;
 
 /** RfTest encoder */
 public class RfTestEncoder extends TlvEncoder {
@@ -68,7 +74,7 @@ public class RfTestEncoder extends TlvEncoder {
                 .putByte(ConfigParam.NUMBER_OF_CONTROLEES,
                         (byte) params.getDestAddressList().size())
                 .putByteArray(ConfigParam.DEVICE_MAC_ADDRESS, params.getDeviceAddress().size(),
-                    getComputedMacAddress(params.getDeviceAddress()))
+                        getComputedMacAddress(params.getDeviceAddress()))
                 .putShort(ConfigParam.SLOT_DURATION, (short) params.getSlotDurationRstu())
                 .putInt(ConfigParam.STS_INDEX, params.getStsIndex())
                 .putByte(ConfigParam.MAC_FCS_TYPE, (byte) params.getFcsType())
@@ -80,6 +86,27 @@ public class RfTestEncoder extends TlvEncoder {
                 .putByte(ConfigParam.PREAMBLE_DURATION, (byte) params.getPreambleDuration())
                 .putByte(ConfigParam.PRF_MODE, (byte) params.getPrfMode())
                 .putByte(ConfigParam.NUMBER_OF_STS_SEGMENTS, (byte) params.getStsSegmentCount());
+
+        if ((params.getSecureRangingNefaLevel() != SECURE_RANGING_NEFA_LEVEL_DEFAULT
+                || params.getSecureRangingCswLength() != SECURE_RANGING_CSW_LENGTH_DEFAULT)) {
+            tlvBufferBuilder
+                    .putByte(ConfigParam.SECURE_RANGING_NEFA_LEVEL,
+                            (byte) params.getSecureRangingNefaLevel())
+                    .putByte(ConfigParam.SECURE_RANGING_CSW_LENGTH,
+                            (byte) params.getSecureRangingCswLength());
+        }
+
+        if (params.getDestAddressList().size() > 0) {
+            // Allocate a ByteBuffer to hold all addresses
+            ByteBuffer dstAddressList = ByteBuffer.allocate(1024);
+            for (UwbAddress address : params.getDestAddressList()) {
+                dstAddressList.put(getComputedMacAddress(address));
+            }
+            tlvBufferBuilder.putByteArray(
+                    ConfigParam.DST_MAC_ADDRESS, dstAddressList.position(),
+                    Arrays.copyOf(dstAddressList.array(), dstAddressList.position()));
+        }
+
         return tlvBufferBuilder.build();
     }
 

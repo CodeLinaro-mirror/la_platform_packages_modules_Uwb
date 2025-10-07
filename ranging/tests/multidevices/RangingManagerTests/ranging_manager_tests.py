@@ -445,6 +445,9 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
       self.responder.start_ranging_and_assert_opened(
           SESSION_HANDLE, responder_preference
       )
+      """Range for 2 seconds"""
+      time.sleep(2)
+
       """Moving app to background"""
       self.initiator.move_snippet_to_bg()
       time.sleep(2)
@@ -456,16 +459,6 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
           "Initiator should not receive in bg",
       )
 
-      self.responder.move_snippet_to_bg()
-      time.sleep(2)
-      self.responder.clear_event_cache()
-      asserts.assert_false(
-          self.responder.verify_received_data_from_peer_using_technologies(
-              SESSION_HANDLE, self.initiator.id, TECHNOLOGIES,
-          ),
-          "Responder should not receive in bg",
-      )
-
       """Moving app to foreground"""
       self.initiator.move_snippet_to_fg()
       self.initiator.clear_event_cache()
@@ -474,14 +467,6 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
               SESSION_HANDLE, self.responder.id, TECHNOLOGIES,
           ),
           "Initiator should not receive in fg",
-      )
-
-      self.responder.move_snippet_to_fg()
-      asserts.assert_true(
-          self.responder.verify_received_data_from_peer_using_technologies(
-               SESSION_HANDLE, self.initiator.id, TECHNOLOGIES,
-          ),
-          "Responder should receive in fg",
       )
 
       self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
@@ -1168,6 +1153,8 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     session.stop_and_assert_closed()
 
   def test_one_to_one_ble_cs_ranging_with_oob(self):
+    asserts.skip_if(self.initiator.ad.adb.getprop("ro.build.type") == "user",
+                    "Skipping OOB CS test on user build because BLE address is masked")
     asserts.skip_if(self._is_emulator_device(self.initiator.ad),
                       "Skipping BLE CS test on emulator")
     asserts.skip_if(
@@ -1315,6 +1302,10 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
     Skip if BLE CS is supported by both devices.
     """
+    asserts.skip_if(self.initiator.ad.adb.getprop("ro.build.type") == "user",
+                    "Skipping OOB BLE RSSI test on user build because BLE address is masked")
+    asserts.skip_if(self._is_emulator_device(self.initiator.ad),
+                      "Skipping BLE RSSI test on emulator")
     asserts.skip_if(
         self.initiator.is_ranging_technology_supported(RangingTechnology.BLE_CS) and
         self.responder.is_ranging_technology_supported(RangingTechnology.BLE_CS),

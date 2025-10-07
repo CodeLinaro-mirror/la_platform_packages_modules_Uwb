@@ -147,6 +147,9 @@ pub enum UciCommand {
     TestLoopback {
         psdu_data: Vec<u8>,
     },
+    TestRx,
+    TestSrRx,
+    TestSsTwr,
     StopRfTest,
 }
 
@@ -188,7 +191,7 @@ impl TryFrom<UciCommand> for uwb_uci_packets::UciControlPacket {
             }
             .build()
             .into(),
-            UciCommand::CoreQueryTimeStamp {} => {
+            UciCommand::CoreQueryTimeStamp => {
                 uwb_uci_packets::CoreQueryTimeStampCmdBuilder {}.build().into()
             }
             UciCommand::SessionSetAppConfig { session_token, config_tlvs } => {
@@ -319,7 +322,10 @@ impl TryFrom<UciCommand> for uwb_uci_packets::UciControlPacket {
             UciCommand::TestLoopback { psdu_data } => {
                 uwb_uci_packets::TestLoopbackCmdBuilder { psdu_data }.build().into()
             }
-            UciCommand::StopRfTest {} => uwb_uci_packets::StopRfTestCmdBuilder {}.build().into(),
+            UciCommand::TestRx => uwb_uci_packets::TestRxCmdBuilder {}.build().into(),
+            UciCommand::TestSrRx => uwb_uci_packets::TestSrRxCmdBuilder {}.build().into(),
+            UciCommand::TestSsTwr => uwb_uci_packets::TestSsTwrCmdBuilder {}.build().into(),
+            UciCommand::StopRfTest => uwb_uci_packets::StopRfTestCmdBuilder {}.build().into(),
             UciCommand::GetLogicalLinkParams { connect_id } => {
                 uwb_uci_packets::GetLogicalLinkParamsCmdBuilder { connect_id }.build().into()
             }
@@ -351,17 +357,17 @@ fn build_raw_uci_cmd_packet(
     payload: Vec<u8>,
 ) -> Result<uwb_uci_packets::UciControlPacket> {
     let group_id = u8::try_from(gid).or(Err(0)).and_then(GroupId::try_from).map_err(|_| {
-        error!("Invalid GroupId: {}", gid);
+        error!("Invalid GroupId: {gid}");
         Error::BadParameters
     })?;
     let payload = if payload.is_empty() { None } else { Some(Bytes::from(payload)) };
     let opcode = u8::try_from(oid).map_err(|_| {
-        error!("Invalid opcod: {}", oid);
+        error!("Invalid opcod: {oid}");
         Error::BadParameters
     })?;
     let message_type =
         u8::try_from(mt).or(Err(0)).and_then(MessageType::try_from).map_err(|_| {
-            error!("Invalid MessageType: {}", mt);
+            error!("Invalid MessageType: {mt}");
             Error::BadParameters
         })?;
     match uwb_uci_packets::build_uci_control_packet(message_type, group_id, opcode, payload) {
