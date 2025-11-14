@@ -17,9 +17,9 @@
 package com.android.server.ranging.engine.heuristic;
 
 
-import androidx.annotation.NonNull;
+import android.ranging.RangingData;
 
-import com.android.server.ranging.RangingData;
+import androidx.annotation.NonNull;
 
 import java.util.concurrent.CopyOnWriteArraySet;
 import java.util.concurrent.Executor;
@@ -58,7 +58,7 @@ public abstract class RangeHeuristic {
     protected final CopyOnWriteArraySet<Listener> mListeners;
     protected final Executor mExecutor;
 
-    RangeHeuristic(Executor executor) {
+    public RangeHeuristic(Executor executor) {
         mListeners = new CopyOnWriteArraySet<>();
         mExecutor = executor;
     }
