@@ -22,6 +22,7 @@ import android.ranging.RangingData;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.VisibleForTesting;
 
 import com.android.server.ranging.RangingInjector;
 import com.android.server.ranging.RangingTechnology;
@@ -43,8 +44,8 @@ import java.util.concurrent.Executor;
  * technology is stopped before the new one is started. This results in brief gaps in the
  * ranging data produced.
  */
-public class BreakBeforeMakeEngine implements RangingEngine {
-    private static final String TAG = BreakBeforeMakeEngine.class.getSimpleName();
+public class UwbBreakBeforeMakeEngine implements RangingEngine {
+    private static final String TAG = UwbBreakBeforeMakeEngine.class.getSimpleName();
     // TODO(449167692): Find suitable threshold values
     /** Distance in meters where the transitioning should occur. */
     private static final Range<Double> SWAP_THRESHOLD = Range.closed(6.0, 8.0);
@@ -75,7 +76,7 @@ public class BreakBeforeMakeEngine implements RangingEngine {
     private EngineEvent mNextEvent; // Used to cancel the pending event in a given state
     private RangingTechnology mNextTechnology = null;
 
-    public BreakBeforeMakeEngine(
+    public UwbBreakBeforeMakeEngine(
             @NonNull RangingTechnology alternate, @NonNull EngineListener listener,
             @NonNull Executor executor, @NonNull RangingInjector injector
     ) {
@@ -151,7 +152,7 @@ public class BreakBeforeMakeEngine implements RangingEngine {
 
         mNextEvent = mStartAltTransition;
         mNextEvent.onNextOccurrence(unused -> {
-            synchronized (BreakBeforeMakeEngine.this) {
+            synchronized (UwbBreakBeforeMakeEngine.this) {
                 mNextTechnology = mAlt;
                 mListener.stopTechnologies(Set.of(RangingTechnology.UWB));
             }
@@ -167,7 +168,7 @@ public class BreakBeforeMakeEngine implements RangingEngine {
         // ALT is now fully active. Listen for the event to stop ALT and switch to UWB.
         mNextEvent = mStartUwbTransition;
         mNextEvent.onNextOccurrence(unused -> {
-            synchronized (BreakBeforeMakeEngine.this) {
+            synchronized (UwbBreakBeforeMakeEngine.this) {
                 mNextTechnology = RangingTechnology.UWB;
                 mListener.stopTechnologies(Set.of(mAlt));
             }
@@ -205,5 +206,20 @@ public class BreakBeforeMakeEngine implements RangingEngine {
             mNextTechnology = RangingTechnology.UWB;
             mListener.stopTechnologies(Set.of(mAlt));
         }
+    }
+
+    @VisibleForTesting
+    EngineEvent getNextEvent() {
+        return mNextEvent;
+    }
+
+    @VisibleForTesting
+    EngineEvent getAltFailure() {
+        return mAltFailure;
+    }
+
+    @VisibleForTesting
+    EngineEvent getUwbFailure() {
+        return mUwbFailure;
     }
 }
