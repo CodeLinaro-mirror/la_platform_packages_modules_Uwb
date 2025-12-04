@@ -28,6 +28,7 @@ from lib.ranging_decorator import *
 from mobly import asserts
 from mobly import config_parser
 from mobly import suite_runner
+from mobly import utils as mobly_utils
 from mobly.controllers import android_device
 from mobly.base_test import retry
 from android.platform.test.annotations import ApiTest
@@ -51,9 +52,9 @@ _TEST_CASES = [
     "test_one_to_one_ble_rssi_ranging_with_oob",
     "test_oob_responder_persists_until_explicitly_stopped",
     "test_dynamic_peer_uwb_ranging",
-    "test_uwb_ranging_move_to_bg_and_fg",
-    "test_ble_rssi_ranging_move_to_bg_and_fg",
-    "test_ble_cs_ranging_move_to_bg_and_fg",
+    "test_uwb_ranging_app_switch_to_bg_and_fg",
+    "test_ble_rssi_ranging_app_switch_to_bg_and_fg",
+    "test_ble_cs_ranging_app_switch_to_bg_and_fg",
 ]
 
 
@@ -120,8 +121,16 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
   def teardown_test(self):
     super().teardown_test()
-    for device in self.devices:
-      device.clear_ranging_sessions()
+    mobly_utils.concurrent_exec(
+        lambda d: d.clear_ranging_sessions(),
+        param_list=[[device] for device in self.devices],
+        raise_on_exception=True,
+    )
+    mobly_utils.concurrent_exec(
+        lambda d: d.services.create_output_excerpts_all(self.current_test_info),
+        param_list=[[decorator.ad] for decorator in self.devices],
+        raise_on_exception=True,
+    )
 
   ### Helpers ###
 
@@ -394,7 +403,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
     self.responder.stop_ranging_and_assert_closed(SESSION_HANDLE)
 
-  def test_uwb_ranging_move_to_bg_and_fg(self):
+  def test_uwb_ranging_app_switch_to_bg_and_fg(self):
       """ verifies Uwb ranging with foreground and background"""
       SESSION_HANDLE = str(uuid4())
       UWB_SESSION_ID = 5
@@ -472,7 +481,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
       self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
       self.responder.stop_ranging_and_assert_closed(SESSION_HANDLE)
 
-  def test_ble_rssi_ranging_move_to_bg_and_fg(self):
+  def test_ble_rssi_ranging_app_switch_to_bg_and_fg(self):
       """ verifies ble rssi ranging with foreground and background"""
       SESSION_HANDLE = str(uuid4())
       TECHNOLOGIES = {RangingTechnology.BLE_RSSI}
@@ -491,6 +500,10 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
       try:
           self._ble_connect()
+      except Exception as e:
+          asserts.skip("Failed to create ble connection", str(e))
+
+      try:
           initiator_preference = RangingPreference(
               device_role=DeviceRole.INITIATOR,
               ranging_params=RawInitiatorRangingParams(
@@ -532,7 +545,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
           self._ble_disconnect()
 
   @retry(max_count=2)
-  def test_ble_cs_ranging_move_to_bg_and_fg(self):
+  def test_ble_cs_ranging_app_switch_to_bg_and_fg(self):
       """ verifies ble cs ranging with foreground and background"""
       SESSION_HANDLE = str(uuid4())
       TECHNOLOGIES = {RangingTechnology.BLE_CS}
@@ -805,7 +818,6 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
               SESSION_HANDLE, initiator_preference
           )
           self.initiator.assert_close_ranging_event_received(SESSION_HANDLE)
-
       finally:
           self._ble_disconnect()
 
@@ -993,7 +1005,11 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     self._enable_bt()
 
     try:
-      self._ble_connect()
+        self._ble_connect()
+    except Exception as e:
+        asserts.skip("Failed to create ble connection", str(e))
+
+    try:
       initiator_preference = RangingPreference(
           device_role=DeviceRole.INITIATOR,
           ranging_params=RawInitiatorRangingParams(
@@ -1077,7 +1093,11 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     self._enable_bt()
 
     try:
-      self._ble_bond()
+        self._ble_bond()
+    except Exception as e:
+        asserts.skip("Failed to create ble bond", str(e))
+
+    try:
       initiator_preference = RangingPreference(
           device_role=DeviceRole.INITIATOR,
           ranging_params=RawInitiatorRangingParams(
@@ -1188,7 +1208,11 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     self._enable_bt()
 
     try:
-      self._ble_bond()
+        self._ble_bond()
+    except Exception as e:
+        asserts.skip("Failed to create ble bond", str(e))
+
+    try:
       session.start_and_assert_opened(check_responders=False)
       session.assert_received_data(technologies=[RangingTechnology.BLE_CS], check_responders=False)
     finally:
@@ -1321,7 +1345,11 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     self._enable_bt()
 
     try:
-      self._ble_connect()
+        self._ble_connect()
+    except Exception as e:
+        asserts.skip("Failed to create ble connection", str(e))
+
+    try:
       initiator_preference = RangingPreference(
           device_role=DeviceRole.INITIATOR,
           ranging_params=OobInitiatorRangingParams(
