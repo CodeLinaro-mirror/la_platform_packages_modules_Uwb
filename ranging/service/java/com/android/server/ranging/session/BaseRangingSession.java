@@ -111,8 +111,8 @@ public class BaseRangingSession {
         /** Fusion engine to use for this device. */
         public final FusionEngine fusionEngine;
 
-        Peer(@NonNull RangingDevice device, @NonNull RangingTechnology initialTechnology) {
-            technologies = Sets.newConcurrentHashSet(Set.of(initialTechnology));
+        Peer(@NonNull RangingDevice device) {
+            technologies = Sets.newConcurrentHashSet();
             if (mSessionConfig.getSensorFusionParams().isSensorFusionEnabled()) {
                 fusionEngine = new FilteringFusionEngine(
                         new DataFusers.PreferentialDataFuser(RangingTechnology.UWB),
@@ -155,24 +155,18 @@ public class BaseRangingSession {
         mAlarmManager = mInjector.getContext().getSystemService(AlarmManager.class);
     }
 
-    /**
-     * Start ranging in this session.
-     * Send {@code onSessionClosed(INTERNAL_ERROR)} if this session is already active.
-     */
+    /** Start ranging in this session with the provided configs. */
     public void start(ImmutableSet<TechnologyConfig> technologyConfigs) {
-        Log.v(TAG, "Starting session");
         synchronized (mLock) {
-            mSessionListener.onConfigurationComplete(technologyConfigs);
-
-            if (!mStateMachine.transition(State.STOPPED, State.STARTING)) {
-                Log.w(TAG, "Failed transition STOPPED -> STARTING");
-                onSessionClosed(InternalReason.INTERNAL_ERROR);
-                return;
+            if (mStateMachine.transition(State.STOPPED, State.STARTING)) {
+                Log.i(TAG, "Starting session");
+                mSessionListener.onConfigurationComplete(technologyConfigs);
             }
+
             AttributionSource nonPrivilegedAttributionSource =
                     mInjector.getAnyNonPrivilegedAppInAttributionSource(mAttributionSource);
 
-            for (TechnologyConfig config : technologyConfigs) {
+            for (TechnologyConfig config : Sets.difference(technologyConfigs, mAdapters.keySet())) {
                 ImmutableSet<RangingDevice> peerDevices;
 
                 if (config instanceof UnicastTechnologyConfig unicastConfig) {
@@ -186,17 +180,14 @@ public class BaseRangingSession {
                     return;
                 }
 
-                for (RangingDevice peerDevice : peerDevices) {
-                    if (mPeers.containsKey(peerDevice)) {
-                        mPeers.get(peerDevice).setUsingTechnology(config.getTechnology());
-                    } else {
-                        mPeers.put(peerDevice, new Peer(peerDevice, config.getTechnology()));
-                    }
-                }
+                peerDevices.forEach(device ->
+                        mPeers.computeIfAbsent(device, unused -> new Peer(device))
+                                .setUsingTechnology(config.getTechnology()));
 
                 // Any calls to the corresponding technology stacks must be
                 // done with a clear calling identity.
                 long token = Binder.clearCallingIdentity();
+
                 RangingAdapter adapter = mInjector.createAdapter(
                         mAttributionSource, config, mAdapterExecutor);
                 mAdapters.put(config, adapter);
@@ -207,34 +198,13 @@ public class BaseRangingSession {
         }
     }
 
-    /**
-     * <ul>
-     *     <li>If this session currently active with a different configuration from the one
-     *     provided, return false.</li>
-     *     <li>If this session is currently active with the same configuration as the one provided,
-     *     return true.</li>
-     *     <li>If this session is not currently active, start it with the provided configuration and
-     *     return true.</li>
-     * </ul>
-     */
-    protected boolean startOrReAttach(ImmutableSet<TechnologyConfig> technologyConfigs) {
-        synchronized (mLock) {
-            if (mStateMachine.getState() == State.STARTING
-                    || mStateMachine.getState() == State.STARTED) {
-                return Sets.difference(technologyConfigs, mAdapters.keySet()).isEmpty();
-            } else {
-                start(technologyConfigs);
-                return true;
-            }
-        }
-    }
-
     public void addPeer(RawResponderRangingConfig params) {
         synchronized (mLock) {
             for (Map.Entry<TechnologyConfig, RangingAdapter> entry : mAdapters.entrySet()) {
                 if (entry.getValue().isDynamicUpdatePeersSupported()) {
                     RangingDevice peerDevice = params.getRawRangingDevice().getRangingDevice();
-                    mPeers.put(peerDevice, new Peer(peerDevice, entry.getKey().getTechnology()));
+                    mPeers.computeIfAbsent(peerDevice, unused -> new Peer(peerDevice))
+                            .setUsingTechnology(entry.getKey().getTechnology());
                     entry.getValue().addPeer(params);
                 }
             }
@@ -377,12 +347,24 @@ public class BaseRangingSession {
         }
     }
 
+    /** Let subclasses override how onTechnologyStarted gets called. */
+    protected void onTechnologyStarted(
+            @NonNull RangingTechnology technology, @NonNull Set<RangingDevice> peers
+    ) {
+        mSessionListener.onTechnologyStarted(technology, peers);
+    }
+
     /** Let subclasses override how onTechnologyStopped gets called. */
     protected void onTechnologyStopped(
             @NonNull RangingTechnology technology, @NonNull Set<RangingDevice> peers,
             @InternalReason int reason
     ) {
         mSessionListener.onTechnologyStopped(technology, peers, reason);
+    }
+
+    /** Let subclasses override to inspect ranging data. */
+    protected void onResults(@NonNull RangingDevice peer, @NonNull RangingData data) {
+        mSessionListener.onResults(peer, data);
     }
 
     /** Let subclasses override how onSessionClosed gets called. */
@@ -408,7 +390,7 @@ public class BaseRangingSession {
                     mStateMachine.transition(State.STARTING, State.STARTED);
                     mPeers.get(peerDevice).setUsingTechnology(mConfig.getTechnology());
                 }
-                mSessionListener.onTechnologyStarted(mConfig.getTechnology(), peerDevices);
+                onTechnologyStarted(mConfig.getTechnology(), peerDevices);
             }
         }
 
@@ -481,7 +463,7 @@ public class BaseRangingSession {
                 if (mStateMachine.getState() != State.STOPPING
                         && mStateMachine.getState() != State.STOPPED
                 ) {
-                    mSessionListener.onResults(mPeer, data);
+                    onResults(mPeer, data);
                 }
             }
         }

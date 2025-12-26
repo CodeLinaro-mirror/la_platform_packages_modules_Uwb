@@ -16,9 +16,9 @@
 
 package com.android.server.ranging.oob;
 
-import static com.android.server.ranging.common.RangingUtils.macAddressToBytes;
-import static com.android.server.ranging.common.RangingUtils.bitset;
 import static com.android.server.ranging.common.ConfigurationUtils.getUpdateRateFromIntervalMs;
+import static com.android.server.ranging.common.RangingUtils.bitset;
+import static com.android.server.ranging.common.RangingUtils.macAddressToBytes;
 import static com.android.server.ranging.common.RangingUtils.privateAddressIfUserBuild;
 
 import android.ranging.RangingCapabilities;
@@ -45,10 +45,13 @@ import com.android.server.ranging.oob.packets.BleRssiCapabilities;
 import com.android.server.ranging.oob.packets.BleRssiConfiguration;
 import com.android.server.ranging.oob.packets.Capabilities;
 import com.android.server.ranging.oob.packets.CapabilitiesRequest;
-import com.android.server.ranging.oob.packets.CapabilitiesResponse;
+import com.android.server.ranging.oob.packets.CapabilitiesResponseV1;
+import com.android.server.ranging.oob.packets.CapabilitiesResponseV2;
 import com.android.server.ranging.oob.packets.Configuration;
 import com.android.server.ranging.oob.packets.ConfigurationRequest;
+import com.android.server.ranging.oob.packets.OobMessage;
 import com.android.server.ranging.oob.packets.TechnologySet;
+import com.android.server.ranging.oob.packets.TechnologyTransitioning;
 import com.android.server.ranging.oob.packets.UnknownConfiguration;
 import com.android.server.ranging.oob.packets.UwbCapabilities;
 import com.android.server.ranging.oob.packets.UwbConfiguration;
@@ -58,9 +61,9 @@ import com.android.server.ranging.oob.packets.WiFiSecurityMethod;
 import com.android.server.ranging.oob.packets.WifiApRttConfiguration;
 import com.android.server.ranging.oob.packets.WifiBandwidth;
 import com.android.server.ranging.oob.packets.WifiNanRttCapabilitiesV1;
-import com.android.server.ranging.oob.packets.WifiNanRttCapabilitiesV2;
+import com.android.server.ranging.oob.packets.WifiNanRttCapabilitiesV3;
 import com.android.server.ranging.oob.packets.WifiNanRttConfigurationV1;
-import com.android.server.ranging.oob.packets.WifiNanRttConfigurationV2;
+import com.android.server.ranging.oob.packets.WifiNanRttConfigurationV3;
 import com.android.server.ranging.oob.packets.WifiStaRttCapabilities;
 import com.android.server.ranging.oob.packets.WifiStaRttConfiguration;
 import com.android.server.ranging.rtt.RttConfig;
@@ -86,8 +89,17 @@ public class OobResponderProtocol {
         mLocalUwbAddress = UwbAddress.createRandomShortAddress();
     }
 
-
-    public CapabilitiesResponse getCapabilitiesResponse(CapabilitiesRequest request) {
+    /**
+     * Retrieves the system's supported ranging capabilities based on the provided request.
+     *
+     * @param request The {@link CapabilitiesRequest} specifying the desired technologies
+     *                and the requested protocol version.
+     * @return A {@link CapabilitiesResponseV1} or {@link CapabilitiesResponseV2} object
+     *         containing the agreed-upon version, a set of all supported technologies,
+     *         and a list of detailed capability objects for each supported and requested
+     *         technology. The specific response version depends on the negotiated protocol version.
+     */
+    public OobMessage getCapabilitiesResponse(CapabilitiesRequest request) {
         if (request.getVersion() instanceof Version.Future) {
             mVersion = Version.Current;
         } else {
@@ -128,7 +140,7 @@ public class OobResponderProtocol {
         RttRangingCapabilities wifiNan = myCapabilities.getRttRangingCapabilities();
         if (request.getRequestedTechnologies().getWifiNanRtt() && wifiNan != null) {
             supported.setWifiNanRtt(true);
-            if (mVersion.toByte() == 1) {
+            if (mVersion.toByte() <= 2) {
                 capabilities.add(new WifiNanRttCapabilitiesV1.Builder()
                         .setPeriodic(wifiNan.hasPeriodicRangingHardwareFeature())
                         .setBandwidth(WifiBandwidth.fromByte(
@@ -136,8 +148,8 @@ public class OobResponderProtocol {
                         .setNumRxChains((byte) wifiNan.getMaxSupportedRxChain())
                         .build());
             } else {
-                // TODO: Correctly handle version 2
-                capabilities.add(new WifiNanRttCapabilitiesV2.Builder().build());
+                // TODO: Correctly handle version 3
+                capabilities.add(new WifiNanRttCapabilitiesV3.Builder().build());
             }
         }
 
@@ -151,7 +163,7 @@ public class OobResponderProtocol {
         }
 
         RttStationRangingCapabilities wifiSta = myCapabilities.getRttStationRangingCapabilities();
-        if (Byte.toUnsignedInt(mVersion.toByte()) >= 2
+        if (Byte.toUnsignedInt(mVersion.toByte()) >= 3
                 && request.getRequestedTechnologies().getWifiApRtt()
                 && wifiSta != null
         ) {
@@ -163,11 +175,20 @@ public class OobResponderProtocol {
                     .build());
         }
 
-        return new CapabilitiesResponse.Builder()
+        // Build either CapabilitiesResponseV1 or CapabilitiesResponseV2 based on mVersion
+        if (Byte.toUnsignedInt(mVersion.toByte()) >= 2) {
+            return new CapabilitiesResponseV2.Builder()
                 .setVersion(mVersion)
                 .setSupportedTechnologies(supported.build())
                 .setCapabilities(capabilities.toArray(new Capabilities[0]))
+                .setSupportedTransitioning(TechnologyTransitioning.MakeBeforeBreak)
                 .build();
+        } else {
+            return new CapabilitiesResponseV1.Builder()
+                .setSupportedTechnologies(supported.build())
+                .setCapabilities(capabilities.toArray(new Capabilities[0]))
+                .build();
+        }
     }
 
     public ImmutableSet<TechnologyConfig> getConfigurations(
@@ -214,7 +235,7 @@ public class OobResponderProtocol {
                                 .build(),
                         new SessionConfig.Builder().build(),
                         handle.getRangingDevice()));
-                case WifiNanRttConfigurationV2 wifiNan -> configs.add(new RttConfig(
+                case WifiNanRttConfigurationV3 wifiNan -> configs.add(new RttConfig(
                         // TODO: Correctly handle V2
                         Byte.toUnsignedInt(wifiNan.getDeviceRole().toByte()),
                         new RttRangingParams.Builder(

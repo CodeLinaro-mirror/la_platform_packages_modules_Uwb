@@ -27,7 +27,7 @@ import static com.google.uwb.support.fira.FiraParams.DeviceRoleCapabilityFlag.HA
 import static com.google.uwb.support.fira.FiraParams.DeviceRoleCapabilityFlag.HAS_CONTROLLER_INITIATOR_SUPPORT;
 import static com.google.uwb.support.fira.FiraParams.DeviceRoleCapabilityFlag.HAS_CONTROLLER_RESPONDER_SUPPORT;
 import static com.google.uwb.support.fira.FiraParams.DeviceRoleCapabilityFlag.HAS_DT_TAG_SUPPORT;
-import static com.google.uwb.support.fira.FiraParams.KEY_LENGTH_256_BITS_SUPPORTED;
+import static com.google.uwb.support.fira.FiraParams.KEY_LENGTH_256_BITS_DYNAMIC_STS;
 import static com.google.uwb.support.fira.FiraParams.MultiNodeCapabilityFlag.HAS_ONE_TO_MANY_SUPPORT;
 import static com.google.uwb.support.fira.FiraParams.MultiNodeCapabilityFlag.HAS_UNICAST_SUPPORT;
 import static com.google.uwb.support.fira.FiraParams.PROTOCOL_VERSION_1_1;
@@ -55,7 +55,6 @@ import static com.google.uwb.support.fira.FiraParams.StsCapabilityFlag.HAS_STATI
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
-import static org.mockito.Mockito.when;
 
 import android.platform.test.annotations.Presubmit;
 
@@ -64,7 +63,6 @@ import androidx.test.runner.AndroidJUnit4;
 
 import com.android.server.uwb.UwbInjector;
 import com.android.server.uwb.util.UwbUtil;
-import com.android.uwb.flags.FeatureFlags;
 
 import com.google.uwb.support.fira.FiraParams;
 import com.google.uwb.support.fira.FiraParams.BprfParameterSetCapabilityFlag;
@@ -163,13 +161,10 @@ public class FiraDecoderTest {
 
     @Mock
     private UwbInjector mUwbInjector;
-    @Mock private FeatureFlags mFeatureFlags;
 
     @Before
     public void setUp() throws Exception {
         MockitoAnnotations.initMocks(this);
-
-        when(mUwbInjector.getFeatureFlags()).thenReturn(mFeatureFlags);
 
         mFiraDecoder = new FiraDecoder(mUwbInjector);
     }
@@ -240,7 +235,8 @@ public class FiraDecoderTest {
 
         assertEquals(firaSpecificationParams.getDeviceType(), RANGING_DEVICE_TYPE_CONTROLLER);
         assertFalse(firaSpecificationParams.hasSuspendRangingSupport());
-        assertEquals(firaSpecificationParams.getSessionKeyLength(), KEY_LENGTH_256_BITS_SUPPORTED);
+        assertEquals(firaSpecificationParams.getSessionKeyLength(),
+                KEY_LENGTH_256_BITS_DYNAMIC_STS);
         assertEquals(firaSpecificationParams.getDtTagMaxActiveRr(), 16);
         assertThat(firaSpecificationParams.hasLogicalLinkSupport()).isTrue();
         assertThat(firaSpecificationParams.hasLogicalLinkAggregatedFrameSupport()).isFalse();
