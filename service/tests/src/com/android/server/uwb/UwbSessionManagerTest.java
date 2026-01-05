@@ -58,12 +58,20 @@ import static com.android.server.uwb.data.UwbUciConstants.STATUS_CODE_DATA_TRANS
 
 import static com.google.common.truth.Truth.assertThat;
 import static com.google.uwb.support.fira.FiraParams.PARTICIPATION_AS_DEFINED_DEVICE_ROLE;
+import static com.google.uwb.support.fira.FiraParams.PREAMBLE_DURATION_T64_SYMBOLS;
+import static com.google.uwb.support.fira.FiraParams.PRF_MODE_BPRF;
 import static com.google.uwb.support.fira.FiraParams.PROTOCOL_NAME;
+import static com.google.uwb.support.fira.FiraParams.RFRAME_CONFIG_SP3;
 import static com.google.uwb.support.fira.FiraParams.RangeDataNtfConfigCapabilityFlag.HAS_RANGE_DATA_NTF_CONFIG_DISABLE;
 import static com.google.uwb.support.fira.FiraParams.RangeDataNtfConfigCapabilityFlag.HAS_RANGE_DATA_NTF_CONFIG_ENABLE;
 import static com.google.uwb.support.fira.FiraParams.SESSION_TYPE_RANGING;
 import static com.google.uwb.support.fira.FiraParams.STATUS_CODE_OK;
+import static com.google.uwb.support.radar.RadarParams.BITS_PER_SAMPLES_32;
+import static com.google.uwb.support.radar.RadarParams.NUMBER_OF_BURSTS_DEFAULT;
 import static com.google.uwb.support.radar.RadarParams.RADAR_DATA_TYPE_RADAR_SWEEP_SAMPLES;
+import static com.google.uwb.support.radar.RadarParams.SAMPLES_PER_SWEEP_DEFAULT;
+import static com.google.uwb.support.radar.RadarParams.SESSION_PRIORITY_DEFAULT;
+import static com.google.uwb.support.radar.RadarParams.SWEEP_OFFSET_DEFAULT;
 
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
@@ -156,6 +164,7 @@ import com.google.uwb.support.fira.FiraSpecificationParams;
 import com.google.uwb.support.generic.GenericSpecificationParams;
 import com.google.uwb.support.radar.RadarOpenSessionParams;
 import com.google.uwb.support.radar.RadarParams;
+import com.google.uwb.support.radar.RadarRangingStartedParams;
 import com.google.uwb.support.rftest.RfTestParams;
 import com.google.uwb.support.rftest.RfTestStartSessionParams;
 
@@ -287,6 +296,29 @@ public class UwbSessionManagerTest {
                 .setHoppingConfigMode(CccParams.HOPPING_CONFIG_MODE_NONE)
                 .setHoppingSequence(CccParams.HOPPING_SEQUENCE_DEFAULT)
                 .build();
+
+    private static final RadarRangingStartedParams RADAR_RANGING_STARTED_PARAMS =
+            new RadarRangingStartedParams.Builder()
+                    .setBurstPeriod(64)
+                    .setSweepPeriod(4800)
+                    .setSweepsPerBurst(16)
+                    .setSamplesPerSweep(SAMPLES_PER_SWEEP_DEFAULT)
+                    .setChannelNumber(FiraParams.UWB_CHANNEL_9)
+                    .setSweepOffset(SWEEP_OFFSET_DEFAULT)
+                    .setRframeConfig(RFRAME_CONFIG_SP3)
+                    .setPreambleDuration(PREAMBLE_DURATION_T64_SYMBOLS)
+                    .setPreambleCodeIndex(11)
+                    .setSessionPriority(SESSION_PRIORITY_DEFAULT)
+                    .setBitsPerSample(BITS_PER_SAMPLES_32)
+                    .setPrfMode(PRF_MODE_BPRF)
+                    .setNumberOfBursts(NUMBER_OF_BURSTS_DEFAULT)
+                    .setRadarDataType(RADAR_DATA_TYPE_RADAR_SWEEP_SAMPLES)
+                    .setAntennaBitmap(0x108)
+                    .setGpioBitmap(0xC)
+                    .setTxPower(24)
+                    .setRxGain(30)
+                    .build();
+
 
     private FiraHybridSessionControllerConfig mHybridControllerParams =
             new FiraHybridSessionControllerConfig.Builder()
@@ -4892,7 +4924,7 @@ public class UwbSessionManagerTest {
         expectedMacAddressBuf.put(getComputedMacAddress(macAddressBytes));
         firaDataTransferPhaseManagementList.add(
                 new FiraDataTransferPhaseConfig.FiraDataTransferPhaseManagementList(
-                        uwbAddress, new byte[] { (byte) 0x10 }, (byte) 0x01));
+                        uwbAddress, new byte[] {0x10, 0x20 }, (byte) 0x01));
 
         // Setup Phase #2
         macAddressBytes = new byte[]{0x44, 0x33};
@@ -4900,7 +4932,7 @@ public class UwbSessionManagerTest {
         expectedMacAddressBuf.put(getComputedMacAddress(macAddressBytes));
         firaDataTransferPhaseManagementList.add(
                 new FiraDataTransferPhaseConfig.FiraDataTransferPhaseManagementList(
-                uwbAddress, new byte[] {(byte) 0x20, 0x30}, (byte) 0x00)); //Invalid slot bit map
+                uwbAddress, new byte[] {0x20, 0x30}, (byte) 0x00));
         FiraDataTransferPhaseConfig firaDataTransferPhaseConfig =
                 new FiraDataTransferPhaseConfig.Builder()
                    .setDtpcmRepetition((byte) dtpcmRepetition)
@@ -4939,7 +4971,7 @@ public class UwbSessionManagerTest {
         expectedMacAddressBuf.put(getComputedMacAddress(macAddressBytes));
         firaDataTransferPhaseManagementList.add(
                 new FiraDataTransferPhaseConfig.FiraDataTransferPhaseManagementList(
-                uwbAddress, new byte[] {(byte) 0x10}, (byte) 0x01));
+                uwbAddress, new byte[] {0x10, 0x20}, (byte) 0x01));
 
         // Size of dtpml-Size is 2 but only one set of configs are provided
         FiraDataTransferPhaseConfig firaDataTransferPhaseConfig =
@@ -4973,7 +5005,7 @@ public class UwbSessionManagerTest {
         when(uwbSession.getSessionType()).thenReturn(
                 UwbUciConstants.SESSION_TYPE_RANGING_AND_IN_BAND_DATA);
         when(mNativeUwbManager.createLogicalLink(anyInt(), anyByte(), any(), anyByte(),
-                anyString())).thenReturn(response);
+                anyByte(), anyString())).thenReturn(response);
         when(response.getStatus()).thenReturn(UwbUciConstants.STATUS_CODE_OK);
 
         mUwbSessionManager.createLogicalLink(uwbSession.getSessionHandle(), params);
@@ -4993,7 +5025,7 @@ public class UwbSessionManagerTest {
 
         when(uwbSession.getDeviceType()).thenReturn(UwbUciConstants.DEVICE_TYPE_CONTROLLER);
         when(mNativeUwbManager.createLogicalLink(anyInt(), anyByte(), any(), anyByte(),
-                anyString())).thenReturn(null);
+                anyByte(), anyString())).thenReturn(null);
 
         mUwbSessionManager.createLogicalLink(uwbSession.getSessionHandle(), params);
         mTestLooper.dispatchNext();
@@ -5016,7 +5048,7 @@ public class UwbSessionManagerTest {
         when(uwbSession.getSessionType()).thenReturn(
                 UwbUciConstants.SESSION_TYPE_RANGING_AND_IN_BAND_DATA);
         when(mNativeUwbManager.createLogicalLink(anyInt(), anyByte(), any(), anyByte(),
-                anyString())).thenReturn(response);
+                anyByte(), anyString())).thenReturn(response);
         when(response.getStatus()).thenReturn(UwbUciConstants.STATUS_CODE_OK);
 
         mUwbSessionManager.createLogicalLink(uwbSession.getSessionHandle(), params);
@@ -5027,7 +5059,7 @@ public class UwbSessionManagerTest {
                 uwbSession);
 
         mUwbSessionManager.onLogicalLinkCreateNotification(connectId,
-                UwbUciConstants.LOGICAL_LINK_STATUS_ACCEPTED);
+                UwbUciConstants.LOGICAL_LINK_STATUS_ACCEPTED, 0, 0);
 
         verify(mUwbSessionNotificationManager).onLogicalLinkCreated(eq(uwbSession), eq(params),
                 eq(connectId));
@@ -5043,7 +5075,7 @@ public class UwbSessionManagerTest {
         when(mUwbSessionManager.getUwbSessionByConnectionIdentifier((int) connectId))
                 .thenReturn(null);
 
-        mUwbSessionManager.onLogicalLinkCreateNotification(connectId, status);
+        mUwbSessionManager.onLogicalLinkCreateNotification(connectId, status, 0x00, 0x00);
 
         verify(mUwbSessionNotificationManager, never()).onLogicalLinkCreated(any(), any(),
                 anyInt());
@@ -5064,7 +5096,7 @@ public class UwbSessionManagerTest {
         when(uwbSession.getSessionType()).thenReturn(
                 UwbUciConstants.SESSION_TYPE_RANGING_AND_IN_BAND_DATA);
         when(mNativeUwbManager.createLogicalLink(anyInt(), anyByte(), any(), anyByte(),
-                anyString())).thenReturn(response);
+                anyByte(), anyString())).thenReturn(response);
         when(response.getStatus()).thenReturn(UwbUciConstants.STATUS_CODE_OK);
         when(response.getLogicalLinkConnectId()).thenReturn(connectId);
 
@@ -5155,7 +5187,7 @@ public class UwbSessionManagerTest {
         when(mUwbSessionManager.getUwbSession(sessionId)).thenReturn(mockUwbSession);
 
         mUwbSessionManager.onRemoteLogicalLinkRequested(sessionId,
-                UwbTestUtils.LOGICAL_LINK_CONNECT_ID, 0x01, new byte[] { 0x11, 0x22 });
+                UwbTestUtils.LOGICAL_LINK_CONNECT_ID, 0x01, new byte[] { 0x11, 0x22 }, 0x00, 0x00);
 
         verify(mUwbSessionNotificationManager).onRemoteLogicalLinkRequested(any(), any());
     }
@@ -5170,7 +5202,7 @@ public class UwbSessionManagerTest {
         when(mUwbSessionManager.getUwbSession(sessionId)).thenReturn(null);
 
         mUwbSessionManager.onRemoteLogicalLinkRequested(sessionId,
-                UwbTestUtils.LOGICAL_LINK_CONNECT_ID, 0x01, sourceAddress);
+                UwbTestUtils.LOGICAL_LINK_CONNECT_ID, 0x01, sourceAddress, 0x00, 0x00);
 
         verify(mUwbSessionNotificationManager, never()).onRemoteLogicalLinkRequested(any(), any());
     }
@@ -6040,6 +6072,12 @@ public class UwbSessionManagerTest {
                 .when(uwbSession).getSessionState();
         when(mNativeUwbManager.startRanging(eq(TEST_SESSION_ID), anyString()))
                 .thenReturn((byte) UwbUciConstants.STATUS_CODE_OK);
+        when(mUwbConfigurationManager.getAppConfigurations(
+                eq(TEST_SESSION_ID), anyString(), any(), any(), eq(TEST_CHIP_ID),
+                any()))
+                .thenReturn(new Pair<>(UwbUciConstants.STATUS_CODE_OK,
+                        new RadarRangingStartedParams.Builder(RADAR_RANGING_STARTED_PARAMS)
+                                .build()));
 
         mUwbSessionManager.startRanging(
                 uwbSession.getSessionHandle(), uwbSession.getParams());
@@ -6056,6 +6094,44 @@ public class UwbSessionManagerTest {
         mUwbSessionManager.onRadarDataMessageReceived(uwbRadarData);
         verify(mUwbSessionNotificationManager)
                 .onRadarDataMessageReceived(uwbSession, uwbRadarData);
+    }
+
+    @Test
+    public void clearSessions_success() {
+        // Setup a session for the first attribution source.
+        UwbSession uwbSession1 = mock(UwbSession.class);
+        SessionHandle sessionHandle1 = new SessionHandle(1, ATTRIBUTION_SOURCE, 1);
+        when(uwbSession1.getSessionHandle()).thenReturn(sessionHandle1);
+        when(uwbSession1.getAttributionSource()).thenReturn(ATTRIBUTION_SOURCE);
+        mUwbSessionManager.mSessionTable.put(sessionHandle1, uwbSession1);
+        doReturn(new AtomicReference<>(UwbSession.State.ACTIVE))
+                .when(uwbSession1).getApiState();
+
+        // Setup a session for the second attribution source (should not be removed).
+        UwbSession uwbSession2 = mock(UwbSession.class);
+        SessionHandle sessionHandle2 = new SessionHandle(2, ATTRIBUTION_SOURCE_2, 2);
+        when(uwbSession2.getSessionHandle()).thenReturn(sessionHandle2);
+        when(uwbSession2.getAttributionSource()).thenReturn(ATTRIBUTION_SOURCE_2);
+        mUwbSessionManager.mSessionTable.put(sessionHandle2, uwbSession2);
+
+        // Setup a third session for the same attribution source as the first (should be removed).
+        UwbSession uwbSession3 = mock(UwbSession.class);
+        SessionHandle sessionHandle3 = new SessionHandle(3, ATTRIBUTION_SOURCE, 3);
+        when(uwbSession3.getSessionHandle()).thenReturn(sessionHandle3);
+        when(uwbSession3.getAttributionSource()).thenReturn(ATTRIBUTION_SOURCE);
+        mUwbSessionManager.mSessionTable.put(sessionHandle3, uwbSession3);
+        doReturn(new AtomicReference<>(UwbSession.State.ACTIVE))
+                .when(uwbSession3).getApiState();
+
+        // Clear sessions for the first attribution source.
+        mUwbSessionManager.clearSessions(ATTRIBUTION_SOURCE);
+
+        // Verify that deInitSession is called for the first and third sessions.
+        verify(mUwbSessionManager).deInitSession(eq(sessionHandle1));
+        verify(mUwbSessionManager).deInitSession(eq(sessionHandle3));
+
+        // Verify that deInitSession is not called for the second session.
+        verify(mUwbSessionManager, never()).deInitSession(eq(sessionHandle2));
     }
 
     private UwbSessionManager.ReceivedDataInfo buildReceivedDataInfo(long macAddress) {

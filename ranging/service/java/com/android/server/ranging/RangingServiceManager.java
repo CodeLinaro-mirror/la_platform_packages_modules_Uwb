@@ -38,6 +38,7 @@ import android.ranging.oob.IOobSendDataListener;
 import android.ranging.oob.OobHandle;
 import android.ranging.oob.OobInitiatorRangingConfig;
 import android.ranging.oob.OobResponderRangingConfig;
+import android.ranging.raw.RawDtTagRangingConfig;
 import android.ranging.raw.RawInitiatorRangingConfig;
 import android.ranging.raw.RawResponderRangingConfig;
 import android.util.Log;
@@ -46,13 +47,14 @@ import androidx.annotation.NonNull;
 
 import com.android.server.ranging.common.RangingUtils.InternalReason;
 import com.android.server.ranging.common.StateMachine;
-import com.android.server.ranging.metrics.SessionMetricsLogger;
 import com.android.server.ranging.session.ConfigurationManager.TechnologyConfig;
 import com.android.server.ranging.session.OobInitiatorRangingSession;
 import com.android.server.ranging.session.OobResponderRangingSession;
 import com.android.server.ranging.session.RangingSession;
+import com.android.server.ranging.session.RawDtTagRangingSession;
 import com.android.server.ranging.session.RawInitiatorRangingSession;
 import com.android.server.ranging.session.RawResponderRangingSession;
+import com.android.server.ranging.telemetry.SessionTelemetryLogger;
 import com.android.server.uwb.util.LruList;
 
 import com.google.common.collect.ImmutableSet;
@@ -259,16 +261,12 @@ public final class RangingServiceManager implements ActivityManager.OnUidImporta
     public class SessionListener implements IBinder.DeathRecipient {
         private final SessionHandle mSessionHandle;
         private final IRangingCallbacks mRangingCallbacks;
-        private final SessionMetricsLogger mMetricsLogger;
+        private final SessionTelemetryLogger mTelemetryLogger;
         private final StateMachine<State> mStateMachine;
 
-        SessionListener(
-                SessionHandle sessionHandle, IRangingCallbacks callbacks,
-                SessionMetricsLogger metricsLogger
-        ) {
+        SessionListener(SessionHandle sessionHandle, IRangingCallbacks callbacks) {
             mSessionHandle = sessionHandle;
             mRangingCallbacks = callbacks;
-            mMetricsLogger = metricsLogger;
             mStateMachine = new StateMachine<>(State.CLOSED);
             try {
                 mRangingCallbacks.asBinder().linkToDeath(this, 0);
@@ -276,6 +274,8 @@ public final class RangingServiceManager implements ActivityManager.OnUidImporta
                 Log.e(TAG, "Failed to link to death: " + sessionHandle, e);
                 stopRanging(mSessionHandle);
             }
+            mTelemetryLogger = mRangingInjector
+                    .getTelemetryManager().getLogger(mSessionHandle);
         }
 
         @Override
@@ -288,13 +288,13 @@ public final class RangingServiceManager implements ActivityManager.OnUidImporta
                 @NonNull ImmutableSet<TechnologyConfig> configs
         ) {
             if (mStateMachine.transition(State.CLOSED, State.CONFIGURED)) {
-                mMetricsLogger.logSessionConfigured(configs.size());
+                mTelemetryLogger.logSessionConfigured(configs.size());
             }
         }
 
         public synchronized void onSessionOpened() {
             if (mStateMachine.transition(State.CONFIGURED, State.ACTIVE)) {
-                mMetricsLogger.logSessionStarted();
+                mTelemetryLogger.logSessionStarted();
                 try {
                     mRangingCallbacks.onOpened(mSessionHandle);
                 } catch (RemoteException e) {
@@ -309,7 +309,7 @@ public final class RangingServiceManager implements ActivityManager.OnUidImporta
             Log.v(TAG, "onTechnologyStarted " + technology + " for " + peers.size() + " peer(s)");
             // Enforce that the session is already opened.
             onSessionOpened();
-            mMetricsLogger.logTechnologyStarted(technology, peers.size());
+            mTelemetryLogger.logTechnologyStarted(technology, peers.size());
             peers.forEach((peer) -> {
                 try {
                     mRangingCallbacks.onStarted(mSessionHandle, peer, technology.getValue());
@@ -324,7 +324,7 @@ public final class RangingServiceManager implements ActivityManager.OnUidImporta
                 @InternalReason int reason
         ) {
             Log.v(TAG, "onTechnologyStopped " + technology + " for " + peers.size() + " peer(s)");
-            mMetricsLogger.logTechnologyStopped(technology, peers.size(), reason);
+            mTelemetryLogger.logTechnologyStopped(technology, peers.size(), reason);
             peers.forEach((peer) -> {
                 try {
                     mRangingCallbacks.onStopped(mSessionHandle, peer, technology.getValue());
@@ -353,7 +353,8 @@ public final class RangingServiceManager implements ActivityManager.OnUidImporta
             }
             rangingSession.close();
             mDbgRecentlyClosedSessions.add(rangingSession);
-            mMetricsLogger.logSessionClosed(reason);
+            mTelemetryLogger.logSessionClosed(reason);
+            mRangingInjector.getTelemetryManager().unregisterLogger(mSessionHandle);
             if (mStateMachine.getAndSet(State.CLOSED) == State.ACTIVE) {
                 try {
                     mRangingCallbacks.onClosed(mSessionHandle, convertReason(reason));
@@ -377,6 +378,7 @@ public final class RangingServiceManager implements ActivityManager.OnUidImporta
                 case InternalReason.INTERNAL_ERROR -> Callback.REASON_UNKNOWN;
                 case InternalReason.BACKGROUND_RANGING_POLICY -> Callback.REASON_SYSTEM_POLICY;
                 case InternalReason.PEER_CAPABILITIES_MISMATCH -> Callback.REASON_UNSUPPORTED;
+                case InternalReason.ENGINE_REQUEST -> InternalReason.LOCAL_REQUEST;
                 default -> Callback.REASON_UNKNOWN;
             };
         }
@@ -443,14 +445,15 @@ public final class RangingServiceManager implements ActivityManager.OnUidImporta
         public void handleStartRanging(StartRangingArgs args) {
             SessionConfig sessionConfig = args.preference().getSessionConfig();
             RangingConfig baseParams = args.preference.getRangingParams();
-            SessionListener listener = new SessionListener(
-                    args.handle, args.callbacks,
-                    SessionMetricsLogger.startLogging(
-                            args.handle, args.preference.getDeviceRole(),
-                            baseParams.getRangingSessionType(), args.attributionSource,
-                            mRangingInjector));
+            mRangingInjector.getTelemetryManager().registerLogger(
+                    args.handle, args.preference.getDeviceRole(),
+                    baseParams.getRangingSessionType(), args.attributionSource);
+            SessionListener listener = new SessionListener(args.handle, args.callbacks);
 
             switch (baseParams) {
+                case RawDtTagRangingConfig params -> startSession(params, args,
+                        new RawDtTagRangingSession(args.attributionSource, args.handle,
+                        mRangingInjector, sessionConfig, listener, mAdapterExecutor));
                 case RawInitiatorRangingConfig params -> startSession(params, args,
                         new RawInitiatorRangingSession(args.attributionSource, args.handle,
                                 mRangingInjector, sessionConfig, listener, mAdapterExecutor));

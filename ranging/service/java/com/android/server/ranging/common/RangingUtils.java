@@ -31,6 +31,7 @@ import com.google.common.collect.ImmutableSet;
 
 import java.lang.annotation.ElementType;
 import java.lang.annotation.Target;
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.EnumSet;
 import java.util.List;
@@ -178,6 +179,7 @@ public class RangingUtils {
             InternalReason.INTERNAL_ERROR,
             InternalReason.BACKGROUND_RANGING_POLICY,
             InternalReason.PEER_CAPABILITIES_MISMATCH,
+            InternalReason.ENGINE_REQUEST,
     })
     @Target({ElementType.TYPE_USE})
     public @interface InternalReason {
@@ -190,6 +192,7 @@ public class RangingUtils {
         int INTERNAL_ERROR = 6;
         int BACKGROUND_RANGING_POLICY = 7;
         int PEER_CAPABILITIES_MISMATCH = 8;
+        int ENGINE_REQUEST = 9;
     }
 
     public static String privateAddressIfUserBuild(String address) {
@@ -204,6 +207,7 @@ public class RangingUtils {
                 case CS -> bitset.setBleCs(true);
                 case RTT -> bitset.setWifiNanRtt(true);
                 case RSSI -> bitset.setBleRssi(true);
+                case WIFI_PD -> bitset.setWifiPd(true);
                 case RTT_STATION -> {
                     continue;
                 }
@@ -218,7 +222,7 @@ public class RangingUtils {
         if (bitset.getBleCs()) technologies.add(RangingTechnology.CS);
         if (bitset.getWifiNanRtt()) technologies.add(RangingTechnology.RTT);
         if (bitset.getBleRssi()) technologies.add(RangingTechnology.RSSI);
-        if (bitset.getWifiStaRtt()) technologies.add(RangingTechnology.RTT_STATION);
+        if (bitset.getWifiPd()) technologies.add(RangingTechnology.WIFI_PD);
         return technologies;
     }
 
@@ -251,5 +255,17 @@ public class RangingUtils {
             result |= 1 << op.applyAsInt(offset);
         }
         return result;
+    }
+
+    /** Converts a byte array to a list of integers. */
+    public static List<Integer> byteArrayToIntegerList(byte[] bytes) {
+        if (bytes == null) {
+            return new ArrayList<>();
+        }
+        List<Integer> list = new ArrayList<>(bytes.length);
+        for (byte b : bytes) {
+            list.add((int) b);
+        }
+        return list;
     }
 }

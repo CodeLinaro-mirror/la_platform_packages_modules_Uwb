@@ -29,6 +29,7 @@ import android.content.AttributionSource;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.PackageManager;
+import android.content.res.Configuration;
 import android.os.Binder;
 import android.os.Handler;
 import android.os.HandlerThread;
@@ -51,20 +52,24 @@ import com.android.server.ranging.cs.CsAdapter;
 import com.android.server.ranging.cs.CsCapabilitiesAdapter;
 import com.android.server.ranging.cs.CsConfigSelector;
 import com.android.server.ranging.oob.OobController;
+import com.android.server.ranging.oob.packets.DeviceType;
 import com.android.server.ranging.rtt.RttAdapter;
 import com.android.server.ranging.rtt.RttCapabilitiesAdapter;
 import com.android.server.ranging.rtt.RttConfigSelector;
 import com.android.server.ranging.rtt.RttStationCapabilitiesAdapter;
 import com.android.server.ranging.rtt.RttStationConfigSelector;
 import com.android.server.ranging.session.ConfigurationManager;
+import com.android.server.ranging.telemetry.TelemetryManager;
 import com.android.server.ranging.uwb.UwbAdapter;
 import com.android.server.ranging.uwb.UwbCapabilitiesAdapter;
 import com.android.server.ranging.uwb.UwbConfigSelector;
 import com.android.server.ranging.wifipd.WifiPdAdapter;
 import com.android.server.ranging.wifipd.WifiPdCapabilitiesAdapter;
+import com.android.server.ranging.wifipd.WifiPdConfigSelector;
 
 import com.google.common.util.concurrent.ListeningExecutorService;
 
+import java.lang.reflect.InvocationTargetException;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -81,6 +86,7 @@ public class RangingInjector {
     private final Context mContext;
     private final RangingServiceManager mRangingServiceManager;
     private final OobController mOobController;
+    private final TelemetryManager mTelemetryManager;
 
     private final CapabilitiesProvider mCapabilitiesProvider;
     private final PermissionManager mPermissionManager;
@@ -103,6 +109,7 @@ public class RangingInjector {
                 mContext.getSystemService(ActivityManager.class),
                 mLooper);
         mOobController = new OobController(this);
+        mTelemetryManager = new TelemetryManager(this);
         mPermissionManager = context.getSystemService(PermissionManager.class);
         mAlarmHandler = new Handler(mLooper);
         mDeviceConfigFacade = new DeviceConfigFacade(new Handler(mLooper), mContext);
@@ -116,6 +123,26 @@ public class RangingInjector {
     @VisibleForTesting
     public static void setInstance(RangingInjector rangingInjector) {
         sInstance = rangingInjector;
+    }
+
+    /**
+     * @param method name of the method to call in {@link com.android.ranging.flags.Flags}.
+     */
+    public static boolean isFlagEnabled(String method) {
+        Class<com.android.ranging.flags.Flags> c = com.android.ranging.flags.Flags.class;
+        return RangingInjector.isFlagEnabled(c, method);
+    }
+
+    public static <C> boolean isFlagEnabled(Class<C> c, String method) {
+        try {
+            return (boolean) c.getDeclaredMethod(method).invoke(null);
+        } catch (NoSuchMethodException e) {
+            Log.w(TAG, "Could not find flag " + c + "#" + method);
+            return false;
+        } catch (InvocationTargetException | IllegalAccessException e) {
+            Log.e(TAG, "Could not access flag " + c + "#" + method + ": " + e);
+            return false;
+        }
     }
 
     public Context getContext() {
@@ -140,6 +167,10 @@ public class RangingInjector {
 
     public DeviceConfigFacade getDeviceConfigFacade() {
         return mDeviceConfigFacade;
+    }
+
+    public TelemetryManager getTelemetryManager() {
+        return mTelemetryManager;
     }
 
     /**
@@ -210,40 +241,9 @@ public class RangingInjector {
                     sessionConfig, oobConfig, capabilities.getBleRssiCapabilities());
             case RangingTechnology.RTT_STATION -> new RttStationConfigSelector(
                     sessionConfig, oobConfig, capabilities.getRttStationRangingCapabilities());
-            case RangingTechnology.WIFI_PD -> /*TODO support for wifi PD*/ null;
+            case RangingTechnology.WIFI_PD -> new WifiPdConfigSelector(
+                    sessionConfig, oobConfig, capabilities.getWifiPdRangingCapabilities());
         };
-    }
-
-    public boolean isLocalDeviceCapableOfConfig(
-            @NonNull SessionConfig sessionConfig, @NonNull OobInitiatorRangingConfig oobConfig
-    ) {
-        RangingCapabilities capabilities = getCapabilitiesProvider().getCapabilities();
-        if (capabilities.getUwbCapabilities() != null && !UwbConfigSelector
-                .isCapableOfConfig(sessionConfig, oobConfig, capabilities.getUwbCapabilities())) {
-            return false;
-        }
-
-        if (capabilities.getCsCapabilities() != null && !CsConfigSelector
-                .isCapableOfConfig(oobConfig, capabilities.getCsCapabilities())) {
-            return false;
-        }
-
-        if (capabilities.getRttRangingCapabilities() != null && !RttConfigSelector
-                .isCapableOfConfig(oobConfig, capabilities.getRttRangingCapabilities())) {
-            return false;
-        }
-
-        if (capabilities.getBleRssiCapabilities() != null && !BleRssiConfigSelector
-                .isCapableOfConfig(oobConfig, capabilities.getBleRssiCapabilities())) {
-            return false;
-        }
-
-        if (capabilities.getRttStationRangingCapabilities() != null && !RttStationConfigSelector
-                .isCapableOfConfig(oobConfig, capabilities.getRttStationRangingCapabilities())) {
-            return false;
-        }
-
-        return true;
     }
 
     public void enforceRangingPermissionForPreflight(
@@ -410,5 +410,28 @@ public class RangingInjector {
         return Arrays.stream(mDeviceConfigFacade.getTechnologyPreferenceList())
                 .map(RangingTechnology::fromName)
                 .toList();
+    }
+
+    public DeviceType getDeviceType() {
+        PackageManager pm = mContext.getPackageManager();
+        if (pm.hasSystemFeature(PackageManager.FEATURE_WATCH)) {
+            return DeviceType.Wearable;
+        } else if (pm.hasSystemFeature(PackageManager.FEATURE_SENSOR_HINGE_ANGLE)
+                || pm.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)
+        ) {
+            return DeviceType.Phone;
+        } else if (isTablet()) {
+            return DeviceType.Tablet;
+        } else {
+            return DeviceType.Unknown;
+        }
+    }
+
+    private boolean isTablet() {
+        Configuration c = mContext.getResources().getConfiguration();
+        boolean isTablet = (c.screenLayout & Configuration.SCREENLAYOUT_SIZE_MASK)
+                > Configuration.SCREENLAYOUT_SIZE_LARGE;
+        boolean isSmallTablet = c.smallestScreenWidthDp > 600;
+        return isTablet || isSmallTablet;
     }
 }

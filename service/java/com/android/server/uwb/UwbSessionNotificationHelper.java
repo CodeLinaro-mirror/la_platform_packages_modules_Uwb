@@ -89,6 +89,7 @@ public class UwbSessionNotificationHelper {
             case UwbUciConstants.STATUS_CODE_INVALID_RANGE:
             case UwbUciConstants.STATUS_CODE_INVALID_MESSAGE_SIZE:
             case UwbUciConstants.STATUS_CODE_ERROR_CMT3_SEGMENTATION_NOT_POSSIBLE:
+            case UwbUciConstants.STATUS_CODE_ERROR_PHASE_DURATION_CHANGE_PROHIBITED:
                 rangingChangeReason = RangingChangeReason.BAD_PARAMETERS;
                 break;
             case UwbUciConstants.STATUS_CODE_ERROR_SESSION_NOT_EXIST:
@@ -117,6 +118,33 @@ public class UwbSessionNotificationHelper {
             case UwbUciConstants.STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_ERROR_DUPLICATE_SLOT_ASSIGNMENT:
             case UwbUciConstants.STATUS_CODE_DATA_TRANSFER_PHASE_CONFIG_ERROR_DTPML_OVERSIZE:
                 rangingChangeReason = RangingChangeReason.PROTOCOL_SPECIFIC;
+                break;
+        }
+        return rangingChangeReason;
+    }
+
+    /**
+     * Convert Session data transfer status notification status code to an API reason code.
+     */
+    public static int convertDataTransferNotificationStatusCodeToApiReasonCode(
+            int dataTransferStatus) {
+        int rangingChangeReason = RangingChangeReason.UNKNOWN;
+        switch (dataTransferStatus) {
+            case UwbUciConstants.STATUS_CODE_DATA_TRANSFER_ERROR_DATA_TRANSFER:
+            case UwbUciConstants.STATUS_CODE_DATA_TRANSFER_NTF_ERROR_NO_CREDIT_AVAILABLE:
+            case UwbUciConstants.STATUS_CODE_DATA_TRANSFER_NTF_ERROR_DATA_TRANSFER_IS_ONGOING:
+                rangingChangeReason = RangingChangeReason.PROTOCOL_SPECIFIC;
+                break;
+            case UwbUciConstants.STATUS_CODE_DATA_TRANSFER_NTF_ERROR_REJECTED:
+            case UwbUciConstants.STATUS_CODE_DATA_TRANSFER_NTF_SESSION_TYPE_NOT_SUPPORTED:
+            case UwbUciConstants.STATUS_CODE_DATA_TRANSFER_NTF_STATUS_INVALID_FORMAT:
+            case UwbUciConstants.STATUS_CODE_DATA_TRANSFER_NTF_STATUS_INVALID_LL_CONNECT_ID:
+            case UwbUciConstants.STATUS_CODE_DATA_TRANSFER_NTF_STATUS_SDU_SIZE_ERROR:
+                rangingChangeReason = RangingChangeReason.BAD_PARAMETERS;
+                break;
+            case UwbUciConstants
+                    .STATUS_CODE_DATA_TRANSFER_NTF_STATUS_ERROR_RANGING_ROUND_IS_SUSPENDED:
+                rangingChangeReason = RangingChangeReason.SESSION_SUSPENDED;
                 break;
         }
         return rangingChangeReason;

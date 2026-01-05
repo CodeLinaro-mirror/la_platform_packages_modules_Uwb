@@ -55,6 +55,7 @@ java_library {
         "framework-wifi.stubs.module_lib",
         "framework-bluetooth.stubs.module_lib",
         "framework-location.stubs.module_lib",
+        "framework-connectivity.stubs.module_lib",
         "ServiceUwbResources",
     ],
 
@@ -62,11 +63,12 @@ java_library {
         "guava",
         "modules-utils-shell-command-handler",
         "modules-utils-handlerexecutor",
-        "framework-ranging-pre-jarjar",
+        "framework-ranging-lib",
         "com.uwb.fusion",
         "ranging_rtt_backend",
         "ranging_uwb_backend",
-        "ranging_flags_lib",
+        "ranging_aconfig_flags_lib",
+        "wifi_aconfig_flags_lib",
     ],
 
     apex_available: [
@@ -150,7 +152,7 @@ genrule {
     cmd: "$(location stats-log-api-gen) " +
         "--java $(out) " +
         "--module ranging " +
-        "--javaPackage com.android.server.ranging.metrics " +
+        "--javaPackage com.android.server.ranging.telemetry " +
         "--javaClass RangingStatsLog",
     out: ["com/android/server/ranging/metrics/RangingStatsLog.java"],
 }

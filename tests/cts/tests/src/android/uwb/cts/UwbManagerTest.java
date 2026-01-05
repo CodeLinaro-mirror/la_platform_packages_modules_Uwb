@@ -28,8 +28,17 @@ import static android.uwb.UwbManager.MESSAGE_TYPE_COMMAND;
 import static androidx.test.platform.app.InstrumentationRegistry.getInstrumentation;
 
 import static com.google.common.truth.Truth.assertThat;
+import static com.google.uwb.support.fira.FiraParams.PREAMBLE_DURATION_T64_SYMBOLS;
+import static com.google.uwb.support.fira.FiraParams.PRF_MODE_BPRF;
 import static com.google.uwb.support.fira.FiraParams.RANGING_DEVICE_DT_TAG;
 import static com.google.uwb.support.fira.FiraParams.RFRAME_CONFIG_SP1;
+import static com.google.uwb.support.fira.FiraParams.RFRAME_CONFIG_SP3;
+import static com.google.uwb.support.radar.RadarParams.BITS_PER_SAMPLES_32;
+import static com.google.uwb.support.radar.RadarParams.NUMBER_OF_BURSTS_DEFAULT;
+import static com.google.uwb.support.radar.RadarParams.RADAR_DATA_TYPE_RADAR_SWEEP_SAMPLES;
+import static com.google.uwb.support.radar.RadarParams.SAMPLES_PER_SWEEP_DEFAULT;
+import static com.google.uwb.support.radar.RadarParams.SESSION_PRIORITY_DEFAULT;
+import static com.google.uwb.support.radar.RadarParams.SWEEP_OFFSET_DEFAULT;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -68,6 +77,7 @@ import android.uwb.UwbManager;
 
 import androidx.test.InstrumentationRegistry;
 import androidx.test.ext.junit.runners.AndroidJUnit4;
+import androidx.test.filters.SdkSuppress;
 import androidx.test.filters.SmallTest;
 
 import com.android.compatibility.common.util.CddTest;
@@ -90,6 +100,9 @@ import com.google.uwb.support.oemextension.DeviceStatus;
 import com.google.uwb.support.oemextension.RangingReportMetadata;
 import com.google.uwb.support.oemextension.SessionConfigParams;
 import com.google.uwb.support.oemextension.SessionStatus;
+import com.google.uwb.support.radar.RadarOpenSessionParams;
+import com.google.uwb.support.radar.RadarParams;
+import com.google.uwb.support.radar.RadarSpecificationParams;
 
 import org.junit.After;
 import org.junit.Assume;
@@ -643,7 +656,6 @@ public class UwbManagerTest {
     private class RangingSessionCallback implements RangingSession.Callback {
         private CountDownLatch mCtrlCountDownLatch;
         private CountDownLatch mResultCountDownLatch;
-
         public boolean onOpenedCalled;
         public boolean onOpenFailedCalled;
         public boolean onStartedCalled;
@@ -667,6 +679,7 @@ public class UwbManagerTest {
         public boolean onPauseFailedCalled;
         public boolean onResumeCalled;
         public boolean onResumeFailedCalled;
+        public boolean onDataReceived;
         public RangingSession rangingSession;
         public RangingReport rangingReport;
         public int connectId;
@@ -794,7 +807,10 @@ public class UwbManagerTest {
         }
 
         public void onDataReceived(UwbAddress remoteDeviceAddress,
-                PersistableBundle params, byte[] data) { }
+                PersistableBundle params, byte[] data) {
+            onDataReceived = true;
+            mResultCountDownLatch.countDown();
+        }
 
         public void onDataReceiveFailed(UwbAddress remoteDeviceAddress,
                 int reason, PersistableBundle params) { }
@@ -1195,6 +1211,24 @@ public class UwbManagerTest {
                 bundle = requireNonNull(bundle.getPersistableBundle(FiraParams.PROTOCOL_NAME));
             }
             return FiraSpecificationParams.fromBundle(bundle);
+        } finally {
+            uiAutomation.dropShellPermissionIdentity();
+        }
+    }
+
+    private RadarSpecificationParams getRadarSpecificationParams() {
+        UiAutomation uiAutomation = getInstrumentation().getUiAutomation();
+        try {
+            // Only hold UWB_PRIVILEGED permission
+            uiAutomation.adoptShellPermissionIdentity();
+            PersistableBundle bundle = mUwbManager.getSpecificationInfo();
+            if (bundle.keySet().contains(RadarParams.PROTOCOL_NAME)) {
+                bundle = requireNonNull(bundle.getPersistableBundle(RadarParams.PROTOCOL_NAME));
+            } else {
+                Log.i(TAG, "No Radar specification info found.");
+                return null;
+            }
+            return RadarSpecificationParams.fromBundle(bundle);
         } finally {
             uiAutomation.dropShellPermissionIdentity();
         }
@@ -2771,6 +2805,233 @@ public class UwbManagerTest {
                 assertThat(countDownLatch.await(2, TimeUnit.SECONDS)).isTrue();
                 // not getting invoked
                 // assertThat(rangingSessionCallback.onClosedCalled).isTrue();
+            }
+            uiAutomation.dropShellPermissionIdentity();
+        }
+    }
+
+    private RadarOpenSessionParams.Builder makeRadarOpenSessionBuilder() {
+        return new RadarOpenSessionParams.Builder()
+                .setSessionId(3)
+                .setBurstPeriod(64)
+                .setSweepPeriod(4800)
+                .setSweepsPerBurst(16)
+                .setSamplesPerSweep(SAMPLES_PER_SWEEP_DEFAULT)
+                .setChannelNumber(FiraParams.UWB_CHANNEL_9)
+                .setSweepOffset(SWEEP_OFFSET_DEFAULT)
+                .setRframeConfig(RFRAME_CONFIG_SP3)
+                .setPreambleDuration(PREAMBLE_DURATION_T64_SYMBOLS)
+                .setPreambleCodeIndex(11)
+                .setSessionPriority(SESSION_PRIORITY_DEFAULT)
+                .setBitsPerSample(BITS_PER_SAMPLES_32)
+                .setPrfMode(PRF_MODE_BPRF)
+                .setNumberOfBursts(NUMBER_OF_BURSTS_DEFAULT)
+                .setRadarDataType(RADAR_DATA_TYPE_RADAR_SWEEP_SAMPLES);
+    }
+
+    @Test
+    @SdkSuppress(minSdkVersion = 37)
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2,C-1-5"})
+    public void testRadarSession() throws Exception {
+        UiAutomation uiAutomation = getInstrumentation().getUiAutomation();
+        uiAutomation.adoptShellPermissionIdentity();
+        RadarSpecificationParams params = getRadarSpecificationParams();
+        assumeTrue(params != null && params.getRadarCapabilities()
+                .contains(RadarParams.RadarCapabilityFlag.HAS_RADAR_SWEEP_SAMPLES_SUPPORT));
+        RadarOpenSessionParams radarOpenSessionParams = makeRadarOpenSessionBuilder().build();
+        CancellationSignal cancellationSignal = null;
+        CountDownLatch countDownLatch = new CountDownLatch(1);
+        CountDownLatch resultCountDownLatch = new CountDownLatch(1);
+        RangingSessionCallback rangingSessionCallback =
+                new RangingSessionCallback(countDownLatch, resultCountDownLatch);
+        try {
+            // Needs UWB_PRIVILEGED & UWB_RANGING permission which is held by shell.
+            uiAutomation.adoptShellPermissionIdentity();
+            // Start ranging session
+            cancellationSignal = mUwbManager.openRangingSession(
+                    radarOpenSessionParams.toBundle(),
+                    Executors.newSingleThreadExecutor(),
+                    rangingSessionCallback,
+                    mDefaultChipId);
+            // Wait for the on opened callback.
+            assertThat(countDownLatch.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(rangingSessionCallback.onOpenedCalled).isTrue();
+            assertThat(rangingSessionCallback.onOpenFailedCalled).isFalse();
+            assertThat(rangingSessionCallback.rangingSession).isNotNull();
+
+            countDownLatch = new CountDownLatch(1);
+            rangingSessionCallback.replaceCtrlCountDownLatch(countDownLatch);
+            rangingSessionCallback.rangingSession.start(new PersistableBundle());
+            // Wait for the on started callback.
+            assertThat(countDownLatch.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(rangingSessionCallback.onStartedCalled).isTrue();
+            assertThat(rangingSessionCallback.onStartFailedCalled).isFalse();
+
+            // Wait for the on data received callback.
+            assertThat(resultCountDownLatch.await(1, TimeUnit.SECONDS)).isTrue();
+
+            // Check the UWB state.
+            assertThat(mUwbManager.getAdapterState()).isEqualTo(STATE_ENABLED_ACTIVE);
+
+            countDownLatch = new CountDownLatch(1);
+            rangingSessionCallback.replaceCtrlCountDownLatch(countDownLatch);
+            // Stop ongoing session.
+            rangingSessionCallback.rangingSession.stop();
+
+            // Wait for on stopped callback.
+            assertThat(countDownLatch.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(rangingSessionCallback.onStoppedCalled).isTrue();
+        } finally {
+            if (cancellationSignal != null) {
+                countDownLatch = new CountDownLatch(1);
+                rangingSessionCallback.replaceCtrlCountDownLatch(countDownLatch);
+
+                // Close session.
+                cancellationSignal.cancel();
+
+                // Wait for the on closed callback.
+                assertThat(countDownLatch.await(2, TimeUnit.SECONDS)).isTrue();
+                assertThat(rangingSessionCallback.onClosedCalled).isTrue();
+            }
+            uiAutomation.dropShellPermissionIdentity();
+        }
+    }
+
+    @Test
+    @SdkSuppress(minSdkVersion = 37)
+    @RequiresFlagsEnabled(com.android.ranging.flags.Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
+    public void testClearSessions() throws Exception {
+        UiAutomation uiAutomation = getInstrumentation().getUiAutomation();
+        CancellationSignal cancellationSignal1Ses1 = null;
+        CancellationSignal cancellationSignal1Ses2 = null;
+        CancellationSignal cancellationSignal2Ses1 = null;
+        UwbManager uwbManagerWithAttrTag1 = createUwbManagerWithAttrTag("tag1");
+        //Create UwbManager with Null tag
+        Context contextWithNullAttrTag = mContext.createContext(
+                new ContextParams.Builder()
+                        .setAttributionTag(null)
+                        .build()
+        );
+        UwbManager uwbManagerWithNullTag = contextWithNullAttrTag.getSystemService(
+                UwbManager.class);
+
+        CountDownLatch countDownLatch1Ses1 = new CountDownLatch(1);
+        CountDownLatch resultCountDownLatch1Ses1 = new CountDownLatch(1);
+        RangingSessionCallback rangingSessionCallback1Ses1 =
+                new RangingSessionCallback(countDownLatch1Ses1, resultCountDownLatch1Ses1);
+        CountDownLatch countDownLatch1Ses2 = new CountDownLatch(1);
+        CountDownLatch resultCountDownLatch1Ses2 = new CountDownLatch(1);
+        RangingSessionCallback rangingSessionCallback1Ses2 =
+                new RangingSessionCallback(countDownLatch1Ses2, resultCountDownLatch1Ses2);
+        CountDownLatch countDownLatch2Ses1 = new CountDownLatch(1);
+        CountDownLatch resultCountDownLatch2Ses1 = new CountDownLatch(1);
+        RangingSessionCallback rangingSessionCallback2Ses1 =
+                new RangingSessionCallback(countDownLatch2Ses1, resultCountDownLatch2Ses1);
+
+        FiraOpenSessionParams.Builder firaOpenSessionParams = makeOpenSessionBuilder();
+        try {
+            // Needs UWB_PRIVILEGED permission which is held by shell.
+            uiAutomation.adoptShellPermissionIdentity();
+            // Start first set of ranging sessions
+            cancellationSignal1Ses1 = uwbManagerWithAttrTag1.openRangingSession(
+                    firaOpenSessionParams.setSessionId(5).build().toBundle(),
+                    Executors.newSingleThreadExecutor(),
+                    rangingSessionCallback1Ses1,
+                    mDefaultChipId);
+            // Wait for the on opened callback for session 1_1
+            assertThat(countDownLatch1Ses1.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(rangingSessionCallback1Ses1.onOpenedCalled).isTrue();
+            assertThat(rangingSessionCallback1Ses1.onOpenFailedCalled).isFalse();
+            assertThat(rangingSessionCallback1Ses1.rangingSession).isNotNull();
+            //Starting session 1_2
+            cancellationSignal1Ses2 = uwbManagerWithAttrTag1.openRangingSession(
+                    firaOpenSessionParams.setSessionId(10).build().toBundle(),
+                    Executors.newSingleThreadExecutor(),
+                    rangingSessionCallback1Ses2,
+                    mDefaultChipId);
+            // Wait for the on opened callback for session 1_2
+            assertThat(countDownLatch1Ses2.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(rangingSessionCallback1Ses2.onOpenedCalled).isTrue();
+            assertThat(rangingSessionCallback1Ses2.onOpenFailedCalled).isFalse();
+            assertThat(rangingSessionCallback1Ses2.rangingSession).isNotNull();
+            // Starting session 2_1
+            cancellationSignal2Ses1 = uwbManagerWithNullTag.openRangingSession(
+                    firaOpenSessionParams.setSessionId(20).build().toBundle(),
+                    Executors.newSingleThreadExecutor(),
+                    rangingSessionCallback2Ses1,
+                    mDefaultChipId);
+            // Wait for the on opened callback for session 2_1
+            assertThat(countDownLatch2Ses1.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(rangingSessionCallback2Ses1.onOpenedCalled).isTrue();
+            assertThat(rangingSessionCallback2Ses1.onOpenFailedCalled).isFalse();
+            assertThat(rangingSessionCallback2Ses1.rangingSession).isNotNull();
+
+            //Start all rangingSessions
+            countDownLatch1Ses1 = new CountDownLatch(1);
+            rangingSessionCallback1Ses1.replaceCtrlCountDownLatch(countDownLatch1Ses1);
+            rangingSessionCallback1Ses1.rangingSession.start(new PersistableBundle());
+            countDownLatch1Ses2 = new CountDownLatch(1);
+            rangingSessionCallback1Ses2.replaceCtrlCountDownLatch(countDownLatch1Ses2);
+            rangingSessionCallback1Ses2.rangingSession.start(new PersistableBundle());
+            countDownLatch2Ses1 = new CountDownLatch(1);
+            rangingSessionCallback2Ses1.replaceCtrlCountDownLatch(countDownLatch2Ses1);
+            rangingSessionCallback2Ses1.rangingSession.start(new PersistableBundle());
+            // Wait for the on started callback.
+            assertThat(countDownLatch1Ses1.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(countDownLatch1Ses2.await(1, TimeUnit.SECONDS)).isTrue();
+
+            // Clear all sessions with Tag1
+            uwbManagerWithAttrTag1.clearSessions();
+            // Check if all tag1 sessions are closed
+            countDownLatch1Ses1 = new CountDownLatch(1);
+            rangingSessionCallback1Ses1.replaceCtrlCountDownLatch(countDownLatch1Ses1);
+            countDownLatch1Ses2 = new CountDownLatch(1);
+            rangingSessionCallback1Ses2.replaceCtrlCountDownLatch(countDownLatch1Ses2);
+            assertThat(countDownLatch1Ses1.await(6, TimeUnit.SECONDS)).isTrue();
+            assertThat(countDownLatch1Ses2.await(1, TimeUnit.SECONDS)).isTrue();
+            assertThat(rangingSessionCallback1Ses1.onClosedCalled).isTrue();
+            assertThat(rangingSessionCallback1Ses2.onClosedCalled).isTrue();
+            // Check if no-tag sessions are open
+            assertThat(rangingSessionCallback2Ses1.onClosedCalled).isFalse();
+
+            countDownLatch2Ses1 = new CountDownLatch(1);
+            rangingSessionCallback2Ses1.replaceCtrlCountDownLatch(countDownLatch2Ses1);
+
+            //Close the remaining sessions
+            rangingSessionCallback2Ses1.rangingSession.stop();
+            // Check if no-tag sessions are closed
+            assertThat(countDownLatch2Ses1.await(2, TimeUnit.SECONDS)).isTrue();
+            assertThat(rangingSessionCallback2Ses1.onStoppedCalled).isTrue();
+            //Check if clearSessions on a null tag throws an exception
+            assertThrows(IllegalArgumentException.class,
+                    () -> uwbManagerWithNullTag.clearSessions());
+        } finally {
+            if (cancellationSignal1Ses1 != null) {
+                // Close session
+                countDownLatch1Ses1 = new CountDownLatch(1);
+                rangingSessionCallback1Ses1.replaceCtrlCountDownLatch(countDownLatch1Ses1);
+                cancellationSignal1Ses1.cancel();
+
+                // Wait for the on closed callback.
+                assertThat(countDownLatch1Ses1.await(2, TimeUnit.SECONDS)).isTrue();
+            }
+            if (cancellationSignal1Ses2 != null) {
+                // Close session.
+                countDownLatch1Ses2 = new CountDownLatch(1);
+                rangingSessionCallback1Ses2.replaceCtrlCountDownLatch(countDownLatch1Ses2);
+                cancellationSignal1Ses2.cancel();
+
+                // Wait for the on closed callback.
+                assertThat(countDownLatch1Ses2.await(2, TimeUnit.SECONDS)).isTrue();
+            }
+            if (cancellationSignal2Ses1 != null) {
+                // Close session.
+                countDownLatch2Ses1 = new CountDownLatch(1);
+                rangingSessionCallback2Ses1.replaceCtrlCountDownLatch(countDownLatch2Ses1);
+                cancellationSignal2Ses1.cancel();
+
+                // Wait for the on closed callback.
+                assertThat(countDownLatch2Ses1.await(2, TimeUnit.SECONDS)).isTrue();
             }
             uiAutomation.dropShellPermissionIdentity();
         }
