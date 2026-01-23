@@ -20,9 +20,11 @@ import static android.ranging.raw.RawRangingDevice.UPDATE_RATE_FREQUENT;
 import static android.ranging.raw.RawRangingDevice.UPDATE_RATE_INFREQUENT;
 import static android.ranging.raw.RawRangingDevice.UPDATE_RATE_NORMAL;
 
+import static com.android.bluetooth.flags.Flags.includePowerAndRssiInDistanceMeasurementResult;
 import static com.android.server.ranging.common.RangingUtils.InternalReason;
 import static com.android.server.ranging.common.RangingUtils.InternalReason.INTERNAL_ERROR;
 import static com.android.server.ranging.common.RangingUtils.convertBluetoothReasonCode;
+
 
 import android.annotation.Nullable;
 import android.app.AlarmManager;
@@ -43,9 +45,9 @@ import android.ranging.RangingData;
 import android.ranging.RangingDataExtras;
 import android.ranging.RangingDevice;
 import android.ranging.RangingMeasurement;
+import android.ranging.ble.BleSpecificData;
 import android.ranging.ble.cs.BleCsConstants;
 import android.ranging.ble.cs.BleCsRangingParams;
-import android.ranging.ble.cs.BleCsSpecificData;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -74,10 +76,11 @@ public class CsAdapter implements RangingAdapter {
     private final RangingInjector mRangingInjector;
     private final BluetoothAdapter mBluetoothAdapter;
     private final StateMachine<State> mStateMachine;
+    private final Object mLock;
     private Callback mCallbacks;
 
     /** Invariant: non-null while a ranging session is active */
-    private BluetoothDevice mDeviceFromPeerBluetoothAddress;
+    private BluetoothDevice mPeerBluetoothDevice;
 
     /** Invariant: non-null while a ranging session is active */
     private RangingDevice mRangingDevice;
@@ -93,13 +96,14 @@ public class CsAdapter implements RangingAdapter {
     private final AlarmManager.OnAlarmListener mMeasurementLimitListener;
 
     /** Injectable constructor for testing. */
-    public CsAdapter(@NonNull Context context, RangingInjector rangingInjector) {
+    public CsAdapter(@NonNull Context context, RangingInjector rangingInjector, Object lock) {
         if (!RangingTechnology.CS.isSupported(context)) {
             throw new IllegalArgumentException("BT_CS system feature not found.");
         }
         mContext = context;
         mBluetoothAdapter = context.getSystemService(BluetoothManager.class).getAdapter();
-        mStateMachine = new StateMachine<>(State.STOPPED);
+        mStateMachine = new StateMachine<>(State.STOPPED, lock);
+        mLock = lock;
         mCallbacks = null;
         mSession = null;
         mRangingInjector = rangingInjector;
@@ -168,8 +172,15 @@ public class CsAdapter implements RangingAdapter {
         }
         mConfig = csConfig;
         mRangingDevice = csConfig.getPeerDevice();
-        mDeviceFromPeerBluetoothAddress =
-                mBluetoothAdapter.getRemoteDevice(bleCsRangingParams.getPeerBluetoothAddress());
+        if (csConfig.getPeerBluetoothDevice() != null) {
+            mPeerBluetoothDevice = csConfig.getPeerBluetoothDevice();
+            Log.v(TAG,
+                    "BluetoothDevice is provided. Using it instead of the address.");
+        } else {
+            mPeerBluetoothDevice =
+                    mBluetoothAdapter.getRemoteDevice(bleCsRangingParams.getPeerBluetoothAddress());
+            Log.v(TAG, "BluetoothDevice not provided, using provided BLE address");
+        }
         DistanceMeasurementManager distanceMeasurementManager =
                 mBluetoothAdapter.getDistanceMeasurementManager();
         int duration = DistanceMeasurementParams.getMaxDurationSeconds();
@@ -177,7 +188,7 @@ public class CsAdapter implements RangingAdapter {
         int methodId = DistanceMeasurementMethod.DISTANCE_MEASUREMENT_METHOD_CHANNEL_SOUNDING;
 
         DistanceMeasurementParams params =
-                new DistanceMeasurementParams.Builder(mDeviceFromPeerBluetoothAddress)
+                new DistanceMeasurementParams.Builder(mPeerBluetoothDevice)
                         .setChannelSoundingParams(new ChannelSoundingParams.Builder()
                                 .setLocationType(bleCsRangingParams.getLocationType())
                                 .setCsSecurityLevel(bleCsRangingParams.getSecurityLevel())
@@ -341,13 +352,19 @@ public class CsAdapter implements RangingAdapter {
                                 .setError(result.getErrorAltitudeAngle())
                                 .build());
                     }
+                    BleSpecificData.Builder bleCsSpecificDataBuilder =
+                            new BleSpecificData.Builder()
+                                    .setDelaySpreadMeters(result.getDelaySpreadMeters());
+                    if (includePowerAndRssiInDistanceMeasurementResult()) {
+                        dataBuilder.setRssi(result.getRssiDbm());
+                        bleCsSpecificDataBuilder
+                                .setRemoteTxPowerDbm(result.getRemoteTxPowerDbm());
+                    }
                     dataBuilder.setRangingDataExtras(
                             new RangingDataExtras.Builder()
-                                    .setBleCsSpecificData(new BleCsSpecificData.Builder()
-                                            .setDelaySpreadMeters(result.getDelaySpreadMeters())
-                                            .build())
+                                    .setBleSpecificData(bleCsSpecificDataBuilder.build())
                                     .build());
-                    synchronized (mStateMachine) {
+                    synchronized (mLock) {
                         if (mStateMachine.getState() == State.STARTED) {
                             mCallbacks.onRangingData(mRangingDevice, dataBuilder.build());
                         }

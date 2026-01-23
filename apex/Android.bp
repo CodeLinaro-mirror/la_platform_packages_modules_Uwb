@@ -124,7 +124,9 @@ custom_bootclasspath_fragment {
         // API.
         split_packages: [
             "android.uwb",
+            "android.uwb.timesync",
             "android.ranging",
+            "android.ranging.ble",
             "android.ranging.ble.cs",
             "android.ranging.ble.rssi",
             "android.ranging.oob",

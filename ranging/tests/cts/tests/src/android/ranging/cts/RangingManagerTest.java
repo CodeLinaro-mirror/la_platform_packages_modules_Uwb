@@ -28,6 +28,7 @@ import static android.ranging.ble.cs.BleCsRangingCapabilities.CS_SECURITY_LEVEL_
 import static android.ranging.ble.cs.BleCsRangingParams.LOCATION_TYPE_INDOOR;
 import static android.ranging.ble.cs.BleCsRangingParams.SIGHT_TYPE_LINE_OF_SIGHT;
 import static android.ranging.oob.OobInitiatorRangingConfig.RANGING_MODE_FUSED;
+import static android.ranging.oob.OobInitiatorRangingConfig.RANGING_MODE_HIGH_ACCURACY_PREFERRED;
 import static android.ranging.oob.OobInitiatorRangingConfig.SECURITY_LEVEL_BASIC;
 import static android.ranging.raw.RawRangingDevice.UPDATE_RATE_FREQUENT;
 import static android.ranging.raw.RawRangingDevice.UPDATE_RATE_NORMAL;
@@ -52,6 +53,7 @@ import static org.junit.Assume.assumeTrue;
 import android.annotation.SuppressLint;
 import android.app.UiAutomation;
 import android.bluetooth.BluetoothAdapter;
+import android.bluetooth.BluetoothDevice;
 import android.bluetooth.test_utils.BlockingBluetoothAdapter;
 import android.content.BroadcastReceiver;
 import android.content.Context;
@@ -173,8 +175,8 @@ public class RangingManagerTest {
                 RangingManager.WIFI_STA_RTT) != NOT_SUPPORTED) {
             mSupportedTechnologies.add(RangingManager.WIFI_STA_RTT);
         }
-        if (callback.mRangingCapabilities.getTechnologyAvailability().get(RangingManager.WIFI_PD)
-                != NOT_SUPPORTED) {
+        if (Flags.rangingStackUpdates26Q2() && callback.mRangingCapabilities
+                .getTechnologyAvailability().get(RangingManager.WIFI_PD) != NOT_SUPPORTED) {
             mSupportedTechnologies.add(RangingManager.WIFI_PD);
         }
         assumeTrue(!mSupportedTechnologies.isEmpty());
@@ -1381,6 +1383,55 @@ public class RangingManagerTest {
 
     @Test
     @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_updates_26_q_2")
+    public void testBluetoothDeviceSetAndUsedInOobFlow() throws InterruptedException {
+        assumeTrue(mSupportedTechnologies.contains(RangingManager.BLE_CS)
+                || mSupportedTechnologies.contains(RangingManager.BLE_RSSI));
+
+        enableBluetooth();
+
+        UiAutomation uiAutomation = getInstrumentation().getUiAutomation();
+        uiAutomation.adoptShellPermissionIdentity();
+
+        RangingSession session = mRangingManager.createRangingSession(
+                MoreExecutors.directExecutor(), new RangingSessionCallback());
+        assertThat(session).isNotNull();
+
+        OobTransport oobTransport = new OobTransport();
+
+        BluetoothAdapter adapter = BlockingBluetoothAdapter.getAdapter();
+        assertThat(adapter).isNotNull();
+
+        BluetoothDevice remoteBluetoothDevice = adapter.getRemoteDevice("F2:A3:45:BC:78:90");
+        assertThat(remoteBluetoothDevice).isNotNull();
+
+        DeviceHandle device =
+                new DeviceHandle.Builder(
+                        new RangingDevice.Builder().build(), oobTransport).setBluetoothDevice(
+                                remoteBluetoothDevice)
+                        .build();
+        OobInitiatorRangingConfig config = new OobInitiatorRangingConfig.Builder()
+                .setFastestRangingInterval(Duration.ofMillis(100))
+                .setSlowestRangingInterval(Duration.ofMillis(5000))
+                .setRangingMode(RANGING_MODE_HIGH_ACCURACY_PREFERRED)
+                .setSecurityLevel(SECURITY_LEVEL_BASIC)
+                .addDeviceHandle(device)
+                .build();
+
+        assertThat(config.getDeviceHandles().getFirst().getBluetoothDevice()).isEqualTo(
+                remoteBluetoothDevice);
+
+        RangingPreference preference =
+                new RangingPreference.Builder(DEVICE_ROLE_INITIATOR, config).build();
+        session.start(preference);
+        assertThat(oobTransport.mSendDataCalled.await(2, TimeUnit.SECONDS)).isTrue();
+
+        session.stop();
+        uiAutomation.dropShellPermissionIdentity();
+    }
+
+    @Test
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_updates_25q4")
     public void testRttStationRanging() throws InterruptedException {
         assumeTrue(mSupportedTechnologies.contains(RangingManager.WIFI_STA_RTT));
@@ -1728,8 +1779,8 @@ public class RangingManagerTest {
 
         UwbAddress deviceAddress = UwbAddress.createRandomShortAddress();
         DlTdoaRangingParams dlTdoaParams = new DlTdoaRangingParams.Builder(1)
-                .setComplexChannel(new UwbComplexChannel.Builder().
-                setChannel(9).setPreambleIndex(10).build())
+                .setComplexChannel(new UwbComplexChannel.Builder()
+                        .setChannel(9).setPreambleIndex(10).build())
                 .setDeviceAddress(deviceAddress)
                 .setSessionKeyInfo(new byte[]{0x01, 0x02, 0x03, 0x04})
                 .setRangingIntervalMillis(240)

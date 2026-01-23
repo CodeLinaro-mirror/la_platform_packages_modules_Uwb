@@ -67,8 +67,9 @@ public class BleRssiAdapter implements RangingAdapter {
     private final RangingInjector mRangingInjector;
     private final BluetoothAdapter mBluetoothAdapter;
     private final StateMachine<State> mStateMachine;
+    private final Object mLock;
     private Callback mCallbacks;
-    private BluetoothDevice mDeviceFromPeerBluetoothAddress;
+    private BluetoothDevice mPeerBluetoothDevice;
     private RangingDevice mRangingDevice;
     private DistanceMeasurementSession mSession;
     private BleRssiConfig mConfig;
@@ -81,14 +82,15 @@ public class BleRssiAdapter implements RangingAdapter {
 
     private final AlarmManager.OnAlarmListener mMeasurementLimitListener;
 
-    public BleRssiAdapter(@NonNull Context context, RangingInjector rangingInjector) {
+    public BleRssiAdapter(@NonNull Context context, RangingInjector rangingInjector, Object lock) {
         if (!RangingTechnology.RSSI.isSupported(context)) {
             throw new IllegalArgumentException("BT_RSSI system feature not found.");
         }
         mContext = context;
         mRangingInjector = rangingInjector;
         mBluetoothAdapter = context.getSystemService(BluetoothManager.class).getAdapter();
-        mStateMachine = new StateMachine<>(State.STOPPED);
+        mStateMachine = new StateMachine<>(State.STOPPED, lock);
+        mLock = lock;
         mCallbacks = null;
         mSession = null;
         mConfig = null;
@@ -158,13 +160,21 @@ public class BleRssiAdapter implements RangingAdapter {
 
         mConfig = bleRssiConfig;
         mRangingDevice = bleRssiConfig.getPeerDevice();
-        mDeviceFromPeerBluetoothAddress =
-                mBluetoothAdapter.getRemoteDevice(bleRssiRangingParams.getPeerBluetoothAddress());
+        if (bleRssiConfig.getPeerBluetoothDevice() != null) {
+            mPeerBluetoothDevice = bleRssiConfig.getPeerBluetoothDevice();
+            Log.v(TAG,
+                    "BluetoothDevice is provided. Using it instead of the address.");
+        } else {
+            mPeerBluetoothDevice =
+                    mBluetoothAdapter.getRemoteDevice(
+                            bleRssiRangingParams.getPeerBluetoothAddress());
+            Log.v(TAG, "BluetoothDevice not provided, using provided BLE address");
+        }
         DistanceMeasurementManager distanceMeasurementManager =
                 mBluetoothAdapter.getDistanceMeasurementManager();
 
         DistanceMeasurementParams params =
-                new DistanceMeasurementParams.Builder(mDeviceFromPeerBluetoothAddress)
+                new DistanceMeasurementParams.Builder(mPeerBluetoothDevice)
                         .setDurationSeconds(DistanceMeasurementParams.getDefaultDurationSeconds())
                         .setFrequency(getBleRssiFrequency(
                                 bleRssiConfig.getRangingParams().getRangingUpdateRate()))
@@ -313,7 +323,7 @@ public class BleRssiAdapter implements RangingAdapter {
                                 .build());
                     }
 
-                    synchronized (mStateMachine) {
+                    synchronized (mLock) {
                         if (mStateMachine.getState() == State.STARTED) {
                             mCallbacks.onRangingData(mRangingDevice, dataBuilder.build());
                         }
