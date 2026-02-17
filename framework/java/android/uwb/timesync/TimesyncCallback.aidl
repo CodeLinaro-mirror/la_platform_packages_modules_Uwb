@@ -16,9 +16,12 @@
 
 package android.uwb.timesync;
 
-import android.uwb.timesync.Version;
+import android.uwb.timesync.TimesyncEvent;
 
 /** @hide */
-oneway interface IVersionListener {
-  void onVersion(in Version version);
+oneway interface TimesyncCallback {
+  void onRegistered() = 1;
+  void onRegisterFailed() = 2;
+  void onTimesyncEvent(
+    in TimesyncEvent event) = 3;
 }

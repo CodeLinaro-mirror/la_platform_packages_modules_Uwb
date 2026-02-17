@@ -16,55 +16,45 @@
 
 package com.android.server.uwb.timesync;
 
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
-import java.util.concurrent.BlockingQueue;
-import java.util.concurrent.Executors;
-import java.util.concurrent.LinkedBlockingQueue;
-import java.util.concurrent.TimeUnit;
+import static android.uwb.UwbManager.MESSAGE_TYPE_COMMAND;
 
-import android.annotation.Hide;
-import android.annotation.IntRange;
+import static com.android.server.uwb.util.DataTypeConversionUtil.bluetoothAddressToBytes;
+import static com.android.server.uwb.util.DataTypeConversionUtil.bytesToStringBluetoothAddress;
+
 import android.annotation.NonNull;
-import android.annotation.PermissionManuallyEnforced;
 import android.annotation.RequiresNoPermission;
+import android.bluetooth.BluetoothDevice.BluetoothAddress;
 import android.content.Context;
-import android.content.Intent;
-import android.os.IBinder;
-import android.os.RemoteException;
-import android.os.ServiceManager;
-import android.util.Log;
-import android.uwb.UwbManager;
-import android.uwb.UwbManager.UwbVendorUciCallback;
-
-import androidx.annotation.VisibleForTesting;
-
-import com.android.server.uwb.UwbInjector;
-
-// TODO (b/422751710): we want these but adding the right dependency in
-// Android.bp is having problems. For now we'll just define constants ourselves.
-//
-// import android.hardware.uwb.fira_android.UwbVendorGids;
-// import android.hardware.uwb.fira_android.UwbVendorGidAndroidOids;
-
-import android.uwb.timesync.BleTimestamp;
-import android.uwb.timesync.CccDkTimeSync;
-import android.uwb.timesync.IBleLmpEventListener;
-import android.uwb.timesync.ICccDkTimeSync;
-import android.uwb.timesync.IEventCallback;
-import android.uwb.timesync.IVersionListener;
-import android.uwb.timesync.Version;
-
-import android.hardware.bluetooth.lmp_event.Direction;
 import android.hardware.bluetooth.lmp_event.IBluetoothLmpEvent;
 import android.hardware.bluetooth.lmp_event.IBluetoothLmpEventCallback;
 import android.hardware.bluetooth.lmp_event.LmpEventId;
 import android.hardware.bluetooth.lmp_event.Timestamp;
+import android.os.IBinder;
+import android.os.RemoteException;
+import android.os.ServiceManager;
+import android.os.SystemClock;
+import android.util.Log;
+import android.uwb.UwbManager;
+import android.uwb.timesync.ITimesyncCallbackListener;
+import android.uwb.timesync.TimesyncEvent;
 
-/**
- * @hide
- */
-@Hide
+import androidx.annotation.VisibleForTesting;
+
+import com.android.server.uwb.UwbContext;
+import com.android.server.uwb.UwbInjector;
+import com.android.server.uwb.data.UwbUciConstants;
+import com.android.server.uwb.data.UwbVendorUciResponse;
+import com.android.server.uwb.jni.NativeUwbManager;
+
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.FutureTask;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+
 public class TimesyncManager {
     private static final String TAG = TimesyncManager.class.getSimpleName();
     private static final String HAL_INSTANCE_NAME = IBluetoothLmpEvent.DESCRIPTOR + "/default";
@@ -79,9 +69,7 @@ public class TimesyncManager {
     //   to the implementation. Runtime Resource Overlays
     //   (https://source.android.com/docs/core/runtime/rros) are a potential
     //   solution for that.
-    public static final int DEVICE_TIME_OFFSET_US = -36000;
     public static final int DEVICE_TIME_UNCERTAINTY = 18000;
-    public static final int MAX_CLOCK_SKEW_PPM = 100;
 
     // TODO (b/422751710): These ought to come from
     // android.hardware.uwb.fira_android.UwbVendorGids and
@@ -98,14 +86,13 @@ public class TimesyncManager {
     public static final byte UCI_STATUS_UNKNOWN_GID = 0x07;
     public static final byte UCI_STATUS_UNKNOWN_OID = 0x08;
 
+    // This comes from UwbServiceCore
+    public static final int SEND_VENDOR_CMD_TIMEOUT_MS = 10000;
+
     // This is constant for the most part, but when doing unit tests we'll
     // force it lower to tests aren't so slow.
-    private static long TIMEOUT = 5;
-    private static TimeUnit TIMEOUT_UNIT = TimeUnit.SECONDS;
-
-    public static final Version SUPPORTED_VERSIONS[] = {
-            new Version((byte) 1, (byte) 1), new Version((byte) 1, (byte) 0),
-    };
+    private static long sTimeout = 5;
+    private static TimeUnit sTimeoutUnit = TimeUnit.SECONDS;
 
     // Encode the uncertainty as per Table 19-43 of the Digital Key Technical
     // Specification Release 3.
@@ -117,7 +104,7 @@ public class TimesyncManager {
     // * The spec doesn't make the Math.ceil() call explicit but doing so will
     //   err on the side of saying that we're _more_ uncertain which is much
     //   safer.
-    private static final int encodeTimeUncertainty(int uncertaintyUs) {
+    private static int encodeTimeUncertainty(int uncertaintyUs) {
         int result;
 
         // log(0) is not defined; lowest uncertainty possible is 1us, so use
@@ -136,158 +123,147 @@ public class TimesyncManager {
         return result;
     }
 
-    private static void enforceUwbPrivilegedPermission(Context context) {
-        context.enforceCallingOrSelfPermission(android.Manifest.permission.UWB_PRIVILEGED,
-                "UwbService");
-    }
-
-    private static class BleLmpEventListenerWrapper extends IEventCallback.Stub {
-        private final Context mContext;
-        private final IBleLmpEventListener mListener;
-
-        private BleLmpEventListenerWrapper(Context context, IBleLmpEventListener listener) {
-            mContext = context;
-            mListener = listener;
-        }
-
-        @Override
-        @RequiresNoPermission
-        public void onRegisterSuccess() {
-            // do nothing
-        }
-
-        @Override
-        @RequiresNoPermission
-        public void onRegisterFailure() {
-            // do nothing
-        }
-
-        @Override
-        @PermissionManuallyEnforced
-        public void onTimestamp(
-                byte[] address, BleTimestamp timestamp, int direction, int events, int eventCount)
-                throws RemoteException {
-            enforceUwbPrivilegedPermission(mContext);
-            mListener.onTimestamp(address, timestamp, direction, events, eventCount);
-        }
-    }
-
     private static class BluetoothCccCallback extends IBluetoothLmpEventCallback.Stub {
+
+        private Object mClockLock = new Object();
 
         // A small structure to pass results between threads w/ the BlockingQueue.
         private static class TimestampConversionResult {
-            TimestampConversionResult(byte status_, long timestampUs_, int uncertaintyUs_) {
-                status = status_;
-                timestampUs = timestampUs_;
-                uncertaintyUs = uncertaintyUs_;
+            TimestampConversionResult(byte status, long timestampUs, int uncertaintyUs) {
+                mStatus = status;
+                mTimestampUs = timestampUs;
+                mUncertaintyUs = uncertaintyUs;
             }
-            TimestampConversionResult(byte status_) {
-                this(status_, 0, 0);
+
+            TimestampConversionResult(byte status) {
+                this(status, 0, 0);
             }
-            byte status;
-            long timestampUs;
-            int uncertaintyUs;
+
+            byte mStatus;
+            long mTimestampUs;
+            int mUncertaintyUs;
         }
 
-        // When we call mUwbManager.sendVendorUciMessage() it doesn't directly
-        // return the result. Instead, it will invoke a callback in a separate
-        // context. We really want the result back in the same context where
-        // we called sendVendorUciMessage(). This class will get the callback
-        // and use a BlockingQueue to send the result back to the original site.
-        private static class CccDkTimeSyncVendorUciCallback implements UwbVendorUciCallback {
-            private final BlockingQueue<TimestampConversionResult> mQueue;
+        private static class BleTimestamp {
+            private long mUwbTimestamp;
+            private int mDeviceTimeUncertainty;
+            private int mMaxClockSkewPpm;
 
-            private CccDkTimeSyncVendorUciCallback(BlockingQueue<TimestampConversionResult> queue) {
-                mQueue = queue;
+            private BleTimestamp(
+                    long uwbTimestamp,
+                    int deviceTimeUncertainty,
+                    int maxClockSkewPpm) {
+                mUwbTimestamp = uwbTimestamp;
+                mDeviceTimeUncertainty = deviceTimeUncertainty;
+                mMaxClockSkewPpm = maxClockSkewPpm;
             }
 
-            @Override
-            public void onVendorUciResponse(
-                    @IntRange(from = 0, to = 15) int gid, int oid, @NonNull byte[] payload) {
-
-                // status (1), timestamp (8), uncertainty (4) = 13 bytes
-                final int expectedPayloadLen = 13;
-
-                Log.v(TAG, String.format("onVendorUciResponse %d %d (%d)",
-                        gid, oid, payload.length));
-                if (gid == ANDROID_GID && oid == ANDROID_TIMESTAMP_ANCHOR_TO_UWBS) {
-                    TimestampConversionResult result;
-                    ByteBuffer buffer = ByteBuffer.wrap(payload);
-                    buffer.order(ByteOrder.LITTLE_ENDIAN);
-
-                    byte status = buffer.get();
-                    if (status != UCI_STATUS_OK) {
-                        /* Caller handles/prints errors since some non-OK statuses are expected */
-                        result = new TimestampConversionResult(status);
-                    } else if (payload.length < expectedPayloadLen) {
-                        Log.e(TAG, String.format("Timestamp conversion response too short: %d < %d",
-                                payload.length, expectedPayloadLen));
-                        result = new TimestampConversionResult(UCI_STATUS_INVALID_MESSAGE_SIZE);
-                    } else {
-                        if (payload.length != expectedPayloadLen) {
-                            Log.i(TAG, String.format("Ignoring extra bytes in timestamp conversion response: %d > %d",
-                                    payload.length, expectedPayloadLen));
-                        }
-                        result = new TimestampConversionResult(status, buffer.getLong(),
-                                buffer.getInt());
-                    }
-
-                    try {
-                        mQueue.put(result);
-                    } catch (InterruptedException e) {
-                        Log.e(TAG, "Queue put failed with InterruptedException: " + e);
-                    }
-                }
+            public long getUwbTimestamp() {
+                return mUwbTimestamp;
             }
 
-            @Override
-            public void onVendorUciNotification(
-                    @IntRange(from = 9, to = 15) int gid, int oid, @NonNull byte[] payload) {
-                Log.d(TAG, String.format("UCI notification gid=%d oid=%d", gid, oid));
+            public int getDeviceTimeUncertainty() {
+                return mDeviceTimeUncertainty;
+            }
+
+            public int getMaxClockSkewPpm() {
+                return mMaxClockSkewPpm;
             }
         }
 
         private BleTimestamp timestampFromHal(Timestamp timestamp) {
+            if (timestamp.systemTimeUs == timestamp.bluetoothTimeUs) {
+                Log.i(TAG, "Using combo chip systemtime==uwbstime");
+                // If the device has combo chip, use system time as uwb time is in the same domain.
+                return new BleTimestamp(
+                        timestamp.systemTimeUs,
+                        mUwbInjector.getDeviceConfigFacade().getTimesyncUncertaintyUs(),
+                        mUwbInjector.getDeviceConfigFacade().getTimesyncClockSkewPpm()
+                );
+            } else if (mUwbInjector.getDeviceConfigFacade().isAndroidSpecificTimesyncSupported()) {
+                // If Android proprietary timesync calculation is supported
+                Log.i(TAG, "Android specific timesync calculation");
+                return androidUwbTimestamp(timestamp);
+            } else if (mUwbInjector.getUwbServiceCore().getCachedSpecificationParams(
+                    null).getFiraSpecificationParams().getUciVersionSupported() >= 2) {
+                // Fira based uci query uwbs timestamp
+                Log.i(TAG, "Fira 2.0 UCI query uwbs timestamp based timesync");
+                return uciUwbTimestamp(timestamp);
+            } else {
+                // All other scenarios
+                Log.i(TAG, "Default timesync calculation");
+                return defaultTimestamp(timestamp);
+            }
+        }
 
-            // While it's unlikely to be needed, flush the queue just in case
-            // there is something stale in it.
-            while (mVendorUciQueue.poll() != null) { }
-
+        private BleTimestamp androidUwbTimestamp(Timestamp timestamp) {
             // Kick off a call to the UWB HAL via a UCI message. We'll get
             // a callback and the response will be passed back via a queue.
             ByteBuffer systemTimeBuffer = ByteBuffer.allocate(16);
             systemTimeBuffer.order(ByteOrder.LITTLE_ENDIAN);
             systemTimeBuffer.putLong(timestamp.systemTimeUs);
             systemTimeBuffer.putLong(timestamp.bluetoothTimeUs);
-            int sendVendorUciStatus = mUwbManager.sendVendorUciMessage(
-                    ANDROID_GID, ANDROID_TIMESTAMP_ANCHOR_TO_UWBS,
-                    systemTimeBuffer.array());
-            if (sendVendorUciStatus != UwbManager.SEND_VENDOR_UCI_SUCCESS) {
-                throw new RuntimeException(String.format("sendVendorUciMessage failed: %d",
-                        sendVendorUciStatus));
+
+            // The uncertainty for ble hal's system time calculation will be accounted by uwb HAL.
+            FutureTask<UwbVendorUciResponse> sendVendorCmdTask = new FutureTask<>(
+                    () -> mNativeUwbManager.sendRawVendorCmd(MESSAGE_TYPE_COMMAND,
+                            ANDROID_GID, ANDROID_TIMESTAMP_ANCHOR_TO_UWBS,
+                            systemTimeBuffer.array(), null));
+
+            UwbVendorUciResponse response = null;
+            int uciStatus = UwbUciConstants.STATUS_CODE_FAILED;
+            try {
+                response = mUwbInjector.runTaskOnSingleThreadExecutorUci(sendVendorCmdTask,
+                        SEND_VENDOR_CMD_TIMEOUT_MS);
+                uciStatus = response.status;
+            } catch (TimeoutException e) {
+                Log.i(TAG, "Failed to send vendor command - status : TIMEOUT");
+            } catch (InterruptedException e) {
+                e.printStackTrace();
+            } catch (ExecutionException e) {
+                e.printStackTrace();
             }
 
-            // The callback is expected to fire right away. Put a long timeout
-            // so we don't get stuck forever if something goes wrong.
+            if (uciStatus != UwbManager.SEND_VENDOR_UCI_SUCCESS) {
+                throw new RuntimeException(String.format("sendVendorUciMessage failed: %d",
+                        uciStatus));
+            }
+
+            // status (1), timestamp (8), uncertainty (4) = 13 bytes
+            final int expectedPayloadLen = 13;
+
+            byte[] payload = response.payload;
             TimestampConversionResult result;
-            try {
-                result = mVendorUciQueue.poll(TIMEOUT, TIMEOUT_UNIT);
-                if (result == null) {
-                    throw new RuntimeException("Timeout waiting for UCI Vendor Message Response");
+            ByteBuffer convBuffer = ByteBuffer.wrap(payload);
+            convBuffer.order(ByteOrder.LITTLE_ENDIAN);
+
+            byte convStatus = convBuffer.get();
+            if (convStatus != UCI_STATUS_OK) {
+                /* Caller handles/prints errors since some non-OK statuses are expected */
+                result = new TimestampConversionResult(convStatus);
+            } else if (payload.length < expectedPayloadLen) {
+                Log.e(TAG, String.format("Timestamp conversion response too short: %d < %d",
+                        payload.length, expectedPayloadLen));
+                result = new TimestampConversionResult(UCI_STATUS_INVALID_MESSAGE_SIZE);
+            } else {
+                if (payload.length != expectedPayloadLen) {
+                    Log.i(TAG, String.format(
+                            "Ignoring extra bytes in timestamp conversion response: %d > %d",
+                            payload.length, expectedPayloadLen));
                 }
-            } catch (InterruptedException e) {
-                throw new RuntimeException("Communication with UCI Vendor Callback failed: " + e);
+                result = new TimestampConversionResult(convStatus,
+                        convBuffer.getLong(), convBuffer.getInt());
             }
 
             long uwbsTimeOffsetUs;
             int uwbsConversionUncertaintyUs;
-            if (result.status == UCI_STATUS_OK) {
+            if (result.mStatus == UCI_STATUS_OK) {
                 // The UWB HAL gave us an absolute time, but convert to an
                 // offset so the math is the same if we don't need to convert.
-                uwbsTimeOffsetUs = result.timestampUs - timestamp.systemTimeUs;
-                uwbsConversionUncertaintyUs = result.uncertaintyUs;
-            } else if (result.status == UCI_STATUS_UNKNOWN_GID
-                    || result.status == UCI_STATUS_UNKNOWN_OID) {
+                uwbsTimeOffsetUs = result.mTimestampUs - timestamp.systemTimeUs;
+                uwbsConversionUncertaintyUs = result.mUncertaintyUs;
+            } else if (result.mStatus == UCI_STATUS_UNKNOWN_GID
+                    || result.mStatus == UCI_STATUS_UNKNOWN_OID) {
                 // If a HAL doesn't know about timestamp conversion then
                 // presumably it doesn't need it and the Bluetooth timestamp
                 // is already in the UWBS time domain.
@@ -299,19 +275,13 @@ public class TimesyncManager {
                 // TODO (b/422755279): add an option to assume `systemTime`
                 // is in BOOTTIME and use `queryUwbsTimestampMicros()` to
                 // convert.
-                Log.i(TAG, String.format("UWB HAL doesn't convert timestamps: %d", result.status));
-                uwbsTimeOffsetUs = DEVICE_TIME_OFFSET_US;
+                Log.i(TAG, String.format("UWB HAL doesn't convert timestamps: %d", result.mStatus));
+                uwbsTimeOffsetUs = mUwbInjector.getDeviceConfigFacade().getTimesyncDeviceOffset();
                 uwbsConversionUncertaintyUs = DEVICE_TIME_UNCERTAINTY;
             } else {
                 throw new RuntimeException(String.format("Timestamp conversion failed: %d",
-                        result.status));
+                        result.mStatus));
             }
-
-            Log.i(TAG, String.format("systemTime=%d => %d, bluetoothTime=%d, uncertainty=%d us",
-                    timestamp.systemTimeUs,
-                    timestamp.systemTimeUs + uwbsTimeOffsetUs,
-                    timestamp.bluetoothTimeUs,
-                    uwbsConversionUncertaintyUs));
 
             // Fill in the BleTimestamp structure after converting the time
             // domain of systemTime (if no conversion is needed,
@@ -339,62 +309,106 @@ public class TimesyncManager {
             //               Procedure 1).
             return new BleTimestamp(
                     timestamp.systemTimeUs + uwbsTimeOffsetUs,
-                    timestamp.bluetoothTimeUs,
-                    encodeTimeUncertainty(uwbsConversionUncertaintyUs),
-                    MAX_CLOCK_SKEW_PPM,
-                    /* isClockSkewMeasurementAvailable= */ false);
+                    Math.max(encodeTimeUncertainty(uwbsConversionUncertaintyUs),
+                            mUwbInjector.getDeviceConfigFacade().getTimesyncUncertaintyUs()),
+                    mUwbInjector.getDeviceConfigFacade().getTimesyncClockSkewPpm());
         }
 
-        private static int directionFromHal(byte direction) {
+        private BleTimestamp uciUwbTimestamp(Timestamp timestamp) {
+            long systemTimestampUs0;
+            long uwbDeviceTime;
+            long systemTimestampUs1;
+            long elapsedTime;
+            long uwbTimeOffsetUs;
+            long bestTimeOffsetUs = 0; // The offset between UWB and System clocks
+            long bestElapsedTime = Long.MAX_VALUE;
+
+            // Perform 3 iterations to find the execution path with the lowest latency (lowest
+            // jitter).
+            // A shorter elapsedTime means the midpoint calculation is more accurate.
+            for (int i = 0; i < 3; i++) {
+                systemTimestampUs0 = SystemClock.elapsedRealtimeNanos() / 1000;
+
+                synchronized (mClockLock) {
+                    // Fetch the current absolute microsecond counter from the UWB hardware
+                    uwbDeviceTime = mUwbInjector.getUwbServiceCore().queryUwbsTimestampMicros();
+                }
+
+                systemTimestampUs1 = SystemClock.elapsedRealtimeNanos() / 1000;
+                elapsedTime = systemTimestampUs1 - systemTimestampUs0;
+
+                // Calculate the offset using the 'Midpoint' assumption:
+                // We assume the hardware captured its timestamp exactly halfway through the
+                // request.
+                // Offset = UWB_Hardware_Time - Estimated_System_Time_At_Capture
+                uwbTimeOffsetUs = uwbDeviceTime - (systemTimestampUs0 + elapsedTime / 2);
+
+                // Keep the result from the "tightest" bracket (least amount of system noise).
+                if (bestElapsedTime > elapsedTime) {
+                    bestElapsedTime = elapsedTime;
+                    bestTimeOffsetUs = uwbTimeOffsetUs;
+                }
+            }
+            long uncertaintyUs = (bestElapsedTime) / 2
+                    + mUwbInjector.getDeviceConfigFacade().getTimesyncBleTimeUncertainty();
+            return new BleTimestamp(
+                    timestamp.systemTimeUs + bestTimeOffsetUs,
+                    Math.max(encodeTimeUncertainty((int) uncertaintyUs),
+                            mUwbInjector.getDeviceConfigFacade().getTimesyncUncertaintyUs()),
+                    mUwbInjector.getDeviceConfigFacade().getTimesyncClockSkewPpm()
+            );
+        }
+
+        private BleTimestamp defaultTimestamp(Timestamp timestamp) {
+            long uncertaintyUs = DEVICE_TIME_UNCERTAINTY
+                    + mUwbInjector.getDeviceConfigFacade().getTimesyncBleTimeUncertainty();
+            return new BleTimestamp(
+                    // Shift the system time by a pre-configured device-specific offset
+                    timestamp.systemTimeUs
+                            + mUwbInjector.getDeviceConfigFacade().getTimesyncDeviceOffset(),
+                    Math.max(encodeTimeUncertainty((int) uncertaintyUs),
+                            mUwbInjector.getDeviceConfigFacade().getTimesyncUncertaintyUs()),
+                    mUwbInjector.getDeviceConfigFacade().getTimesyncClockSkewPpm()
+            );
+        }
+
+
+        //TODO (b/467707737) check if switch case implementation correct
+        private static int directionFromHal(int direction) {
             switch (direction) {
-                case Direction.TX:
-                    return CccDkTimeSync.Direction.TX.ordinal();
-                case Direction.RX:
-                    return CccDkTimeSync.Direction.RX.ordinal();
+                case TimesyncEvent.DIRECTION_TX:
+                    return 1;
+                case TimesyncEvent.DIRECTION_RX:
+                    return 0;
                 default:
                     return 0;
             }
         }
 
-        private static int eventFromHal(byte event) {
+        private static int eventFromHal(int event) {
             switch (event) {
-                case LmpEventId.CONNECT_IND:
-                    return CccDkTimeSync.BleLmpEvent.CONNECT_IND.ordinal();
-                case LmpEventId.LL_PHY_UPDATE_IND:
-                    return CccDkTimeSync.BleLmpEvent.LL_PHY_UPDATE_IND.ordinal();
+                case TimesyncEvent.BLE_LMP_EVENT_CONNECT_IND:
+                    return 0;
+                case TimesyncEvent.BLE_LMP_EVENT_LL_PHY_UPDATE_IND:
+                    return 1;
                 default:
                     return 0;
             }
         }
 
-        private final IEventCallback mCallback;
-        private final Context mContext;
-        private final UwbManager mUwbManager;
-        private final BlockingQueue<TimestampConversionResult> mVendorUciQueue;
-        private final CccDkTimeSyncVendorUciCallback mVendorUciCallback;
+        private final ITimesyncCallbackListener mCallbackListener;
+        private final NativeUwbManager mNativeUwbManager;
+        private final UwbInjector mUwbInjector;
 
-        private BluetoothCccCallback(IEventCallback callback, Context context,
-                UwbManager uwbManager) {
-            mCallback = callback;
-            mContext = context;
-            mUwbManager = uwbManager;
-            mVendorUciQueue = new LinkedBlockingQueue<>();
-            mVendorUciCallback = new CccDkTimeSyncVendorUciCallback(mVendorUciQueue);
-            mUwbManager.registerUwbVendorUciCallback(Executors.newSingleThreadExecutor(),
-                    mVendorUciCallback);
+        private BluetoothCccCallback(ITimesyncCallbackListener callback,
+                NativeUwbManager nativeUwbManager, UwbInjector uwbInjector) {
+            mCallbackListener = callback;
+            mNativeUwbManager = nativeUwbManager;
+            mUwbInjector = uwbInjector;
         }
 
-        private BluetoothCccCallback(IBleLmpEventListener listener, Context context,
-                UwbManager uwbManager) {
-            this(new BleLmpEventListenerWrapper(context, listener), context, uwbManager);
-        }
-
-        public void close() {
-            mUwbManager.unregisterUwbVendorUciCallback(mVendorUciCallback);
-        }
-        //TODO (b/467707737): fix address type, currently just set to public
         @Override
-        @PermissionManuallyEnforced
+        @RequiresNoPermission
         public void onEventGenerated(
                 Timestamp timestamp,
                 byte addressType,
@@ -403,122 +417,76 @@ public class TimesyncManager {
                 byte lmpEventId,
                 char eventCounter)
                 throws RemoteException {
-            enforceUwbPrivilegedPermission(mContext);
-            mCallback.onTimestamp(
-                    address,
-                    timestampFromHal(timestamp),
-                    directionFromHal(direction),
-                    eventFromHal(lmpEventId),
-                    eventCounter);
-        }
-
-        @Override
-        @PermissionManuallyEnforced
-        public void onRegistered(boolean status) throws RemoteException {
-            enforceUwbPrivilegedPermission(mContext);
-            if (status) {
-                Log.i(TAG, "Register Success");
-                mCallback.onRegisterSuccess();
-            } else {
-                Log.i(TAG, "Register Failed");
-                mCallback.onRegisterFailure();
+            Log.i(TAG, "Received system timestamp: "
+                    + String.format("systemTime=%d, bluetoothTime=%d,",
+                    timestamp.systemTimeUs,
+                    timestamp.bluetoothTimeUs));
+            BleTimestamp mBleTimestamp = timestampFromHal(timestamp);
+            Log.i(TAG, "Calculated uwb timestamp: " + String.format(
+                    "mUwbTimestamp=%d, mDeviceTimeUncertainty=%d, mMaxClockSkewPpm=%d us",
+                    mBleTimestamp.mUwbTimestamp,
+                    mBleTimestamp.mDeviceTimeUncertainty,
+                    mBleTimestamp.mMaxClockSkewPpm));
+            BluetoothAddress bluetoothAddress = new BluetoothAddress(
+                    bytesToStringBluetoothAddress(address), addressType);
+            //TODO check injector for on delivery check
+            if (sAddressCallbackMap.containsKey(bluetoothAddress.getAddress())) {
+                sAddressCallbackMap.get(bluetoothAddress.getAddress()).mCallbackListener
+                        .onTimesyncEvent(
+                                new TimesyncEvent.Builder(
+                                        bluetoothAddress.getAddress(),
+                                        bluetoothAddress.getAddressType(),
+                                        eventFromHal(lmpEventId),
+                                        directionFromHal(direction),
+                                        mBleTimestamp.getUwbTimestamp(),
+                                        mBleTimestamp.getDeviceTimeUncertainty(),
+                                        mBleTimestamp.getMaxClockSkewPpm(),
+                                        eventCounter)
+                                        .build());
             }
         }
 
         @Override
-        @PermissionManuallyEnforced
+        @RequiresNoPermission
+        public void onRegistered(boolean status) throws RemoteException {
+            if (status) {
+                Log.i(TAG, "Register Success");
+                mCallbackListener.onRegistered();
+            } else {
+                Log.i(TAG, "Register Failed");
+                mCallbackListener.onRegisterFailed();
+            }
+        }
+
+        @Override
+        @RequiresNoPermission
         public String getInterfaceHash() {
-            enforceUwbPrivilegedPermission(mContext);
             return IBluetoothLmpEventCallback.HASH;
         }
 
         @Override
-        @PermissionManuallyEnforced
+        @RequiresNoPermission
         public int getInterfaceVersion() {
-            enforceUwbPrivilegedPermission(mContext);
             return IBluetoothLmpEventCallback.VERSION;
         }
     }
 
-    private class CccDkTimeSyncImpl extends ICccDkTimeSync.Stub {
-
-        @Override
-        @PermissionManuallyEnforced
-        public void getApiVersion(
-                Version versionMin,
-                Version versionMax,
-                IVersionListener listener)
-                throws RemoteException {
-            enforceUwbPrivilegedPermission(mContext);
-            for (Version version : SUPPORTED_VERSIONS) {
-                if (versionMin.isGreaterThan(version) || versionMax.isLessThan(version)) {
-                    continue;
-                }
-
-                listener.onVersion(version);
-                return;
-            }
-
-            listener.onVersion(CccDkTimeSync.VERSION_UNSUPPORTED);
-        }
-
-        //TODO (b/467707737): fix address type, currently just set to public
-        public static final byte PUBLIC = 0x0;
-        @Override
-        @PermissionManuallyEnforced
-        public void registerBleLmpEventListener(byte[] address, IBleLmpEventListener listener)
-                throws RemoteException {
-            enforceUwbPrivilegedPermission(mContext);
-            mBluetoothCccCallback = new BluetoothCccCallback(listener, mContext, mUwbManager);
-            mBtCccHal.registerForLmpEvents(
-                    mBluetoothCccCallback,
-                    PUBLIC,
-                    address,
-                    new byte[]{LmpEventId.CONNECT_IND, LmpEventId.LL_PHY_UPDATE_IND}); }
-
-        @Override
-        @PermissionManuallyEnforced
-        public void registerEventCallback(byte[] address, IEventCallback callback)
-                throws RemoteException {
-            enforceUwbPrivilegedPermission(mContext);
-            mBluetoothCccCallback = new BluetoothCccCallback(callback, mContext, mUwbManager);
-            mBtCccHal.registerForLmpEvents(
-                    mBluetoothCccCallback,
-                    PUBLIC,
-                    address,
-                    new byte[] {LmpEventId.CONNECT_IND, LmpEventId.LL_PHY_UPDATE_IND});
-        }
-
-        @Override
-        @PermissionManuallyEnforced
-        public void unregisterEventCallback(byte[] address) throws RemoteException {
-            enforceUwbPrivilegedPermission(mContext);
-            mBtCccHal.unregisterLmpEvents(
-                    PUBLIC,
-                    address);
-            mBluetoothCccCallback.close();
-        }
-    }
     private final Context mContext;
     private IBluetoothLmpEvent mBtCccHal;
-    private CccDkTimeSyncImpl mCccDkTimeSyncImpl;
     private IBinder.DeathRecipient mServiceDeathRecipient;
-    private UwbManager mUwbManager;
-    //TODO (b/467707737) call serviceCore instead of using uwbManager
+    private NativeUwbManager mNativeUwbManager;
     private final UwbInjector mUwbInjector;
-    private BluetoothCccCallback mBluetoothCccCallback;
+    private static final Map<String, BluetoothCccCallback> sAddressCallbackMap =
+            new ConcurrentHashMap<>();
 
-    public TimesyncManager(@NonNull Context context, @NonNull UwbInjector uwbInjector) {
+
+    public TimesyncManager(@NonNull UwbContext context, @NonNull NativeUwbManager nativeUwbManager,
+            @NonNull UwbInjector uwbInjector) {
         mContext = context;
         mUwbInjector = uwbInjector;
+        mNativeUwbManager = nativeUwbManager;
 
         try {
-            mUwbManager = mContext.getSystemService(UwbManager.class);
-            if (mUwbManager == null) {
-                Log.e(TAG, "Unable to obtain UwbManager");
-                return;
-            }
-
             IBluetoothLmpEvent bluetoothCcc = IBluetoothLmpEvent.Stub.asInterface(
                     ServiceManager.waitForDeclaredService(HAL_INSTANCE_NAME));
             if (bluetoothCcc == null) {
@@ -530,43 +498,67 @@ public class TimesyncManager {
                 Log.e(TAG, "Unable to obtain service binder");
                 return;
             }
-            mServiceDeathRecipient = new BluetoothCccDeathRecipient();
-            serviceBinder.linkToDeath(mServiceDeathRecipient, /* flags */ 0);
+            //TODO need to check
+//            mServiceDeathRecipient = new BluetoothCccDeathRecipient();
+//            serviceBinder.linkToDeath(mServiceDeathRecipient, /* flags */ 0);
 
             mBtCccHal = bluetoothCcc;
-            mCccDkTimeSyncImpl = new CccDkTimeSyncImpl();
-        } catch (RemoteException e) {
-            Log.e(TAG, "Failed with remote exception: " + e);
         } catch (Exception e) {
             Log.e(TAG, "Failed with exception: " + e);
         }
     }
 
+    /**
+     *
+     */
+    public void registerEventCallback(
+            ITimesyncCallbackListener callback,
+            BluetoothAddress bluetoothAddress)
+            throws RemoteException {
+        BluetoothCccCallback bluetoothCccCallback = new BluetoothCccCallback(callback,
+                mNativeUwbManager, mUwbInjector);
+        sAddressCallbackMap.put(bluetoothAddress.getAddress(), bluetoothCccCallback);
+        if (mBtCccHal == null) {
+            Log.e(TAG, "Unable to obtain mBtCccHal");
+            return;
+        }
+        mBtCccHal.registerForLmpEvents(
+                bluetoothCccCallback,
+                (byte) bluetoothAddress.getAddressType(),
+                bluetoothAddressToBytes(bluetoothAddress.getAddress()),
+                new byte[]{LmpEventId.CONNECT_IND, LmpEventId.LL_PHY_UPDATE_IND});
+    }
+
+    public void unregisterEventCallback(ITimesyncCallbackListener callback,
+            BluetoothAddress bluetoothAddress)
+            throws RemoteException {
+        if (sAddressCallbackMap.containsKey(bluetoothAddress.getAddress())
+                && sAddressCallbackMap.get(
+                bluetoothAddress.getAddress()).mCallbackListener == callback) {
+            mBtCccHal.unregisterLmpEvents(
+                    (byte) bluetoothAddress.getAddressType(),
+                    bluetoothAddressToBytes(bluetoothAddress.getAddress()));
+            sAddressCallbackMap.remove(bluetoothAddress.getAddress());
+        }
+    }
+
     @VisibleForTesting(otherwise = VisibleForTesting.NONE)
-    public void mockCreate(@NonNull UwbManager uwbManager, @NonNull IBluetoothLmpEvent hal) {
-        mUwbManager = uwbManager;
+    public void mockCreate(@NonNull IBluetoothLmpEvent hal) {
         mBtCccHal = hal;
-        mCccDkTimeSyncImpl = new CccDkTimeSyncImpl();
     }
 
     @VisibleForTesting(otherwise = VisibleForTesting.NONE)
     public static void mockTimeout(long timeout, TimeUnit timeoutUnit) {
-        TIMEOUT = timeout;
-        TIMEOUT_UNIT = timeoutUnit;
+        sTimeout = timeout;
+        sTimeoutUnit = timeoutUnit;
     }
 
     private class BluetoothCccDeathRecipient implements IBinder.DeathRecipient {
         @Override
         public void binderDied() {
             Log.e(TAG, "BluetoothCcc service died.");
+//            unregisterEventCallback()
             mBtCccHal = null;
         }
-    }
-
-    public IBinder onBind(Intent intent) {
-        if (ICccDkTimeSync.class.getName().equals(intent.getAction())) {
-            return mCccDkTimeSyncImpl;
-        }
-        return null;
     }
 }

@@ -19,10 +19,12 @@ package com.android.server.ranging.session;
 import static android.ranging.oob.OobInitiatorRangingConfig.RANGING_MODE_AUTO;
 import static android.ranging.oob.OobInitiatorRangingConfig.RANGING_MODE_HIGH_ACCURACY;
 
+import static com.android.server.ranging.oob.OobUtils.fromOobMotion;
 import static com.android.server.ranging.common.RangingUtils.macAddressToString;
 
 import android.bluetooth.BluetoothDevice;
 import android.content.AttributionSource;
+import android.ranging.MotionState;
 import android.ranging.RangingCapabilities;
 import android.ranging.RangingConfig;
 import android.ranging.RangingData;
@@ -54,8 +56,10 @@ import com.android.server.ranging.oob.OobInitiatorProtocol.PeerCapabilities;
 import com.android.server.ranging.oob.packets.BleCsCapabilities;
 import com.android.server.ranging.oob.packets.Capabilities;
 import com.android.server.ranging.oob.packets.Configuration;
-import com.android.server.ranging.oob.packets.ConfigurationRequest;
 import com.android.server.ranging.oob.packets.DeviceType;
+import com.android.server.ranging.oob.packets.MotionIndicator;
+import com.android.server.ranging.oob.packets.MotionNotification;
+import com.android.server.ranging.oob.packets.OobMessage;
 import com.android.server.ranging.oob.packets.Technology;
 import com.android.server.ranging.oob.packets.TechnologyTransitioning;
 import com.android.server.ranging.rtt.RttConfigSelector;
@@ -167,7 +171,8 @@ public class OobInitiatorRangingSession extends BaseRangingSession implements Ra
                         + "failed to agree on a configuration");
                 return;
             }
-            ConfigurationRequest request = mProtocol.getConfigurationRequest(mDevice, remote);
+            OobMessage request = mProtocol.getConfigurationRequest(
+                    mDevice, remote, MotionIndicator.Supported);
             Log.v(TAG, "Sending " + request);
             var unused = mConnection.sendData(request.toBytes())
                     .transform(unused1 -> {
@@ -319,14 +324,18 @@ public class OobInitiatorRangingSession extends BaseRangingSession implements Ra
             Peer peer = mPeers.get(peerDevice);
             Set<RangingTechnology> starting = peer.mEngine.getTechnologiesToStart();
 
-            ConfigurationRequest request = mProtocol.getConfigurationRequest(
+            OobMessage request = mProtocol.getConfigurationRequest(
                     peerDevice,
-                    mConfigManager.getRemoteConfigs(peerDevice, starting));
+                    mConfigManager.getRemoteConfigs(peerDevice, starting),
+                    MotionIndicator.Supported); // TODO: Read the configuration instead of hard-code
             pendingSends.put(
                     peerDevice,
                     peer.mConnection.sendData(request.toBytes())
                             .transformAsync(unused -> {
                                 peer.mOobCompleted.set(null);
+                                // TODO: Exchange OOB capability and enabling param.
+                                peer.mConnection.receiveData().addCallback(
+                                        new OobConnectionListener(peer), mOobExecutor);
                                 return Futures.immediateFuture(null);
                             }, mOobExecutor));
 
@@ -499,5 +508,53 @@ public class OobInitiatorRangingSession extends BaseRangingSession implements Ra
     public void close() {
         mPeers.values().forEach(Peer::close);
         mPeers.clear();
+    }
+
+    // A Listener to handle async message from responder.
+    private class OobConnectionListener implements FutureCallback<byte[]> {
+        private final Peer mPeer;
+
+        OobConnectionListener(Peer peer) {
+            mPeer = peer;
+        }
+
+        @Override
+        public void onSuccess(byte[] data) {
+            if (!mPeers.containsKey(mPeer.mDevice)) {
+                Log.d(TAG, "Peer " + mPeer.mDevice
+                        + " removed or session closed. Stopping read loop.");
+                return;
+            }
+            OobMessage message = OobMessage.fromBytes(data);
+            Log.v(TAG, "Received " + message + " from " + mPeer.mDevice);
+            switch (message) {
+                case MotionNotification notification -> {
+                    reportPeerMotion(
+                            mPeer.mDevice,
+                            new MotionState(fromOobMotion(notification.getMotion())));
+                }
+                default -> {
+                    Log.w(TAG, "Received unexpected OOB message with id " + message.getId());
+                }
+            }
+            mPeer.mConnection.receiveData().addCallback(this, mOobExecutor);
+        }
+
+        @Override
+        public void onFailure(Throwable t) {
+            if (t instanceof ConnectionClosedException
+                    && ((ConnectionClosedException) t).getReason()
+                    == ConnectionClosedException.Reason.REQUESTED) {
+                Log.i(TAG, "OOB connection with " + mPeer.mDevice + " closed by local request");
+                return;
+            }
+            Log.w(TAG, "OOB connection with " + mPeer.mDevice + " failed", t);
+            if (mPeers.remove(mPeer.mDevice) != null) {
+                mPeer.close();
+            }
+            if (mPeers.isEmpty()) {
+                mSessionListener.onSessionClosed(InternalReason.NO_PEERS_FOUND);
+            }
+        }
     }
 }

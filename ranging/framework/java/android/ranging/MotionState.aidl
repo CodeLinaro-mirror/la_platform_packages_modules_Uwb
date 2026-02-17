@@ -14,18 +14,7 @@
  * limitations under the License.
  */
 
-package android.uwb.timesync;
-
-import android.uwb.timesync.BleTimestamp;
+package android.ranging;
 
 /** @hide */
-oneway interface IEventCallback {
-  void onRegisterSuccess() = 1;
-  void onRegisterFailure() = 2;
-  void onTimestamp(
-    in byte[] address,
-    in BleTimestamp timestamp,
-    int direction,
-    int events,
-    int eventCount) = 3;
-}
+parcelable MotionState;

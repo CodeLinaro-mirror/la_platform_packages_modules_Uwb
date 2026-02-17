@@ -24,20 +24,23 @@ import static com.android.server.ranging.uwb.UwbConfig.toBackend;
 import android.content.AttributionSource;
 import android.content.Context;
 import android.ranging.DataNotificationConfig;
+import android.ranging.DlTdoaMeasurement;
 import android.ranging.RangingCapabilities;
 import android.ranging.RangingData;
 import android.ranging.RangingDataExtras;
 import android.ranging.RangingDevice;
 import android.ranging.RangingMeasurement;
 import android.ranging.RangingPreference;
+import android.ranging.SessionConfig;
 import android.ranging.raw.RawResponderRangingConfig;
 import android.ranging.uwb.DlTdoaRangingParams;
 import android.ranging.uwb.UwbAddress;
 import android.ranging.uwb.UwbComplexChannel;
 import android.ranging.uwb.UwbRangingCapabilities;
 import android.ranging.uwb.UwbSpecificData;
-
 import android.util.Log;
+import android.util.Range;
+
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
@@ -70,6 +73,11 @@ import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.Futures;
 import com.google.common.util.concurrent.ListeningExecutorService;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.util.HashMap;
+import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 /** Ranging adapter for Ultra-wideband (UWB). */
@@ -84,6 +92,7 @@ public class UwbAdapter implements RangingAdapter {
     private final StateMachine<State> mStateMachine;
     private final Object mLock;
     private final BiMap<RangingDevice, UwbAddress> mPeers;
+    private final HashMap<UwbDevice, RangingDevice> mAnchors;
     private boolean mIsDlTdoaSession = false;
 
     private DataNotificationManager mDataNotificationManager;
@@ -93,6 +102,7 @@ public class UwbAdapter implements RangingAdapter {
 
     private AttributionSource mNonPrivilegedAttributionSource;
     boolean mIsBackgroundRangingSupported;
+    private List<Integer> mSupportedAntennaModes;
 
     private final AttributionSource mAttributionSource;
 
@@ -145,22 +155,44 @@ public class UwbAdapter implements RangingAdapter {
         mExecutorService = executor;
         mCallbacks = null;
         mPeers = Maps.synchronizedBiMap(HashBiMap.create());
+        mAnchors = new HashMap<>();
         mDataNotificationManager = new DataNotificationManager(
                 new DataNotificationConfig.Builder().build(),
                 new DataNotificationConfig.Builder().build()
         );
-        mIsBackgroundRangingSupported = Optional.ofNullable(mRangingInjector)
+        UwbRangingCapabilities uwbCapabilities = Optional.ofNullable(mRangingInjector)
                 .map(RangingInjector::getCapabilitiesProvider)
                 .map(CapabilitiesProvider::getCapabilities)
                 .map(RangingCapabilities::getUwbCapabilities)
+                .orElse(null);
+        mIsBackgroundRangingSupported = Optional.ofNullable(uwbCapabilities)
                 .map(UwbRangingCapabilities::isBackgroundRangingSupported)
                 .orElse(true); // Defaults to true;
+        mSupportedAntennaModes = Optional.ofNullable(uwbCapabilities)
+                .map(UwbRangingCapabilities::getSupportedAntennaModes)
+                .orElse(List.of()); // Defaults to empty;
         mAttributionSource = attributionSource;
     }
 
     @Override
     public @NonNull RangingTechnology getTechnology() {
         return RangingTechnology.UWB;
+    }
+
+    /**
+     * Use this method to do some service side validation of params
+     * {@link android.ranging.RangingSession#start(RangingPreference)}.
+     */
+    public boolean isConfigValid(ConfigurationManager.TechnologyConfig config) {
+        if (config instanceof UwbConfig uwbConfig) {
+            int antennaMode = uwbConfig.getSessionConfig().getAntennaMode();
+            if (antennaMode != SessionConfig.ANTENNA_MODE_UNSET
+                && !mSupportedAntennaModes.contains(antennaMode)) {
+                Log.e(TAG,  "Invalid antenna mode: " + antennaMode);
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
@@ -175,6 +207,11 @@ public class UwbAdapter implements RangingAdapter {
         if (!mStateMachine.transition(State.STOPPED, State.STARTED)) {
             Log.v(TAG, "Attempted to start adapter when it was already started");
             closeForReason(InternalReason.INTERNAL_ERROR);
+            return;
+        }
+        if (!isConfigValid(config)) {
+            Log.v(TAG, "Invalid session config passed to start");
+            closeForReason(InternalReason.UNSUPPORTED);
             return;
         }
 
@@ -410,32 +447,15 @@ public class UwbAdapter implements RangingAdapter {
         }
 
         @Override
-        public void onDlTdoaRangingResult(UwbDevice peer,
+        public void onDlTdoaRangingResult(UwbDevice anchor,
                 com.android.ranging.uwb.backend.internal.DlTdoaMeasurement measurement) {
-            android.ranging.DlTdoaMeasurement.Builder builder =
-                    new android.ranging.DlTdoaMeasurement.Builder()
-                            .setMessageType(measurement.getMessageType())
-                            .setMessageControl(measurement.getMessageControl())
-                            .setBlockIndex(measurement.getBlockIndex())
-                            .setRoundIndex(measurement.getRoundIndex())
-                            // .setNlos(measurement.getNlos())
-                            .setTxTimestamp(measurement.getTxTimestamp())
-                            .setRxTimestamp(measurement.getRxTimestamp())
-                            .setAnchorCfo(measurement.getAnchorCfo())
-                            .setCfo(measurement.getCfo())
-                            .setInitiatorReplyTime(measurement.getInitiatorReplyTime())
-                            .setResponderReplyTime(measurement.getResponderReplyTime())
-                            .setInitiatorResponderTof(measurement.getInitiatorResponderTof())
-                            .setAnchorLocationData(measurement.getAnchorLocation())
-                            .setActiveRangingRoundIndexes(
-                                    RangingUtils.byteArrayToIntegerList(
-                                            measurement.getActiveRangingRounds()));
+            DlTdoaMeasurement dlTdoaMeasurement = convertDlTdoaMeasurement(measurement);
 
             synchronized (mLock) {
                 if (mStateMachine.getState() == State.STARTED) {
-                    RangingDevice device = convertPeerDevice(peer);
-                    if (device != null) {
-                        mCallbacks.onDlTdoaRangingResult(device, builder.build());
+                    RangingDevice anchorDevice = convertPeerDevice(anchor);
+                    if (anchorDevice != null) {
+                        mCallbacks.onDlTdoaRangingResult(anchorDevice, dlTdoaMeasurement);
                     }
                 }
             }
@@ -472,8 +492,12 @@ public class UwbAdapter implements RangingAdapter {
                 @NonNull com.android.ranging.uwb.backend.internal.UwbDevice peer
         ) {
             if (mIsDlTdoaSession) {
-                // For DL-TDOA, the "peer" is the anchor. We create a RangingDevice on the fly.
-                return new RangingDevice.Builder().build();
+                // For DL-TDoA, the "peer" is the anchor. We create a RangingDevice on the fly.
+                return mAnchors.computeIfAbsent(peer, key ->
+                        new RangingDevice.Builder()
+                                .setDlTdoaUwbAddress(
+                                        UwbAddress.fromBytes(key.getAddress().toBytes()))
+                                .build());
             }
             RangingDevice device = mPeers
                     .inverse()
@@ -493,6 +517,142 @@ public class UwbAdapter implements RangingAdapter {
                     .setMeasurement(measurement.getValue())
                     .setConfidence(convertConfidence(measurement.getConfidence()))
                     .build();
+        }
+
+        private static @DlTdoaRangingParams.MeasurementVersion int convertMeasurementVersion(
+                int measurementVersion) {
+            return switch (measurementVersion) {
+                case com.android.ranging.uwb.backend.internal.DlTdoaMeasurement
+                        .MEASUREMENT_VERSION_1 ->
+                                DlTdoaRangingParams.MEASUREMENT_VERSION_1;
+                case com.android.ranging.uwb.backend.internal.DlTdoaMeasurement
+                        .MEASUREMENT_VERSION_2 ->
+                                DlTdoaRangingParams.MEASUREMENT_VERSION_2;
+                default -> DlTdoaRangingParams.MEASUREMENT_VERSION_UNKNOWN;
+            };
+        }
+
+        private static @Nullable DlTdoaMeasurement.Wgs84Location convertWgs84Location(
+                @Nullable UwbAnchorLocation.UwbWgs84Location wgs84Location) {
+            if (wgs84Location == null) {
+                return null;
+            }
+            return new DlTdoaMeasurement.Wgs84Location(
+                    wgs84Location.getLatitude(),
+                    wgs84Location.getLongitude(),
+                    wgs84Location.getAltitude());
+        }
+
+        private static @Nullable DlTdoaMeasurement.RelativeLocation convertRelativeLocation(
+                @Nullable UwbAnchorLocation.UwbRelativeLocation relativeLocation) {
+            if (relativeLocation == null) {
+                return null;
+            }
+            return new DlTdoaMeasurement.RelativeLocation(
+                    relativeLocation.getX(),
+                    relativeLocation.getY(),
+                    relativeLocation.getZ());
+        }
+
+        private static @Nullable DlTdoaMeasurement.ZElementExtension convertZElementExtension(
+                @Nullable UwbAnchorLocation.UwbZElementExtension zElementExtension) {
+            if (zElementExtension == null) {
+                return null;
+            }
+            Range<Double> anchorHeightAboveFloorRange =
+                    zElementExtension.getAnchorHeightAboveFloorRange();
+            return new DlTdoaMeasurement.ZElementExtension(
+                    zElementExtension.getAnchorFloorNumber(),
+                    zElementExtension.getExpectedToMove(),
+                    zElementExtension.getAnchorHeightAboveFloor(),
+                    zElementExtension.getAnchorHeightAboveFloorUncertainty(),
+                    zElementExtension.isAnchorFloorNumberOutOfRange(),
+                    zElementExtension.isAnchorHeightAboveFloorOutOfRange(),
+                    anchorHeightAboveFloorRange == null
+                            ? Double.NaN : anchorHeightAboveFloorRange.getLower(),
+                    anchorHeightAboveFloorRange == null
+                            ? Double.NaN : anchorHeightAboveFloorRange.getUpper()
+                    );
+        }
+
+        private static @DlTdoaMeasurement.AnchorLocation.CoordinateType int
+                convertCoordinateType(int coordinateType) {
+            return switch (coordinateType) {
+                case UwbAnchorLocation.COORDINATE_WGS84 ->
+                        DlTdoaMeasurement.AnchorLocation.COORDINATE_WGS84;
+                case UwbAnchorLocation.COORDINATE_RELATIVE ->
+                        DlTdoaMeasurement.AnchorLocation.COORDINATE_RELATIVE;
+                case UwbAnchorLocation.COORDINATE_WGS84_PLUS_Z_ELEMENT ->
+                        DlTdoaMeasurement.AnchorLocation.COORDINATE_WGS84_PLUS_Z_ELEMENT;
+                case UwbAnchorLocation.COORDINATE_RELATIVE_PLUS_Z_ELEMENT ->
+                        DlTdoaMeasurement.AnchorLocation.COORDINATE_RELATIVE_PLUS_Z_ELEMENT;
+                case UwbAnchorLocation.COORDINATE_RELATIVE_WITH_Z_GRAVITY_ALIGNED ->
+                        DlTdoaMeasurement.AnchorLocation.COORDINATE_RELATIVE_WITH_Z_GRAVITY_ALIGNED;
+                case UwbAnchorLocation.COORDINATE_RELATIVE_WITH_Z_GRAVITY_ALIGNED_PLUS_Z_ELEMENT ->
+                        DlTdoaMeasurement
+                                .AnchorLocation
+                                        .COORDINATE_RELATIVE_WITH_Z_GRAVITY_ALIGNED_PLUS_Z_ELEMENT;
+                default -> DlTdoaMeasurement.AnchorLocation.COORDINATE_UNKNOWN;
+            };
+        }
+
+        private static DlTdoaMeasurement.AnchorLocation convertAnchorLocation(
+                int measurementVersion, int messageControl, @NonNull byte[] rawAnchorLocation) {
+            Objects.requireNonNull(rawAnchorLocation);
+
+            UwbAnchorLocation location = switch (measurementVersion) {
+                case com.android.ranging.uwb.backend.internal.DlTdoaMeasurement
+                        .MEASUREMENT_VERSION_1 ->
+                                UwbAnchorLocation.fromBytesV1(messageControl, rawAnchorLocation);
+                case com.android.ranging.uwb.backend.internal.DlTdoaMeasurement
+                        .MEASUREMENT_VERSION_2 ->
+                                UwbAnchorLocation.fromBytesV2(rawAnchorLocation);
+                default -> UwbAnchorLocation.fromBytesWithUnknownType(rawAnchorLocation);
+            };
+            return new DlTdoaMeasurement.AnchorLocation(
+                    convertCoordinateType(location.getCoordinateType()),
+                    location.getRawBytes(),
+                    convertWgs84Location(location.getWgs84Location()),
+                    convertRelativeLocation(location.getRelativeLocation()),
+                    convertZElementExtension(location.getZElementExtension()));
+        }
+
+        private static DlTdoaMeasurement convertDlTdoaMeasurement(
+                @NonNull com.android.ranging.uwb.backend.internal.DlTdoaMeasurement measurement) {
+            android.ranging.DlTdoaMeasurement.Builder builder =
+                    new android.ranging.DlTdoaMeasurement.Builder(
+                            convertMeasurementVersion(measurement.getMeasurementVersion()),
+                            measurement.getMessageType(),
+                            measurement.getMessageControl(),
+                            measurement.getBlockIndex(),
+                            measurement.getRoundIndex(),
+                            measurement.getNLoS(),
+                            ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN)
+                                    .putLong(measurement.getTxTimestamp()).array(),
+                            ByteBuffer.allocate(8).order(ByteOrder.LITTLE_ENDIAN)
+                                    .putLong(measurement.getRxTimestamp()).array(),
+                            measurement.getAnchorCfo(),
+                            measurement.getCfo(),
+                            measurement.getInitiatorReplyTime(),
+                            measurement.getResponderReplyTime(),
+                            measurement.getInitiatorResponderTof()
+                    );
+            builder.setAoaAzimuth(measurement.getAoaAzimuth());
+            builder.setAoaAzimuthFom(measurement.getAoaAzimuthFom());
+            builder.setAoaElevation(measurement.getAoaElevation());
+            builder.setAoaElevationFom(measurement.getAoaElevationFom());
+            builder.setRssi(measurement.getRssi());
+            builder.setAnchorLocation(convertAnchorLocation(
+                    measurement.getMeasurementVersion(),
+                    measurement.getMessageControl(),
+                    measurement.getAnchorLocation()));
+            builder.setActiveRangingRoundIndexes(measurement.getActiveRangingRounds());
+            if (measurement.getSuperclusterId() !=
+                    com.android.ranging.uwb.backend.internal.DlTdoaMeasurement
+                            .SUPERCLUSTER_ID_ABSENT) {
+                builder.setSuperclusterId(measurement.getSuperclusterId());
+            }
+            return builder.build();
         }
     }
 
@@ -518,6 +678,7 @@ public class UwbAdapter implements RangingAdapter {
     private void clear() {
         mCallbacks = null;
         mPeers.clear();
+        mAnchors.clear();
         mIsDlTdoaSession = false;
     }
 

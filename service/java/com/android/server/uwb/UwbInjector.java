@@ -49,6 +49,7 @@ import android.util.Log;
 
 import com.android.server.uwb.advertisement.UwbAdvertiseManager;
 import com.android.server.uwb.data.ServiceProfileData;
+import com.android.server.uwb.data.UwbVendorUciResponse;
 import com.android.server.uwb.jni.NativeUwbManager;
 import com.android.server.uwb.multchip.UwbMultichipData;
 import com.android.server.uwb.pm.ProfileManager;
@@ -155,7 +156,7 @@ public class UwbInjector {
                 mUwbCountryCode, mUwbSessionManager, uwbConfigurationManager, this, mLooper);
         mSystemBuildProperties = new SystemBuildProperties();
         mUwbDiagnostics = new UwbDiagnostics(mContext, this, mSystemBuildProperties);
-        mTimesyncManager = new TimesyncManager(mContext, this);
+        mTimesyncManager = new TimesyncManager(mContext, mNativeUwbManager, this);
     }
 
     public boolean dataTransferPhaseConfig() {
@@ -488,20 +489,47 @@ public class UwbInjector {
         }
     }
 
+    /* Runs a FutureTask<UwbVendorUciResponse> on a single-threaded executor with a timeout */
+    public UwbVendorUciResponse runTaskOnSingleThreadExecutorUci(
+            FutureTask<UwbVendorUciResponse> task,
+            int timeoutMs)
+            throws InterruptedException, TimeoutException, ExecutionException {
+        ExecutorService executor = Executors.newSingleThreadExecutor();
+        executor.submit(task);
+        try {
+            return task.get(timeoutMs, TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            executor.shutdownNow();
+            throw e;
+        }
+    }
+
     public boolean isMulticastListNtfV2Supported() {
-        return mContext.getResources().getBoolean(
-                        com.android.uwb.resources.R.bool.is_multicast_list_update_ntf_v2_supported);
+        if (mContext.getResources() != null) {
+            return mContext.getResources().getBoolean(
+                    com.android.uwb.resources.R.bool.is_multicast_list_update_ntf_v2_supported);
+        } else {
+            return false;
+        }
     }
 
     public boolean isMulticastListRspV2Supported() {
-        return mContext.getResources().getBoolean(
-                        com.android.uwb.resources.R.bool.is_multicast_list_update_rsp_v2_supported);
+        if (mContext.getResources() != null) {
+            return mContext.getResources().getBoolean(
+                    com.android.uwb.resources.R.bool.is_multicast_list_update_rsp_v2_supported);
+        } else {
+            return false;
+        }
     }
 
     public boolean isCccSupportedTwoByteConfigIdLittleEndian() {
-        return mContext.getResources().getBoolean(
-                com.android.uwb.resources.R.bool.ccc_two_byte_config_id_little_endian_supported
-        );
+        if (mContext.getResources() != null) {
+            return mContext.getResources().getBoolean(
+                    com.android.uwb.resources.R.bool.ccc_two_byte_config_id_little_endian_supported
+            );
+        } else {
+            return false;
+        }
     }
 
     private boolean isPrivilegedApp(int uid, String packageName) {

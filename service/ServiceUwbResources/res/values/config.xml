@@ -230,10 +230,6 @@
      If enabled, the response will be parsed into version 2 if uci major version is 2.0. -->
     <bool name = "is_multicast_list_update_rsp_v2_supported">false</bool>
 
-    <!-- Whether or not the antenna operation mode shall be configured by the ANTENNA_MODE vendor
-    config param. If false, the FiRa-specified AOA_RESULT_REQ param is used instead. -->
-    <bool name = "is_antenna_mode_config_supported">false</bool>
-
     <!-- List of MCC/MNC where OEM default country code is used as an override.
     This is a array of MCC/MNC values, where each value is a 3-digit string (only MCC)
     or a 5/6-digit string (MCC + MNC). -->
@@ -247,9 +243,33 @@
     If false, never sets hopmodekey randomly-->
     <bool name = "enable_random_hopmodekey">false</bool>
 
+    <!-- Whether hopmodekey should be 4-byte or 16-byte. Random hopmodekey must also
+    be enabled. If true, 16-byte. -->
+    <bool name = "enable_16_byte_hopmodekey">false</bool>
+
     <!-- Whether FIRa CCC capability UCI Specification applied or not.
     If enabled, FIRa CCC capability UCI Specification used -->
     <bool name = "fira_supported_extension_ccc">false</bool>
+
+    <!-- Whether android proprietary timesync is supported,
+     ANDROID_GID (0x0c) and ANDROID_TIMESTAMP_ANCHOR_TO_UWBS(0x03)-->
+    <bool name = "android_specific_timesync_supported">false</bool>
+
+    <!-- Device with high uncertainty for timesync. 255 is max, set it to 0 if timesync is reliable.
+    Value [µsec] = 2^(timesync_uncertainty_override/8)
+    -->
+    <integer name = "timesync_uncertainty_override">255</integer>
+
+    <!-- Static offset between system time and uwb time if they are in different time domain.
+    This value will be used in case there was an error getting or for fira 1.0 devices which does
+    not support uci query uwb timestamp -->
+    <integer name = "timesync_static_device_offset_us">-36000</integer>
+
+    <!-- Max clock skew ppm -->
+    <integer name = "timesync_clock_skew_ppm">100</integer>
+
+    <!-- Uncertainty in Bluetooth HAL's system time calculation in microseconds -->
+    <integer name= "timesync_ble_time_uncertainty_us">1000</integer>
     <!-- ===== End of UWB stack overlay definitions ===== -->
 
     <!-- ===== Start of ranging stack overlay definitions ===== -->

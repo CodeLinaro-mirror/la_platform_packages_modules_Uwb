@@ -54,6 +54,7 @@ _TEST_CASES = [
     "test_uwb_ranging_app_switch_to_bg_and_fg",
     "test_ble_rssi_ranging_app_switch_to_bg_and_fg",
     "test_ble_cs_ranging_app_switch_to_bg_and_fg",
+    "test_on_motion_received",
 ]
 
 
@@ -85,6 +86,10 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
   def _is_watch(self, ad1: android_device.AndroidDevice, ad2: android_device.AndroidDevice) -> bool:
       return ("watch" in ad1.adb.getprop("ro.build.characteristics")) or \
         ("watch" in ad2.adb.getprop("ro.build.characteristics"))
+
+  def _is_pc(self, ad1: android_device.AndroidDevice, ad2: android_device.AndroidDevice) -> bool:
+        return ('feature:android.hardware.type.pc' in ad1.adb.shell('pm list features').decode('utf-8')) or \
+          ('feature:android.hardware.type.pc' in ad2.adb.shell('pm list features').decode('utf-8'))
 
   def setup_class(self):
     super().setup_class()
@@ -408,6 +413,11 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
   def test_uwb_ranging_app_switch_to_bg_and_fg(self):
       """ verifies Uwb ranging with foreground and background"""
+      #TODO: b/474105892 Add support via test api for AL.
+      asserts.skip_if(
+          self._is_pc(self.initiator.ad, self.responder.ad),
+          f"Skip test on AL",
+      )
       SESSION_HANDLE = str(uuid4())
       UWB_SESSION_ID = 5
       TECHNOLOGIES = {RangingTechnology.UWB}
@@ -486,6 +496,11 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
   def test_ble_rssi_ranging_app_switch_to_bg_and_fg(self):
       """ verifies ble rssi ranging with foreground and background"""
+      #TODO: b/474105892 Add support via test api for AL.
+      asserts.skip_if(
+          self._is_pc(self.initiator.ad, self.responder.ad),
+          f"Skip test on AL",
+      )
       SESSION_HANDLE = str(uuid4())
       TECHNOLOGIES = {RangingTechnology.BLE_RSSI}
       asserts.skip_if(self._is_emulator_device(self.initiator.ad),
@@ -551,6 +566,11 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
   def test_ble_cs_ranging_app_switch_to_bg_and_fg(self):
       """ verifies ble cs ranging with foreground and background"""
+      #TODO: b/474105892 Add support via test api for AL.
+      asserts.skip_if(
+          self._is_pc(self.initiator.ad, self.responder.ad),
+          f"Skip test on AL",
+      )
       SESSION_HANDLE = str(uuid4())
       TECHNOLOGIES = {RangingTechnology.BLE_CS}
       asserts.skip_if(self._is_emulator_device(self.initiator.ad),
@@ -567,11 +587,15 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
           f"BLE_CS not supported by initiator",
       )
       self._enable_bt()
-
       try:
-          self._ble_bond()
+          self._ble_connect()
       except Exception as e:
-          asserts.skip("Failed to create ble bond", str(e))
+          asserts.skip("Failed to create ble connection", str(e))
+
+      asserts.skip_if(
+          not self.initiator.ad.bluetooth.isRemoteDeviceBonded(),
+          f"Responder is not bonded. Please bond manually.",
+      )
 
       try:
           initiator_preference = RangingPreference(
@@ -612,7 +636,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
       finally:
           self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
-          self._ble_unbond()
+          self._ble_disconnect()
 
   def test_dynamic_peer_uwb_ranging(self):
       """verifies dynamic peer with UWB"""
@@ -1102,11 +1126,15 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
         f"BLE CS not supported by initiator",
     )
     self._enable_bt()
-
     try:
-        self._ble_bond()
+        self._ble_connect()
     except Exception as e:
-        asserts.skip("Failed to create ble bond", str(e))
+        asserts.skip("Failed to create ble connection", str(e))
+
+    asserts.skip_if(
+        not self.initiator.ad.bluetooth.isRemoteDeviceBonded(),
+        f"Responder is not bonded. Please bond manually.",
+    )
 
     try:
       initiator_preference = RangingPreference(
@@ -1142,8 +1170,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
       )
     finally:
       self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
-
-      self._ble_unbond()
+      self._ble_disconnect()
 
   @ApiTest(apis=[
     'android.ranging.oob.TransportHandle#sendData(byte[])',
@@ -1218,18 +1245,22 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     session.add_responder(self.responder, responder_preference)
 
     self._enable_bt()
-
     try:
-        self._ble_bond()
+        self._ble_connect()
     except Exception as e:
-        asserts.skip("Failed to create ble bond", str(e))
+        asserts.skip("Failed to create ble connection", str(e))
+
+    asserts.skip_if(
+        not self.initiator.ad.bluetooth.isRemoteDeviceBonded(),
+        f"Responder is not bonded. Please bond manually.",
+    )
 
     try:
       session.start_and_assert_opened(check_responders=False)
       session.assert_received_data(technologies=[RangingTechnology.BLE_CS], check_responders=False)
     finally:
       session.stop_and_assert_closed(check_responders=False)
-      self._ble_unbond()
+      self._ble_disconnect()
 
   def test_ble_cs_ranging_measurement_limit(self):
       """Verifies ble cs ranging with measurement limit."""
@@ -1249,11 +1280,15 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
           f"BLE CS not supported by initiator",
       )
       self._enable_bt()
-
       try:
-          self._ble_bond()
+          self._ble_connect()
       except Exception as e:
-          asserts.skip("Failed to create ble bond", str(e))
+          asserts.skip("Failed to create ble connection", str(e))
+
+      asserts.skip_if(
+          not self.initiator.ad.bluetooth.isRemoteDeviceBonded(),
+          f"Responder is not bonded. Please bond manually.",
+      )
 
       try:
         initiator_preference = RangingPreference(
@@ -1277,7 +1312,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
         self.initiator.assert_close_ranging_event_received(SESSION_HANDLE)
 
       finally:
-        self._ble_unbond()
+        self._ble_disconnect()
 
   def test_one_to_one_wifi_rtt_ranging_with_oob(self):
       """Verifies wifi rtt ranging with oob.
@@ -1422,6 +1457,45 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
     session.start_and_assert_opened(start_responders=False, check_responders=False)
     session.assert_received_data()
+    session.stop_and_assert_closed()
+
+  @ApiTest(apis=[
+      'android.ranging.MotionState#getMotionState()',
+      'android.ranging.RangingSession.Callback#onMotionReceived(android.ranging.RangingDevice, android.ranging.MotionState)',
+  ])
+  def test_on_motion_received(self):
+    """Verifies onMotionReceived callback is triggered."""
+    asserts.skip_if(
+        not self.responder.is_ranging_technology_supported(RangingTechnology.UWB),
+        "UWB not supported by responder",
+    )
+    asserts.skip_if(
+        not self.initiator.is_ranging_technology_supported(RangingTechnology.UWB),
+        "UWB not supported by initiator",
+    )
+
+    initiator_preference = RangingPreference(
+        device_role=DeviceRole.INITIATOR,
+        ranging_params=OobInitiatorRangingParams(
+            peer_ids=[self.responder.id], ranging_mode=RangingMode.HIGH_ACCURACY
+        ),
+    )
+
+    responder_preference = RangingPreference(
+        device_role=DeviceRole.RESPONDER,
+        ranging_params=OobResponderRangingParams(peer_id=self.initiator.id),
+    )
+
+    session = RangingSession()
+    session.set_initiator(self.initiator, initiator_preference)
+    session.add_responder(self.responder, responder_preference)
+
+    session.start_and_assert_opened()
+    session.assert_received_data()
+
+    # Verify responder can send motion event to initiator.
+    session.send_motion_event_and_assert_received(self.responder.id, self.initiator.id)
+
     session.stop_and_assert_closed()
 
 if __name__ == "__main__":

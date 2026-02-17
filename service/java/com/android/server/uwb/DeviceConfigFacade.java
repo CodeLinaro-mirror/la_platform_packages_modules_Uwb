@@ -30,6 +30,7 @@ public class DeviceConfigFacade {
     private static final String LOG_TAG = DeviceConfigFacade.class.getSimpleName();
 
     /**
+     *
      */
     private static final int MAX_FOV = 180;
 
@@ -102,10 +103,15 @@ public class DeviceConfigFacade {
     private boolean mPersistentCacheUseForCountryCodeEnabled;
     private boolean mHwIdleTurnOffEnabled;
     private boolean mFusedCountryCodeProviderEnabled;
-    private boolean mIsAntennaModeConfigSupported;
     private String[] mMccMncOemOverrideList;
     private boolean mIsRandomHopmodekeySupported;
     private boolean mFiraExtensionForCCCSupported;
+    private boolean mIs16ByteHopmodekeyEnabled;
+    private boolean mIsAndroidSpecificTimesyncSupported;
+    private int mTimesyncUncertainty;
+    private int mTimesyncDeviceOffset;
+    private int mTimesyncClockSkewPpm;
+    private int mTimesyncBleTimeUncertainty;
 
     public DeviceConfigFacade(Handler handler, Context context) {
         mContext = context;
@@ -131,230 +137,329 @@ public class DeviceConfigFacade {
                 "bug_report_min_interval_ms", DEFAULT_BUG_REPORT_MIN_INTERVAL_MS);
 
         // Default values come from the overlay file (config.xml).
-        mEnableFilters = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "enable_filters",
-                mContext.getResources().getBoolean(R.bool.enable_filters)
-        );
-        mFilterDistanceInliersPercent = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "filter_distance_inliers_percent",
-                mContext.getResources().getInteger(R.integer.filter_distance_inliers_percent)
-        );
-        mFilterDistanceWindow = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "filter_distance_window",
-                mContext.getResources().getInteger(R.integer.filter_distance_window)
-        );
-        mFilterAngleInliersPercent = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "filter_angle_inliers_percent",
-                mContext.getResources().getInteger(R.integer.filter_angle_inliers_percent)
-        );
-        mFilterAngleWindow = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "filter_angle_window",
-                mContext.getResources().getInteger(R.integer.filter_angle_window)
-        );
-        poseSourceName = DeviceConfig.getString(
-                DeviceConfig.NAMESPACE_UWB,
-                "pose_source_type",
-                mContext.getResources().getString(R.string.pose_source_type)
-        );
-        mEnablePrimerEstElevation = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "enable_primer_est_elevation",
-                mContext.getResources().getBoolean(R.bool.enable_primer_est_elevation)
-        );
-        mEnablePrimerAoA = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "enable_primer_aoa",
-                mContext.getResources().getBoolean(R.bool.enable_primer_aoa)
-        );
-        mPrimerFovDegree = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "primer_fov_degrees",
-                mContext.getResources().getInteger(R.integer.primer_fov_degrees)
-        );
-        mPredictionTimeoutSeconds = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "prediction_timeout_seconds",
-                mContext.getResources().getInteger(R.integer.prediction_timeout_seconds)
-        );
-        mEnableBackAzimuth = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "enable_azimuth_mirroring",
-                mContext.getResources().getBoolean(R.bool.enable_azimuth_mirroring)
-        );
-        mEnableBackAzimuthMasking = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "predict_rear_azimuths",
-                mContext.getResources().getBoolean(R.bool.predict_rear_azimuths)
-        );
-        mBackAzimuthWindow = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "mirror_detection_window",
-                mContext.getResources().getInteger(R.integer.mirror_detection_window)
-        );
-        int frontAzimuthDegreesPerSecond = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "front_mirror_dps",
-                mContext.getResources().getInteger(R.integer.front_mirror_dps)
-        );
-        int backAzimuthDegreesPerSecond = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "back_mirror_dps",
-                mContext.getResources().getInteger(R.integer.back_mirror_dps)
-        );
-        int mirrorScoreStdDegrees = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "mirror_score_std_degrees",
-                mContext.getResources().getInteger(R.integer.mirror_score_std_degrees)
-        );
-        int backNoiseInfluencePercent = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "back_noise_influence_percent",
-                mContext.getResources().getInteger(R.integer.back_noise_influence_percent)
-        );
+        if (mContext.getResources() != null) {
+            mEnableFilters = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "enable_filters",
+                    mContext.getResources().getBoolean(R.bool.enable_filters)
+            );
+            mFilterDistanceInliersPercent = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "filter_distance_inliers_percent",
+                    mContext.getResources().getInteger(R.integer.filter_distance_inliers_percent)
+            );
+            mFilterDistanceWindow = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "filter_distance_window",
+                    mContext.getResources().getInteger(R.integer.filter_distance_window)
+            );
+            mFilterAngleInliersPercent = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "filter_angle_inliers_percent",
+                    mContext.getResources().getInteger(R.integer.filter_angle_inliers_percent)
+            );
+            mFilterAngleWindow = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "filter_angle_window",
+                    mContext.getResources().getInteger(R.integer.filter_angle_window)
+            );
+            poseSourceName = DeviceConfig.getString(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "pose_source_type",
+                    mContext.getResources().getString(R.string.pose_source_type)
+            );
+            mEnablePrimerEstElevation = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "enable_primer_est_elevation",
+                    mContext.getResources().getBoolean(R.bool.enable_primer_est_elevation)
+            );
+            mEnablePrimerAoA = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "enable_primer_aoa",
+                    mContext.getResources().getBoolean(R.bool.enable_primer_aoa)
+            );
+            mPrimerFovDegree = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "primer_fov_degrees",
+                    mContext.getResources().getInteger(R.integer.primer_fov_degrees)
+            );
+            mPredictionTimeoutSeconds = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "prediction_timeout_seconds",
+                    mContext.getResources().getInteger(R.integer.prediction_timeout_seconds)
+            );
+            mEnableBackAzimuth = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "enable_azimuth_mirroring",
+                    mContext.getResources().getBoolean(R.bool.enable_azimuth_mirroring)
+            );
+            mEnableBackAzimuthMasking = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "predict_rear_azimuths",
+                    mContext.getResources().getBoolean(R.bool.predict_rear_azimuths)
+            );
+            mBackAzimuthWindow = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "mirror_detection_window",
+                    mContext.getResources().getInteger(R.integer.mirror_detection_window)
+            );
+            int frontAzimuthDegreesPerSecond = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "front_mirror_dps",
+                    mContext.getResources().getInteger(R.integer.front_mirror_dps)
+            );
+            int backAzimuthDegreesPerSecond = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "back_mirror_dps",
+                    mContext.getResources().getInteger(R.integer.back_mirror_dps)
+            );
+            int mirrorScoreStdDegrees = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "mirror_score_std_degrees",
+                    mContext.getResources().getInteger(R.integer.mirror_score_std_degrees)
+            );
+            int backNoiseInfluencePercent = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "back_noise_influence_percent",
+                    mContext.getResources().getInteger(R.integer.back_noise_influence_percent)
+            );
 
-        // Read the Advertising profile config parameters.
-        mAdvertiseAoaCriteriaAngle = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "advertise_aoa_criteria_angle",
-                mContext.getResources().getInteger(R.integer.advertise_aoa_criteria_angle)
-        );
-        mAdvertiseTimeThresholdMillis = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "advertise_time_threshold_millis",
-                mContext.getResources().getInteger(R.integer.advertise_time_threshold_millis)
-        );
-        mAdvertiseArraySizeToCheck = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "advertise_array_size_to_check",
-                mContext.getResources().getInteger(R.integer.advertise_array_size_to_check)
-        );
-        mAdvertiseArrayStartIndexToCalVariance = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "advertise_array_start_index_to_cal_variance",
-                mContext.getResources().getInteger(
-                        R.integer.advertise_array_start_index_to_cal_variance)
-        );
-        mAdvertiseArrayEndIndexToCalVariance = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "advertise_array_end_index_to_cal_variance",
-                mContext.getResources().getInteger(
-                        R.integer.advertise_array_end_index_to_cal_variance)
-        );
-        mAdvertiseTrustedVarianceValue = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "advertise_trusted_variance_value",
-                mContext.getResources().getInteger(R.integer.advertise_trusted_variance_value)
-        );
+            // Read the Advertising profile config parameters.
+            mAdvertiseAoaCriteriaAngle = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "advertise_aoa_criteria_angle",
+                    mContext.getResources().getInteger(R.integer.advertise_aoa_criteria_angle)
+            );
+            mAdvertiseTimeThresholdMillis = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "advertise_time_threshold_millis",
+                    mContext.getResources().getInteger(R.integer.advertise_time_threshold_millis)
+            );
+            mAdvertiseArraySizeToCheck = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "advertise_array_size_to_check",
+                    mContext.getResources().getInteger(R.integer.advertise_array_size_to_check)
+            );
+            mAdvertiseArrayStartIndexToCalVariance = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "advertise_array_start_index_to_cal_variance",
+                    mContext.getResources().getInteger(
+                            R.integer.advertise_array_start_index_to_cal_variance)
+            );
+            mAdvertiseArrayEndIndexToCalVariance = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "advertise_array_end_index_to_cal_variance",
+                    mContext.getResources().getInteger(
+                            R.integer.advertise_array_end_index_to_cal_variance)
+            );
+            mAdvertiseTrustedVarianceValue = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "advertise_trusted_variance_value",
+                    mContext.getResources().getInteger(R.integer.advertise_trusted_variance_value)
+            );
 
-        // Rx data packets.
-        mRxDataMaxPacketsToStore = DeviceConfig.getInt(
-                DeviceConfig.NAMESPACE_UWB,
-                "rx_data_max_packets_to_store",
-                mContext.getResources().getInteger(R.integer.rx_data_max_packets_to_store)
-        );
+            // Rx data packets.
+            mRxDataMaxPacketsToStore = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "rx_data_max_packets_to_store",
+                    mContext.getResources().getInteger(R.integer.rx_data_max_packets_to_store)
+            );
 
-        mBackgroundRangingEnabled = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "background_ranging_enabled",
-                mContext.getResources().getBoolean(R.bool.background_ranging_enabled)
-        );
+            mBackgroundRangingEnabled = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "background_ranging_enabled",
+                    mContext.getResources().getBoolean(R.bool.background_ranging_enabled)
+            );
 
-        mRangingErrorStreakTimerEnabled = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "ranging_error_streak_timer_enabled",
-                mContext.getResources().getBoolean(R.bool.ranging_error_streak_timer_enabled)
-        );
+            mRangingErrorStreakTimerEnabled = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "ranging_error_streak_timer_enabled",
+                    mContext.getResources().getBoolean(R.bool.ranging_error_streak_timer_enabled)
+            );
 
-        mCccRangingStoppedParamsSendEnabled = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "ccc_ranging_stopped_params_send_enabled",
-                mContext.getResources().getBoolean(R.bool.ccc_ranging_stopped_params_send_enabled)
-        );
+            mCccRangingStoppedParamsSendEnabled = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "ccc_ranging_stopped_params_send_enabled",
+                    mContext.getResources().getBoolean(
+                            R.bool.ccc_ranging_stopped_params_send_enabled)
+            );
 
-        mCccAbsoluteUwbInitiationTimeEnabled = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "ccc_absolute_uwb_initiation_time_enabled",
-                mContext.getResources().getBoolean(R.bool.ccc_absolute_uwb_initiation_time_enabled)
-        );
+            mCccAbsoluteUwbInitiationTimeEnabled = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "ccc_absolute_uwb_initiation_time_enabled",
+                    mContext.getResources().getBoolean(
+                            R.bool.ccc_absolute_uwb_initiation_time_enabled)
+            );
 
-        mLocationUseForCountryCodeEnabled = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "location_use_for_country_code_enabled",
-                mContext.getResources().getBoolean(R.bool.location_use_for_country_code_enabled)
-        );
+            mLocationUseForCountryCodeEnabled = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "location_use_for_country_code_enabled",
+                    mContext.getResources().getBoolean(R.bool.location_use_for_country_code_enabled)
+            );
 
-        mUwbDisabledUntilFirstToggle = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "uwb_disabled_until_first_toggle",
-                mContext.getResources().getBoolean(R.bool.uwb_disabled_until_first_toggle)
-        );
+            mUwbDisabledUntilFirstToggle = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "uwb_disabled_until_first_toggle",
+                    mContext.getResources().getBoolean(R.bool.uwb_disabled_until_first_toggle)
+            );
 
-        mCccSupportedSyncCodesLittleEndian = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "ccc_supported_sync_codes_little_endian",
-                mContext.getResources().getBoolean(R.bool.ccc_supported_sync_codes_little_endian)
-        );
+            mCccSupportedSyncCodesLittleEndian = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "ccc_supported_sync_codes_little_endian",
+                    mContext.getResources().getBoolean(
+                            R.bool.ccc_supported_sync_codes_little_endian)
+            );
 
-        mCccSupportedRangeDataNtfConfig = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "ccc_supported_range_data_ntf_config",
-                mContext.getResources().getBoolean(R.bool.ccc_supported_range_data_ntf_config)
-        );
+            mCccSupportedRangeDataNtfConfig = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "ccc_supported_range_data_ntf_config",
+                    mContext.getResources().getBoolean(R.bool.ccc_supported_range_data_ntf_config)
+            );
 
-        mPersistentCacheUseForCountryCodeEnabled = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "persistent_cache_use_for_country_code_enabled",
-                mContext.getResources().getBoolean(
-                        R.bool.persistent_cache_use_for_country_code_enabled)
-        );
+            mPersistentCacheUseForCountryCodeEnabled = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "persistent_cache_use_for_country_code_enabled",
+                    mContext.getResources().getBoolean(
+                            R.bool.persistent_cache_use_for_country_code_enabled)
+            );
 
-        mHwIdleTurnOffEnabled = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "hw_idle_turn_off_enabled",
-                mContext.getResources().getBoolean(R.bool.hw_idle_turn_off_enabled)
-        );
+            mHwIdleTurnOffEnabled = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "hw_idle_turn_off_enabled",
+                    mContext.getResources().getBoolean(R.bool.hw_idle_turn_off_enabled)
+            );
 
-        mFusedCountryCodeProviderEnabled = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "fused_country_code_provider_enabled",
-                mContext.getResources().getBoolean(R.bool.fused_country_code_provider_enabled)
-        );
+            mFusedCountryCodeProviderEnabled = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "fused_country_code_provider_enabled",
+                    mContext.getResources().getBoolean(R.bool.fused_country_code_provider_enabled)
+            );
 
-        mIsAntennaModeConfigSupported = DeviceConfig.getBoolean(
-                DeviceConfig.NAMESPACE_UWB,
-                "is_antenna_mode_config_supported",
-                mContext.getResources().getBoolean(R.bool.is_antenna_mode_config_supported)
-        );
+            // device config override with array is not supported, so just read the resource.
+            mMccMncOemOverrideList = mContext.getResources()
+                    .getStringArray(R.array.mcc_mcc_oem_override_list);
 
-        // device config override with array is not supported, so just read the resource.
-        mMccMncOemOverrideList = mContext.getResources()
-                .getStringArray(R.array.mcc_mcc_oem_override_list);
+            mIsRandomHopmodekeySupported = mContext.getResources()
+                    .getBoolean(R.bool.enable_random_hopmodekey);
 
-        mIsRandomHopmodekeySupported = mContext.getResources()
-                .getBoolean(R.bool.enable_random_hopmodekey);
+            mIs16ByteHopmodekeyEnabled = mContext.getResources()
+                    .getBoolean(R.bool.enable_16_byte_hopmodekey);
 
-        // A little parsing and cleanup:
-        mFrontAzimuthRadiansPerSecond = (float) Math.toRadians(frontAzimuthDegreesPerSecond);
-        mBackAzimuthRadiansPerSecond = (float) Math.toRadians(backAzimuthDegreesPerSecond);
-        mMirrorScoreStdRadians = (float) Math.toRadians(mirrorScoreStdDegrees);
-        mBackNoiseInfluenceCoeff = backNoiseInfluencePercent / 100F;
-        try {
-            mPoseSourceType = PoseSourceType.valueOf(poseSourceName);
-        } catch (IllegalArgumentException e) {
-            mPoseSourceType = PoseSourceType.ROTATION_VECTOR;
-            Log.e(LOG_TAG, "UWB pose source '" + poseSourceName + "' defined in flags or"
-                    + "overlay file is invalid. Defaulting to " + mPoseSourceType.name());
+            mIsAndroidSpecificTimesyncSupported = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "android_specific_timesync_supported",
+                    mContext.getResources().getBoolean(R.bool.android_specific_timesync_supported)
+            );
+            mTimesyncUncertainty = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "timesync_uncertainty_override",
+                    mContext.getResources().getInteger(R.integer.timesync_uncertainty_override)
+            );
+
+            mTimesyncDeviceOffset = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "timesync_static_device_offset_us",
+                    mContext.getResources().getInteger(R.integer.timesync_static_device_offset_us)
+            );
+
+            mTimesyncClockSkewPpm = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "timesync_clock_skew_ppm",
+                    mContext.getResources().getInteger(R.integer.timesync_clock_skew_ppm)
+            );
+
+            mTimesyncBleTimeUncertainty = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "timesync_ble_time_uncertainty_us",
+                    mContext.getResources().getInteger(R.integer.timesync_ble_time_uncertainty_us)
+            );
+
+            // A little parsing and cleanup:
+            mFrontAzimuthRadiansPerSecond = (float) Math.toRadians(frontAzimuthDegreesPerSecond);
+            mBackAzimuthRadiansPerSecond = (float) Math.toRadians(backAzimuthDegreesPerSecond);
+            mMirrorScoreStdRadians = (float) Math.toRadians(mirrorScoreStdDegrees);
+            mBackNoiseInfluenceCoeff = backNoiseInfluencePercent / 100F;
+            try {
+                mPoseSourceType = PoseSourceType.valueOf(poseSourceName);
+            } catch (IllegalArgumentException e) {
+                mPoseSourceType = PoseSourceType.ROTATION_VECTOR;
+                Log.e(LOG_TAG, "UWB pose source '" + poseSourceName + "' defined in flags or"
+                        + "overlay file is invalid. Defaulting to " + mPoseSourceType.name());
+            }
+            mEnablePrimerFov = mPrimerFovDegree > 0 && mPrimerFovDegree < MAX_FOV;
+
+            // device config override with array is not supported, so just read the resource.
+            mFiraExtensionForCCCSupported = mContext.getResources()
+                    .getBoolean(R.bool.fira_supported_extension_ccc);
+        } else { // resource is null (init with the default value in
+            // uwbResources/res/values/config.xml)
+            mEnableFilters = true;
+            mFilterDistanceInliersPercent = 0;
+            mFilterDistanceWindow = 3;
+            mFilterAngleInliersPercent = 50;
+            mFilterAngleWindow = 5;
+            poseSourceName = "ROTATION_VECTOR";
+            mEnablePrimerEstElevation = false;
+            mEnablePrimerAoA = true;
+            mPrimerFovDegree = 60;
+            mPredictionTimeoutSeconds = 5;
+            mEnableBackAzimuth = true;
+            mEnableBackAzimuthMasking = true;
+            mBackAzimuthWindow = 5;
+            int frontAzimuthDegreesPerSecond = 12;
+            int backAzimuthDegreesPerSecond = 10;
+            int mirrorScoreStdDegrees = 8;
+            int backNoiseInfluencePercent = 8;
+
+            // Read the Advertising profile config parameters.
+            mAdvertiseAoaCriteriaAngle = 10;
+            mAdvertiseTimeThresholdMillis = 5000;
+            mAdvertiseArraySizeToCheck = 10;
+            mAdvertiseArrayStartIndexToCalVariance = 2;
+            mAdvertiseArrayEndIndexToCalVariance = 8;
+            mAdvertiseTrustedVarianceValue = 5;
+
+            // Rx data packets.
+            mRxDataMaxPacketsToStore = 10;
+            mBackgroundRangingEnabled = false;
+            mRangingErrorStreakTimerEnabled = true;
+            mCccRangingStoppedParamsSendEnabled = false;
+            mCccAbsoluteUwbInitiationTimeEnabled = false;
+            mLocationUseForCountryCodeEnabled = true;
+            mUwbDisabledUntilFirstToggle = false;
+            mCccSupportedSyncCodesLittleEndian = false;
+            mCccSupportedRangeDataNtfConfig = false;
+            mPersistentCacheUseForCountryCodeEnabled = false;
+            mHwIdleTurnOffEnabled = false;
+            mFusedCountryCodeProviderEnabled = false;
+
+            // device config override with array is not supported, so just read the resource.
+            mMccMncOemOverrideList = new String[]{};
+            mIsRandomHopmodekeySupported = false;
+            mIs16ByteHopmodekeyEnabled = false;
+            mIsAndroidSpecificTimesyncSupported = false;
+            mTimesyncUncertainty = 255;
+            mTimesyncDeviceOffset = -36000;
+            mTimesyncClockSkewPpm = 100;
+            mTimesyncBleTimeUncertainty = 1000;
+
+            // A little parsing and cleanup:
+            mFrontAzimuthRadiansPerSecond = (float) Math.toRadians(frontAzimuthDegreesPerSecond);
+            mBackAzimuthRadiansPerSecond = (float) Math.toRadians(backAzimuthDegreesPerSecond);
+            mMirrorScoreStdRadians = (float) Math.toRadians(mirrorScoreStdDegrees);
+            mBackNoiseInfluenceCoeff = backNoiseInfluencePercent / 100F;
+            try {
+                mPoseSourceType = PoseSourceType.valueOf(poseSourceName);
+            } catch (IllegalArgumentException e) {
+                mPoseSourceType = PoseSourceType.ROTATION_VECTOR;
+                Log.e(LOG_TAG, "UWB pose source '" + poseSourceName + "' defined in flags or"
+                        + "overlay file is invalid. Defaulting to " + mPoseSourceType.name());
+            }
+            mEnablePrimerFov = mPrimerFovDegree > 0 && mPrimerFovDegree < MAX_FOV;
+
+            // device config override with array is not supported, so just read the resource.
+            mFiraExtensionForCCCSupported = false;
         }
-        mEnablePrimerFov = mPrimerFovDegree > 0 && mPrimerFovDegree < MAX_FOV;
-
-        // device config override with array is not supported, so just read the resource.
-        mFiraExtensionForCCCSupported = mContext.getResources()
-                .getBoolean(R.bool.fira_supported_extension_ccc);
     }
 
     /**
@@ -567,8 +672,8 @@ public class DeviceConfigFacade {
     /**
      * Returns whether background ranging is enabled or not.
      * If enabled:
-     *  * Background 3p apps are allowed to open new ranging sessions
-     *  * When previously foreground 3p apps moves to background, sessions are not terminated
+     * * Background 3p apps are allowed to open new ranging sessions
+     * * When previously foreground 3p apps moves to background, sessions are not terminated
      */
     public boolean isBackgroundRangingEnabled() {
         return mBackgroundRangingEnabled;
@@ -655,11 +760,6 @@ public class DeviceConfigFacade {
     }
 
     /**
-     * Returns whether antenna mode configuration is supported or not.
-     */
-    public boolean isAntennaModeConfigSupported() { return mIsAntennaModeConfigSupported; }
-
-    /**
      * Returns array of mcc/mnc where oem override country code should be used.
      * Empty array means no override.
      */
@@ -667,7 +767,7 @@ public class DeviceConfigFacade {
         return mMccMncOemOverrideList;
     }
 
-     /**
+    /**
      * Returns whether random hopmodekey is supported or not.
      */
     public boolean isRandomHopmodekeySupported() {
@@ -679,5 +779,44 @@ public class DeviceConfigFacade {
      */
     public boolean isFiraSupportedExtensionForCCC() {
         return mFiraExtensionForCCCSupported;
+    }
+
+    /**
+     * Returns whether hopmodekey should be 16-byte or not.
+     */
+    public boolean is16ByteHopmodekeyEnabled() {
+        return mIs16ByteHopmodekeyEnabled;
+    }
+
+    /** Returns the maximum frequency drift in parts per million. */
+    public int getTimesyncClockSkewPpm() {
+        return mTimesyncClockSkewPpm;
+    }
+
+    /**
+     * Returns the calibrated microsecond offset used to align the system clock with the UWB clock
+     * domain.
+     */
+    public int getTimesyncDeviceOffset() {
+        return mTimesyncDeviceOffset;
+    }
+
+    /**
+     * Returns the Log2-encoded uncertainty floor for time synchronization measurements in
+     * microseconds.
+     */
+    public int getTimesyncUncertaintyUs() {
+        return mTimesyncUncertainty;
+    }
+
+    /**
+     * Returns whether the device supports proprietary Android UCI extensions for timesync.
+     */
+    public boolean isAndroidSpecificTimesyncSupported() {
+        return mIsAndroidSpecificTimesyncSupported;
+    }
+
+    public int getTimesyncBleTimeUncertainty() {
+        return mTimesyncBleTimeUncertainty;
     }
 }

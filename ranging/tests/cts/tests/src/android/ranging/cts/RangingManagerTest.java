@@ -24,6 +24,8 @@ import static android.ranging.RangingConfig.RANGING_SESSION_RAW;
 import static android.ranging.RangingPreference.DEVICE_ROLE_DT_TAG;
 import static android.ranging.RangingPreference.DEVICE_ROLE_INITIATOR;
 import static android.ranging.RangingPreference.DEVICE_ROLE_RESPONDER;
+import static android.ranging.SessionConfig.ANTENNA_MODE_DIRECTIONAL;
+import static android.ranging.SessionConfig.ANTENNA_MODE_OMNI;
 import static android.ranging.ble.cs.BleCsRangingCapabilities.CS_SECURITY_LEVEL_ONE;
 import static android.ranging.ble.cs.BleCsRangingParams.LOCATION_TYPE_INDOOR;
 import static android.ranging.ble.cs.BleCsRangingParams.SIGHT_TYPE_LINE_OF_SIGHT;
@@ -69,6 +71,7 @@ import android.net.wifi.rtt.WifiRttManager;
 import android.platform.test.annotations.AppModeFull;
 import android.platform.test.annotations.RequiresFlagsEnabled;
 import android.ranging.DataNotificationConfig;
+import android.ranging.DlTdoaMeasurement;
 import android.ranging.RangingCapabilities;
 import android.ranging.RangingData;
 import android.ranging.RangingDevice;
@@ -125,6 +128,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
@@ -139,6 +143,8 @@ public class RangingManagerTest {
     private RangingManager mRangingManager;
 
     private final Set<Integer> mSupportedTechnologies = new HashSet<>();
+    // Latest capabilities received from the RangingManager.
+    private static final AtomicReference<RangingCapabilities> sRangingCapabilities = new AtomicReference<>();
 
     @Before
     public void setup() throws Exception {
@@ -298,6 +304,18 @@ public class RangingManagerTest {
 
     private RangingPreference getGenericUwbRangingPreference(int sessionId) {
         // Generic ranging preference, Improve this method based on future needs.
+        SessionConfig.Builder sessionConfigBuilder = new SessionConfig.Builder()
+                .setRangingMeasurementsLimit(100);
+        if (Flags.rangingStackUpdates26Q2()
+                && sRangingCapabilities.get().getUwbCapabilities() != null) {
+            List<Integer> supportedAntennaModes =
+                    sRangingCapabilities.get().getUwbCapabilities().getSupportedAntennaModes();
+            if (supportedAntennaModes.contains(ANTENNA_MODE_DIRECTIONAL)) {
+                sessionConfigBuilder.setAntennaMode(ANTENNA_MODE_DIRECTIONAL);
+            } else if (supportedAntennaModes.contains(ANTENNA_MODE_OMNI)) {
+                sessionConfigBuilder.setAntennaMode(ANTENNA_MODE_OMNI);
+            }
+        }
         return new RangingPreference.Builder(RangingPreference.DEVICE_ROLE_INITIATOR,
                 new RawInitiatorRangingConfig.Builder()
                         .addRawRangingDevice(new RawRangingDevice.Builder()
@@ -308,9 +326,7 @@ public class RangingManagerTest {
                                                 new byte[]{3, 4}))
                                 .build())
                         .build())
-                .setSessionConfig(new SessionConfig.Builder()
-                        .setRangingMeasurementsLimit(100)
-                        .build())
+                .setSessionConfig(sessionConfigBuilder.build())
                 .build();
     }
 
@@ -620,6 +636,7 @@ public class RangingManagerTest {
         private CountDownLatch mOnPeerAdded = new CountDownLatch(1);
         private CountDownLatch mOnPeerRemoved = new CountDownLatch(1);
         private CountDownLatch mOnOpenFailed = new CountDownLatch(1);
+        private CountDownLatch mOnDlTdoaResultsCalled = new CountDownLatch(1);
 
         public void replaceOnPeerAddedLatch(CountDownLatch countDownLatch) {
             mOnPeerAdded = countDownLatch;
@@ -651,6 +668,13 @@ public class RangingManagerTest {
 
         @Override
         public void onResults(@NonNull RangingDevice peer, @NonNull RangingData data) {
+        }
+
+        @Override
+        @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
+        public void onDlTdoaResults(
+                @NonNull RangingDevice peer, @NonNull DlTdoaMeasurement measurement) {
+            mOnDlTdoaResultsCalled.countDown();
         }
 
         @Override
@@ -742,6 +766,7 @@ public class RangingManagerTest {
             assertThat(uwbRangingCapabilities.getSupportedSlotDurations()).isNotNull();
             assertThat(uwbRangingCapabilities.getSupportedRangingUpdateRates()).isNotNull();
             assertTrue(uwbRangingCapabilities.isDistanceMeasurementSupported());
+            assertThat(uwbRangingCapabilities.getSupportedAntennaModes()).isNotNull();
 
             boolean unused = uwbRangingCapabilities.isAzimuthalAngleSupported();
             unused = uwbRangingCapabilities.isElevationAngleSupported();
@@ -1670,6 +1695,7 @@ public class RangingManagerTest {
         public void onRangingCapabilities(@NonNull RangingCapabilities capabilities) {
             mOnCapabilitiesReceived = true;
             mRangingCapabilities = capabilities;
+            sRangingCapabilities.set(capabilities);
             mCountDownLatch.countDown();
         }
 
@@ -1773,8 +1799,8 @@ public class RangingManagerTest {
 
         RangingSessionCallback callback = new RangingSessionCallback();
 
-        RangingSession rangingSession = mRangingManager.createRangingSession(
-                Executors.newSingleThreadExecutor(), callback);
+        Executor executor = Executors.newSingleThreadExecutor();
+        RangingSession rangingSession = mRangingManager.createRangingSession(executor, callback);
         assertThat(rangingSession).isNotNull();
 
         UwbAddress deviceAddress = UwbAddress.createRandomShortAddress();
@@ -1812,6 +1838,16 @@ public class RangingManagerTest {
         Log.i(TAG, "Starting DL-TDOA ranging session with preference: " + preference);
         rangingSession.start(preference);
         assertThat(callback.mOnOpenedCalled.await(4, TimeUnit.SECONDS)).isTrue();
+
+        Log.i(TAG, "Mocking a DL-TDOA measurement callback.");
+        executor.execute(() -> {
+            RangingDevice anchor = new RangingDevice.Builder().build();
+            // measurement should not be null in the real case, but since there is no public
+            // builder or any constructor of it, we simply ignore the values in this test.
+            callback.onDlTdoaResults(anchor, null);
+        });
+        Log.i(TAG, "Waiting for a DL-TDOA measurement callback.");
+        assertThat(callback.mOnDlTdoaResultsCalled.await(2, TimeUnit.SECONDS)).isTrue();
 
         Log.i(TAG, "DL-TDOA ranging session opened. Closing.");
         rangingSession.close();
@@ -1856,5 +1892,108 @@ public class RangingManagerTest {
 
         assertThrows(IllegalArgumentException.class,
                 () -> new DlTdoaRangingParams.Builder(1).setSlotsPerRangingRound(-1).build());
+    }
+
+    @Test
+    @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
+    public void testDlTdoaRangingParams_createFromFiraConfigPacket_validConfig() {
+        byte[] config = {
+            // WiFi Specific Header
+            (byte) 0xDD, (byte) 0x2D, (byte) 0x5A, (byte) 0x18, (byte) 0xFF,
+            // FiRa Specific Sub-Element Type and Length (with Extension)
+            (byte) 0x5F, (byte) 0x19,
+            // UWB Configuration Sub-Element Profile ID and UWB Config ID
+            (byte) 0x02, (byte) 0x00,
+            // Tag-Length-Value for DEVICE_MAC_ADDRESS
+            (byte) 0x06, (byte) 0x02, (byte) 0x20, (byte) 0x08,
+            // Tag-Length-Value for PREAMBLE_CODE_INDEX
+            (byte) 0x14, (byte) 0x01, (byte) 0x0C,
+            // Tag-Length-Value for VENDOR_ID
+            (byte) 0x27, (byte) 0x02, (byte) 0x08, (byte) 0x07,
+            // Tag-Length-Value for STATIC_STS_IV
+            (byte) 0x28, (byte) 0x06, (byte) 0xCA, (byte) 0xC8,
+            (byte) 0xA6, (byte) 0xF7, (byte) 0x6F, (byte) 0x08,
+            // Tag-Length-Value for SLOT_DURATION
+            (byte) 0x08, (byte) 0x02, (byte) 0x60, (byte) 0x09,
+            // Tag-Length-Value for SLOTS_PER_RR
+            (byte) 0x1B, (byte) 0x01, (byte) 0x0A,
+            // Tag-Length-Value for RANGING_DURATION
+            (byte) 0x09, (byte) 0x04, (byte) 0xE8, (byte) 0x03, (byte) 0x00, (byte) 0x00,
+            // Tag-Length-Value for SESSION_ID
+            (byte) 0x9F, (byte) 0x04, (byte) 0x67, (byte) 0x45, (byte) 0x23, (byte) 0x01,
+        };
+        DlTdoaRangingParams params = DlTdoaRangingParams.createFromFiraConfigPacket(config, null);
+
+        byte[] expectedDeviceAddress = new byte[] {(byte) 0x20, (byte) 0x08};
+        int expectedChannel = 9;
+        int expectedPreambleIndex = 12;
+        byte[] expectedSessionKeyInfo = new byte[] {
+            (byte) 0x08, (byte) 0x07, (byte) 0xCA, (byte) 0xC8,
+            (byte) 0xA6, (byte) 0xF7, (byte) 0x6F, (byte) 0x08};
+        int expectedSlotDuration = UwbRangingParams.DURATION_2_MS;
+        int expectedSlotsPerRangingRound = 10;
+        int expectedRangingIntervalMillis = 1000;
+        int expectedSessionId = 0x01234567;
+        byte[] expectedRangingRoundIndexes = new byte[] {(byte) 0x00};
+
+        assertThat(params).isNotNull();
+        assertThat(params.getDeviceAddress()).isEqualTo(
+                UwbAddress.fromBytes(expectedDeviceAddress));
+        assertThat(params.getComplexChannel().getChannel()).isEqualTo(expectedChannel);
+        assertThat(params.getComplexChannel().getPreambleIndex()).isEqualTo(expectedPreambleIndex);
+        assertThat(params.getSessionKeyInfo()).isEqualTo(expectedSessionKeyInfo);
+        assertThat(params.getSlotDuration()).isEqualTo(expectedSlotDuration);
+        assertThat(params.getSlotsPerRangingRound()).isEqualTo(expectedSlotsPerRangingRound);
+        assertThat(params.getRangingIntervalMillis()).isEqualTo(expectedRangingIntervalMillis);
+        assertThat(params.getSessionId()).isEqualTo(expectedSessionId);
+        assertThat(params.getRangingRoundIndexes()).isEqualTo(expectedRangingRoundIndexes);
+    }
+
+    @Test
+    @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
+    public void testDlTdoaRangingParams_defaultValues() {
+        DlTdoaRangingParams params = new DlTdoaRangingParams.Builder(12345678).build();
+        assertThat(params.getSessionId()).isEqualTo(12345678);
+        assertThat(params.getSessionKeyInfo()).isEqualTo(
+                new byte[] {7, 8, 1, 2, 3, 4, 5, 6});
+        assertThat(params.getComplexChannel().getChannel()).isEqualTo(9);
+        assertThat(params.getComplexChannel().getPreambleIndex()).isEqualTo(10);
+        assertThat(params.getRangingIntervalMillis()).isEqualTo(200);
+        assertThat(params.getSlotDuration()).isEqualTo(UwbRangingParams.DURATION_2_MS);
+        assertThat(params.getSlotsPerRangingRound()).isEqualTo(25);
+        assertThat(params.getRangingRoundIndexes()).isEqualTo(new byte[] {0});
+        assertThat(params.getMeasurementVersion()).isEqualTo(
+                DlTdoaRangingParams.MEASUREMENT_VERSION_1);
+    }
+
+    @Test
+    @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
+    public void testDlTdoaRangingParams_getters() {
+        DlTdoaRangingParams params = new DlTdoaRangingParams.Builder(12345678)
+                .setDeviceAddress(UwbAddress.fromBytes(new byte[] {(byte) 0x01, (byte) 0x02}))
+                .setSessionKeyInfo(new byte[] {0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A})
+                .setComplexChannel(new UwbComplexChannel.Builder()
+                        .setChannel(5)
+                        .setPreambleIndex(12)
+                        .build())
+                .setRangingIntervalMillis(240)
+                .setSlotDuration(UwbRangingParams.DURATION_1_MS)
+                .setSlotsPerRangingRound(20)
+                .setRangingRoundIndexes(new byte[] {1, 3, 5, 7, 9})
+                .setMeasurementVersion(DlTdoaRangingParams.MEASUREMENT_VERSION_2)
+                .build();
+        assertThat(params.getSessionId()).isEqualTo(12345678);
+        assertThat(params.getDeviceAddress()).isEqualTo(
+                UwbAddress.fromBytes(new byte[] {(byte) 0x01, (byte) 0x02}));
+        assertThat(params.getSessionKeyInfo()).isEqualTo(
+                new byte[] {0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A});
+        assertThat(params.getComplexChannel().getChannel()).isEqualTo(5);
+        assertThat(params.getComplexChannel().getPreambleIndex()).isEqualTo(12);
+        assertThat(params.getRangingIntervalMillis()).isEqualTo(240);
+        assertThat(params.getSlotDuration()).isEqualTo(UwbRangingParams.DURATION_1_MS);
+        assertThat(params.getSlotsPerRangingRound()).isEqualTo(20);
+        assertThat(params.getRangingRoundIndexes()).isEqualTo(new byte[] {1, 3, 5, 7, 9});
+        assertThat(params.getMeasurementVersion()).isEqualTo(
+                DlTdoaRangingParams.MEASUREMENT_VERSION_2);
     }
 }

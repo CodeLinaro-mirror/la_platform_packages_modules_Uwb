@@ -60,11 +60,16 @@
             <item name="fused_country_code_provider_enabled" type="bool" />
             <item name="is_multicast_list_update_ntf_v2_supported" type="bool" />
             <item name="is_multicast_list_update_rsp_v2_supported" type="bool" />
-            <item name="is_antenna_mode_config_supported" type="bool" />
             <item name="mcc_mcc_oem_override_list" type="array" />
             <item name="ccc_two_byte_config_id_little_endian_supported" type="bool" />
             <item name="enable_random_hopmodekey" type="bool" />
             <item name="fira_supported_extension_ccc" type="bool" />
+            <item name="enable_16_byte_hopmodekey" type="bool" />
+            <item name="android_specific_timesync_supported" type="bool"/>
+            <item name="timesync_uncertainty_override" type="integer"/>
+            <item name="timesync_static_device_offset_us" type="integer"/>
+            <item name="timesync_clock_skew_ppm" type="integer"/>
+            <item name="timesync_ble_time_uncertainty_us" type="integer"/>
           <!-- ===== End of UWB stack overlay definitions ===== -->
 
           <!-- ===== Start of ranging stack overlay definitions ===== -->

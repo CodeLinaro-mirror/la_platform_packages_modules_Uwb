@@ -17,22 +17,70 @@
 package android.ranging.uwb;
 
 import android.annotation.FlaggedApi;
+import android.annotation.IntDef;
 import android.annotation.IntRange;
 import android.annotation.NonNull;
 import android.annotation.Nullable;
 import android.os.Parcel;
 import android.os.Parcelable;
 import android.ranging.uwb.UwbRangingParams.SlotDuration;
+
 import com.android.ranging.flags.Flags;
 
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
 import java.util.Arrays;
 import java.util.Objects;
+import java.lang.annotation.Retention;
+import java.lang.annotation.RetentionPolicy;
 
 /**
  * Class to represent UWB Downlink TDoA ranging parameters.
  */
 @FlaggedApi(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
 public final class DlTdoaRangingParams implements Parcelable {
+
+    /**
+     * Defines supported DL-TDoA Ranging Measurement notification and result versions.
+     */
+    /** DL-TDoA Ranging Measurement version 1 */
+    public static final int MEASUREMENT_VERSION_1 = 1;
+    /** DL-TDoA Ranging Measurement version 2 */
+    public static final int MEASUREMENT_VERSION_2 = 2;
+    /** DL-TDoA Ranging Measurement version unknown */
+    public static final int MEASUREMENT_VERSION_UNKNOWN = Integer.MAX_VALUE;
+    /** @hide */
+    @Retention(RetentionPolicy.SOURCE)
+    @IntDef({
+            MEASUREMENT_VERSION_1,
+            MEASUREMENT_VERSION_2,
+            MEASUREMENT_VERSION_UNKNOWN,
+    })
+    public @interface MeasurementVersion {}
+
+    private static final int FIRA_OOB_WIFI_VSE_MINIMUM_TOTAL_LENGTH = 6;
+    private static final int FIRA_OOB_UWB_CONFIGURATION_HEADER_LENGTH = 2;
+
+    private static final int FIRA_OOB_WIFI_VSE_ID = 0xDD;
+    private static final int FIRA_OOB_WIFI_OUI_0 = 0x5A;
+    private static final int FIRA_OOB_WIFI_OUI_1 = 0x18;
+    private static final int FIRA_OOB_WIFI_OUI_2 = 0xFF;
+    private static final int FIRA_SUB_ELEMENT_TYPE_UWB_CONFIG = 0x05;
+    private static final int FIRA_UWB_PROFILE_ID = 0x02;
+
+    private static final int TAG_CHANNEL_NUMBER = 0x04;
+    private static final int TAG_DEVICE_MAC_ADDRESS = 0x06;
+    private static final int TAG_SLOT_DURATION = 0x08;
+    private static final int TAG_RANGING_DURATION = 0x09;
+    private static final int TAG_PREAMBLE_CODE_INDEX = 0x14;
+    private static final int TAG_SLOTS_PER_RR = 0x1B;
+    private static final int TAG_VENDOR_ID = 0x27;
+    private static final int TAG_STATIC_STS_IV = 0x28;
+    private static final int TAG_SESSION_ID = 0x9F;
+
+    // As per FiRa/UCI, Slot Duration is typically in RSTU (Ranging Slot Time Units),
+    // where 1200 RSTU is approx 1ms. We convert to the nearest supported ms value.
+    private static final int RSTU_PER_MS = 1200;
 
     private final int mSessionId;
     private final UwbAddress mDeviceAddress;
@@ -43,6 +91,8 @@ public final class DlTdoaRangingParams implements Parcelable {
     private final int mSlotDuration;
     private final int mSlotsPerRangingRound;
     private final byte[] mRangingRoundIndexes;
+    @MeasurementVersion
+    private final int mMeasurementVersion;
 
     private DlTdoaRangingParams(Builder builder) {
         mSessionId = builder.mSessionId;
@@ -53,6 +103,7 @@ public final class DlTdoaRangingParams implements Parcelable {
         mSlotDuration = builder.mSlotDuration;
         mSlotsPerRangingRound = builder.mSlotsPerRangingRound;
         mRangingRoundIndexes = builder.mRangingRoundIndexes;
+        mMeasurementVersion = builder.mMeasurementVersion;
     }
 
     private DlTdoaRangingParams(Parcel in) {
@@ -66,6 +117,7 @@ public final class DlTdoaRangingParams implements Parcelable {
         mSlotDuration = in.readInt();
         mSlotsPerRangingRound = in.readInt();
         mRangingRoundIndexes = in.createByteArray();
+        mMeasurementVersion = in.readInt();
     }
 
     public static final @NonNull Creator<DlTdoaRangingParams> CREATOR =
@@ -80,6 +132,215 @@ public final class DlTdoaRangingParams implements Parcelable {
             return new DlTdoaRangingParams[size];
         }
     };
+
+    /**
+     * Creates a {@link DlTdoaRangingParams} from a FiRa compliant configuration packet.
+     *
+     * @param config The byte array containing the FiRa configuration packet.
+     * @param rangingRoundIndexes The active ranging round indexes. If null, use the default
+     * value of {@link DlTdoaRangingParams.Builder}.
+     * @return A {@link DlTdoaRangingParams} instance.
+     * @throws IllegalArgumentException if the configuration packet is malformed or missing
+     * mandatory fields.
+     * @see <a href="https://groups.firaconsortium.org/wg/FPSG/document/5944">FiRa Specific OOB
+     * Profile Advertisement Message</a> for the configuration packet format.
+     */
+    @NonNull
+    public static DlTdoaRangingParams createFromFiraConfigPacket(
+            @NonNull byte[] config, @Nullable byte [] rangingRoundIndexes) {
+        Objects.requireNonNull(config);
+
+        // Validate header
+        if (config.length < FIRA_OOB_WIFI_VSE_MINIMUM_TOTAL_LENGTH) {
+            throw new IllegalArgumentException("Not enough bytes for a valid FiRa OOB WiFi VSE.");
+        }
+        int vseLength = config[1] & 0xFF;
+        int totalLength = 2 + vseLength;
+        if (totalLength < FIRA_OOB_WIFI_VSE_MINIMUM_TOTAL_LENGTH) {
+            throw new IllegalArgumentException("Invalid FiRa OOB WiFi VSE length.");
+        }
+        if (config.length < totalLength) {
+            throw new IllegalArgumentException("Not enough bytes for FiRa OOB WiFi VSE content.");
+        }
+        if ((config[0] & 0xFF) != FIRA_OOB_WIFI_VSE_ID
+                || (config[2] & 0xFF) != FIRA_OOB_WIFI_OUI_0
+                || (config[3] & 0xFF) != FIRA_OOB_WIFI_OUI_1
+                || (config[4] & 0xFF) != FIRA_OOB_WIFI_OUI_2) {
+            throw new IllegalArgumentException("Invalid FiRa OOB WiFi VSE header.");
+        }
+        if (((config[5] & 0xF0) >> 4) != FIRA_SUB_ELEMENT_TYPE_UWB_CONFIG) {
+            throw new IllegalArgumentException("Unsupported FiRa Sub-Element type.");
+        }
+
+        // Validate sub-element
+        int subElementLength = config[5] & 0x0F;
+        int subElementDataOffset = 6;
+        if (subElementLength == 0x0F) {
+            // parse extra bytes for length extension
+            int lengthExtensionOffset = subElementDataOffset;
+            int lengthExtension = config[lengthExtensionOffset++] & 0xFF;
+            while (lengthExtension == 0xFF && lengthExtensionOffset < totalLength) {
+                subElementLength += lengthExtension;
+                lengthExtension = config[lengthExtensionOffset++] & 0xFF;
+            }
+            subElementLength += lengthExtension;
+            // update offset for sub-element data
+            subElementDataOffset = lengthExtensionOffset;
+        }
+        if ((subElementDataOffset + subElementLength) > totalLength) {
+            throw new IllegalArgumentException(
+                    "Not enough bytes for UWB Configuration Sub-Element content.");
+        }
+        if (subElementLength < FIRA_OOB_UWB_CONFIGURATION_HEADER_LENGTH) {
+            throw new IllegalArgumentException("Invalid UWB Configuration Sub-Element length.");
+        }
+        if ((config[subElementDataOffset] & 0xFF) != FIRA_UWB_PROFILE_ID) {
+            throw new IllegalArgumentException("Invalid UWB Configuration Sub-Element header.");
+        }
+
+        // mandatory fields
+        Integer sessionId = null;
+
+        // configurable fields with default values
+        Short channelNumber = null;
+        byte[] deviceMacAddress = null;
+        Integer slotDuration = null;
+        Long rangingDuration = null;
+        Short preambleCodeIndex = null;
+        Short slotsPerRangingRound = null;
+        byte[] vendorId = null;
+        byte[] staticStsIv = null;
+
+        int offset = subElementDataOffset + FIRA_OOB_UWB_CONFIGURATION_HEADER_LENGTH;
+        while (offset + 1 < totalLength) {
+            int tag = config[offset++] & 0xFF;
+            int length = config[offset++] & 0xFF;
+
+            if (offset + length > totalLength) {
+                throw new IllegalArgumentException(
+                        "Not enough bytes for UWB Configuration Parameter List content.");
+            }
+
+            // Helper to read Little Endian values
+            ByteBuffer buffer = ByteBuffer.wrap(config, offset, length).order(
+                    ByteOrder.LITTLE_ENDIAN);
+
+            switch (tag) {
+                case TAG_CHANNEL_NUMBER -> {
+                    if (length != 1) {
+                        throw new IllegalArgumentException("Invalid length for CHANNEL_NUMBER.");
+                    }
+                    channelNumber = (short) (buffer.get() & 0xFF);
+                }
+                case TAG_DEVICE_MAC_ADDRESS -> {
+                    if (length != UwbAddress.SHORT_ADDRESS_BYTE_LENGTH
+                            && length != UwbAddress.EXTENDED_ADDRESS_BYTE_LENGTH) {
+                        throw new IllegalArgumentException(
+                                "Invalid length for DEVICE_MAC_ADDRESS.");
+                    }
+                    deviceMacAddress = new byte[length];
+                    buffer.get(deviceMacAddress);
+                }
+                case TAG_SLOT_DURATION -> {
+                    if (length != 2) {
+                        throw new IllegalArgumentException("Invalid length for SLOT_DURATION.");
+                    }
+                    slotDuration = buffer.getShort() & 0xFFFF; // Reads 2 bytes as LE
+                }
+                case TAG_RANGING_DURATION -> {
+                    if (length != 4) {
+                        throw new IllegalArgumentException("Invalid length for RANGING_DURATION.");
+                    }
+                    rangingDuration = buffer.getInt() & 0xFFFFFFFFL; // Reads 4 bytes as LE
+                }
+                case TAG_PREAMBLE_CODE_INDEX -> {
+                    if (length != 1) {
+                        throw new IllegalArgumentException(
+                                "Invalid length for PREAMBLE_CODE_INDEX.");
+                    }
+                    preambleCodeIndex = (short) (buffer.get() & 0xFF);
+                }
+                case TAG_SLOTS_PER_RR -> {
+                    if (length != 1) {
+                        throw new IllegalArgumentException("Invalid length for SLOTS_PER_RR.");
+                    }
+                    slotsPerRangingRound = (short) (buffer.get() & 0xFF);
+                }
+                case TAG_VENDOR_ID -> {
+                    if (length != 2) {
+                        throw new IllegalArgumentException("Invalid length for VENDOR_ID.");
+                    }
+                    vendorId = new byte[length];
+                    buffer.get(vendorId);
+                }
+                case TAG_STATIC_STS_IV -> {
+                    if (length != 6) {
+                        throw new IllegalArgumentException("Invalid length for STATIC_STS_IV.");
+                    }
+                    staticStsIv = new byte[length];
+                    buffer.get(staticStsIv);
+                }
+                case TAG_SESSION_ID -> {
+                    if (length != 4) {
+                        throw new IllegalArgumentException("Invalid length for SESSION_ID.");
+                    }
+                    sessionId = buffer.getInt(); // Reads 4 bytes as LE
+                }
+                default -> {
+                    // Skip unknown tags
+                }
+            }
+            // Move offset past the value
+            offset += length;
+        }
+
+        if (sessionId == null) {
+            throw new IllegalArgumentException(
+                    "Missing SESSION_ID parameter in UWB Configuration Parameter List.");
+        }
+
+        Builder builder = new Builder(sessionId);
+
+        if (channelNumber != null || preambleCodeIndex != null) {
+            int channel = channelNumber == null
+                    ? UwbConstants.DEFAULT_DLTDOA_CHANNEL_9 : channelNumber;
+            int preambleIndex = preambleCodeIndex == null
+                    ? UwbConstants.DEFAULT_DLTDOA_PREAMBLE_INDEX_10 : preambleCodeIndex;
+            builder.setComplexChannel(new UwbComplexChannel.Builder()
+                    .setChannel(channel)
+                    .setPreambleIndex(preambleIndex)
+                    .build());
+        }
+
+        if (deviceMacAddress != null) {
+            builder.setDeviceAddress(UwbAddress.fromBytes(deviceMacAddress));
+        }
+
+        if (slotDuration != null) {
+            builder.setSlotDuration(slotDuration / RSTU_PER_MS);
+        }
+
+        if (rangingDuration != null) {
+            builder.setRangingIntervalMillis(rangingDuration.intValue());
+        }
+
+        if (slotsPerRangingRound != null) {
+            builder.setSlotsPerRangingRound(slotsPerRangingRound);
+        }
+
+        if (vendorId != null && staticStsIv != null) {
+            byte[] sessionKeyInfo = new byte[vendorId.length + staticStsIv.length];
+            System.arraycopy(vendorId, 0, sessionKeyInfo, 0, vendorId.length);
+            System.arraycopy(staticStsIv, 0, sessionKeyInfo, vendorId.length, staticStsIv.length);
+            builder.setSessionKeyInfo(sessionKeyInfo);
+        }
+
+        if (rangingRoundIndexes != null) {
+            builder.setRangingRoundIndexes(rangingRoundIndexes);
+        }
+
+        return builder.build();
+    }
 
     /**
      * Gets the session ID.
@@ -158,6 +419,16 @@ public final class DlTdoaRangingParams implements Parcelable {
                 mRangingRoundIndexes.length);
     }
 
+    /**
+     * Gets the measurement version.
+     *
+     * @return The measurement version.
+     */
+    @MeasurementVersion
+    public int getMeasurementVersion() {
+        return mMeasurementVersion;
+    }
+
     @Override
     public int describeContents() {
         return 0;
@@ -173,6 +444,7 @@ public final class DlTdoaRangingParams implements Parcelable {
         dest.writeInt(mSlotDuration);
         dest.writeInt(mSlotsPerRangingRound);
         dest.writeByteArray(mRangingRoundIndexes);
+        dest.writeInt(mMeasurementVersion);
     }
 
     @Override
@@ -187,13 +459,14 @@ public final class DlTdoaRangingParams implements Parcelable {
                 Objects.equals(mDeviceAddress, that.mDeviceAddress) &&
                 Arrays.equals(mSessionKeyInfo, that.mSessionKeyInfo) &&
                 Objects.equals(mComplexChannel, that.mComplexChannel) &&
-                Arrays.equals(mRangingRoundIndexes, that.mRangingRoundIndexes);
+                Arrays.equals(mRangingRoundIndexes, that.mRangingRoundIndexes) &&
+                mMeasurementVersion == that.mMeasurementVersion;
     }
 
     @Override
     public int hashCode() {
         int result = Objects.hash(mSessionId, mDeviceAddress, mComplexChannel, mRangingIntervalMs,
-                mSlotDuration, mSlotsPerRangingRound);
+                mSlotDuration, mSlotsPerRangingRound, mMeasurementVersion);
         result = 31 * result + Arrays.hashCode(mSessionKeyInfo);
         result = 31 * result + Arrays.hashCode(mRangingRoundIndexes);
         return result;
@@ -210,6 +483,7 @@ public final class DlTdoaRangingParams implements Parcelable {
                 ", mSlotDuration=" + mSlotDuration +
                 ", mSlotsPerRangingRound=" + mSlotsPerRangingRound +
                 ", mRangingRoundIndexes=" + Arrays.toString(mRangingRoundIndexes) +
+                ", mMeasurementVersion=" + mMeasurementVersion +
                 '}';
     }
 
@@ -219,13 +493,20 @@ public final class DlTdoaRangingParams implements Parcelable {
     public static final class Builder {
         private final int mSessionId;
         private UwbAddress mDeviceAddress = UwbAddress.createRandomShortAddress();
-        private byte[] mSessionKeyInfo;
-        private UwbComplexChannel mComplexChannel = new UwbComplexChannel.Builder().build();
-        private int mRangingIntervalMs = 200;
+        private byte[] mSessionKeyInfo = UwbConstants.DEFAULT_DLTDOA_SESSION_KEY_INFO.clone();
+        private UwbComplexChannel mComplexChannel =
+                new UwbComplexChannel.Builder()
+                        .setChannel(UwbConstants.DEFAULT_DLTDOA_CHANNEL_9)
+                        .setPreambleIndex(UwbConstants.DEFAULT_DLTDOA_PREAMBLE_INDEX_10)
+                        .build();
+        private int mRangingIntervalMs = UwbConstants.DEFAULT_DLTDOA_RANGING_INTERVAL_200_MS;
         @SlotDuration
-        private int mSlotDuration = UwbRangingParams.DURATION_2_MS;
-        private int mSlotsPerRangingRound = 25;
-        private byte[] mRangingRoundIndexes;
+        private int mSlotDuration = UwbConstants.DEFAULT_DLTDOA_SLOT_DURATION_2_MS;
+        private int mSlotsPerRangingRound = UwbConstants.DEFAULT_DLTDOA_SLOTS_PER_RANGING_ROUND_25;
+        private byte[] mRangingRoundIndexes =
+                UwbConstants.DEFAULT_DLTDOA_RANGING_ROUND_INDEXES.clone();
+        @MeasurementVersion
+        private int mMeasurementVersion = MEASUREMENT_VERSION_1;
 
         /**
          * Constructor for the Builder.
@@ -237,6 +518,8 @@ public final class DlTdoaRangingParams implements Parcelable {
 
         /**
          * Sets the UWB address of the device.
+         *
+         * <p>If not set, a random short address is used as default.
          *
          * @param deviceAddress The UWB address of the device.
          * @return this {@link Builder} instance.
@@ -251,6 +534,8 @@ public final class DlTdoaRangingParams implements Parcelable {
         /**
          * Sets the session key information.
          *
+         * <p>If not set, {@code {7, 8, 1, 2, 3, 4, 5, 6}} is used as default.
+         *
          * @param sessionKeyInfo The session key information.
          * @return this {@link Builder} instance.
          */
@@ -263,6 +548,8 @@ public final class DlTdoaRangingParams implements Parcelable {
         /**
          * Sets the complex channel.
          *
+         * <p>If not set, a default channel with channel 9 and preamble index 10 is used.
+         *
          * @param complexChannel The complex channel.
          * @return this {@link Builder} instance.
          */
@@ -274,6 +561,8 @@ public final class DlTdoaRangingParams implements Parcelable {
 
         /**
          * Sets the ranging interval in milliseconds.
+         *
+         * <p>If not set, 200ms is used as default.
          *
          * @param rangingIntervalMs The ranging interval in milliseconds.
          * @return this {@link Builder} instance.
@@ -291,6 +580,8 @@ public final class DlTdoaRangingParams implements Parcelable {
         /**
          * Sets the slot duration.
          *
+         * <p>If not set, {@link UwbRangingParams#DURATION_2_MS} is used as default.
+         *
          * @param slotDuration The slot duration.
          * @return this {@link Builder} instance.
          */
@@ -302,6 +593,8 @@ public final class DlTdoaRangingParams implements Parcelable {
 
         /**
          * Sets the number of slots per ranging round.
+         *
+         * <p>If not set, 25 is used as default.
          *
          * @param slotsPerRangingRound The number of slots per ranging round.
          * @return this {@link Builder} instance.
@@ -319,12 +612,26 @@ public final class DlTdoaRangingParams implements Parcelable {
         /**
          * Sets the active ranging round indexes.
          *
+         * <p>If not set, {@code {0}} is used as default.
+         *
          * @param rangingRoundIndexes The active ranging round indexes.
          * @return this {@link Builder} instance.
          */
         @NonNull
         public Builder setRangingRoundIndexes(@NonNull byte[] rangingRoundIndexes) {
             mRangingRoundIndexes = Objects.requireNonNull(rangingRoundIndexes);
+            return this;
+        }
+
+        /**
+         * Sets the measurement version.
+         *
+         * @param measurementVersion The measurement version.
+         * @return this {@link Builder} instance.
+         */
+        @NonNull
+        public Builder setMeasurementVersion(@MeasurementVersion int measurementVersion) {
+            mMeasurementVersion = measurementVersion;
             return this;
         }
 

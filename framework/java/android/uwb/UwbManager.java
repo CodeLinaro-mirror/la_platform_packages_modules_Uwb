@@ -29,6 +29,7 @@ import android.annotation.RequiresPermission;
 import android.annotation.SuppressLint;
 import android.annotation.SystemApi;
 import android.annotation.SystemService;
+import android.bluetooth.BluetoothDevice;
 import android.content.Context;
 import android.os.Binder;
 import android.os.Build;
@@ -36,6 +37,8 @@ import android.os.CancellationSignal;
 import android.os.PersistableBundle;
 import android.os.RemoteException;
 import android.util.Log;
+import android.uwb.timesync.TimesyncCallbackListener;
+import android.uwb.timesync.TimesyncEvent;
 
 import androidx.annotation.RequiresApi;
 
@@ -77,6 +80,7 @@ public final class UwbManager {
     private final UwbVendorUciCallbackListener mUwbVendorUciCallbackListener;
     private final UwbOemExtensionCallbackListener mUwbOemExtensionCallbackListener;
     private final ChannelUsageCallbackListener mChannelUsageCallbackListener;
+    private final TimesyncCallbackListener mTimesyncCallbackListener;
 
     /**
      * Interface for receiving UWB adapter state changes
@@ -473,6 +477,7 @@ public final class UwbManager {
         mUwbVendorUciCallbackListener = new UwbVendorUciCallbackListener(adapter);
         mUwbOemExtensionCallbackListener = new UwbOemExtensionCallbackListener(adapter);
         mChannelUsageCallbackListener = new ChannelUsageCallbackListener(adapter);
+        mTimesyncCallbackListener = new TimesyncCallbackListener(adapter);
     }
 
     /**
@@ -1325,5 +1330,89 @@ public final class UwbManager {
         } catch (RemoteException e) {
             throw e.rethrowFromSystemServer();
         }
+    }
+
+    /**
+     * @hide
+     */
+    @Retention(RetentionPolicy.SOURCE)
+    @IntDef(
+            prefix = {"ADDRESS_TYPE_"},
+            value = {
+                    BluetoothDevice.ADDRESS_TYPE_PUBLIC,
+                    BluetoothDevice.ADDRESS_TYPE_RANDOM,
+                    BluetoothDevice.ADDRESS_TYPE_ANONYMOUS,
+                    BluetoothDevice.ADDRESS_TYPE_UNKNOWN,
+            })
+    public @interface AddressType {}
+
+    /**
+     * Register a {@link TimesyncCallback} to listen for timesync callbacks from a peer UWB device.
+     *
+     * This method is used to synchronize the UWB time base with a peer device's Bluetooth clock.
+     *
+     * <p> The service listens for specific Bluetooth LMP events, associated with the provided
+     * macAddress and addressType. When these events occur, the system captures timestamps and clock
+     * offsets, providing them to the caller via the {@link TimesyncCallback#onTimesyncEvent}
+     * method.
+     *
+     * <p>This enables applications to receive precise timing information. Intended clients are
+     * applications that need to perform time-sensitive ranging or communication with other UWB
+     * devices.
+     *
+     * <p> The provided callback will be invoked by the given {@link Executor}.
+     *
+     * @param executor an {@link Executor} to execute given callback
+     * @param macAddress the mac address of the peer device for time synchronization
+     * @param addressType the {@link AddressType} of the peer device
+     * @param callback the {@link TimesyncCallback} to be registered
+     */
+    @FlaggedApi(com.android.ranging.flags.Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
+    @RequiresPermission(permission.UWB_PRIVILEGED)
+    public void registerTimesyncCallback(
+            @NonNull @CallbackExecutor Executor executor,
+            @NonNull String macAddress,
+            @AddressType int addressType,
+            @NonNull TimesyncCallback callback) {
+        mTimesyncCallbackListener.register(executor, callback, macAddress, addressType);
+    }
+
+    /**
+     * Unregister the specified {@link TimesyncCallback}.
+     *
+     * <p> The same {@link TimesyncCallback} object used when calling
+     * {@link #registerTimesyncCallback(Executor, TimesyncCallback, String, int)} must be used.
+     *
+     * <p> Callbacks are automatically unregistered when an application process goes away.
+     *
+     * @param callback the {@link TimesyncCallback} to be unregistered
+     */
+    @FlaggedApi(com.android.ranging.flags.Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
+    @RequiresPermission(permission.UWB_PRIVILEGED)
+    public void unregisterTimesyncCallback(@NonNull TimesyncCallback callback) {
+        mTimesyncCallbackListener.unregister(callback);
+    }
+
+    /**
+     * Interfaces for receiving timesync responses and notifications
+     */
+    @FlaggedApi(com.android.ranging.flags.Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
+    public interface TimesyncCallback {
+        /**
+         * Call when the {@link TimesyncCallback} is successfully registered with the UWB service.
+         */
+        void onRegistered();
+
+        /**
+         * Call when the {@link TimesyncCallback} has failed to register.
+         */
+        void onRegisteredFailed();
+
+        /**
+         * Called when peer device receives new timesync event.
+         *
+         * @param event a {@link TimesyncEvent} object containing timesync information
+         */
+        void onTimesyncEvent(@NonNull TimesyncEvent event);
     }
 }
