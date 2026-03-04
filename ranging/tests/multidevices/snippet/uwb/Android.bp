@@ -33,8 +33,11 @@ android_test {
         "guava",
         "jsr330",
         "mobly-snippet-lib",
+        "MediaPerformanceClassCommon",
+        "mediapc-requirements",
         "ranging_aconfig_flags_lib",
         "framework-ranging.impl",
+        "compatibility-device-util-axt",
     ],
     min_sdk_version: "34",
 }
