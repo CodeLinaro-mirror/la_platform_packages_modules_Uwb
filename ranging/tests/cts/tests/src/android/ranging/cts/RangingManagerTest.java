@@ -47,7 +47,6 @@ import static com.google.common.truth.Truth.assertThat;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNotNull;
-import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
 import static org.junit.Assume.assumeTrue;
@@ -128,11 +127,11 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.Executor;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicReference;
 
 @SmallTest
 @RunWith(AndroidJUnit4.class)
@@ -799,7 +798,7 @@ public class RangingManagerTest {
     }
 
     @Test
-    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @CddTest(requirements = {"7.4.2.5/C-1-1,C-1-2"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_rtt_enabled")
     public void testRttRangingInitiator() throws InterruptedException {
         assumeTrue(mSupportedTechnologies.contains(RangingManager.WIFI_NAN_RTT));
@@ -870,7 +869,7 @@ public class RangingManagerTest {
     }
 
     @Test
-    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @CddTest(requirements = {"7.4.2.5/C-1-1,C-1-2"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_rtt_enabled")
     public void testRttRangingResponder() throws InterruptedException {
         assumeTrue(mSupportedTechnologies.contains(RangingManager.WIFI_NAN_RTT));
@@ -917,7 +916,7 @@ public class RangingManagerTest {
     }
 
     @Test
-    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @CddTest(requirements = {"7.4.2.5/C-1-1,C-1-2"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_rtt_enabled")
     public void testRttRangingResponder_WithMeasurementLimit() throws InterruptedException {
         assumeTrue(mSupportedTechnologies.contains(RangingManager.WIFI_NAN_RTT));
@@ -964,7 +963,7 @@ public class RangingManagerTest {
     }
 
     @Test
-    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2", "7.4.2.5/C-1-1,C-1-2"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_rtt_enabled")
     public void testMultiRangingSession() throws InterruptedException {
         assumeTrue(mSupportedTechnologies.contains(RangingManager.WIFI_NAN_RTT));
@@ -1017,7 +1016,7 @@ public class RangingManagerTest {
     }
 
     @Test
-    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @CddTest(requirements = {"7.4.3/C-10-1"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_enabled")
     public void testBleRssiRangingSession() throws Exception {
         assumeTrue(mSupportedTechnologies.contains(RangingManager.BLE_RSSI));
@@ -1070,7 +1069,7 @@ public class RangingManagerTest {
     }
 
     @Test
-    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @CddTest(requirements = {"7.4.3/C-10-1"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_enabled")
     public void testBleRssiRangingSession_whenDisabled() throws Exception {
         assumeTrue(mSupportedTechnologies.contains(RangingManager.BLE_RSSI));
@@ -1114,7 +1113,7 @@ public class RangingManagerTest {
     }
 
     @Test
-    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @CddTest(requirements = {"7.4.3/C-11-1,C-11-2"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_cs_enabled")
     public void testBleCsRangingSession() throws Exception {
         assumeTrue(mSupportedTechnologies.contains(RangingManager.BLE_CS));
@@ -1177,7 +1176,7 @@ public class RangingManagerTest {
     }
 
     @Test
-    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2", "7.4.3/C-11-1,C-11-2"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_enabled")
     public void testStartOobInitiatorRangingSession() throws InterruptedException {
         assumeTrue(mSupportedTechnologies.contains(RangingManager.UWB)
@@ -1393,21 +1392,21 @@ public class RangingManagerTest {
     }
 
     @Test
-    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @CddTest(requirements = {" 7.4.2.10/C-1-1,C-1-2,C-1-3,C-1-4"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_updates_26_q_2")
     public void testWifiPdInitiatorSession() throws InterruptedException {
         testWifiPdSessionInternal(DEVICE_ROLE_INITIATOR);
     }
 
     @Test
-    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @CddTest(requirements = {" 7.4.2.10/C-1-1,C-1-2,C-1-3,C-1-4"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_updates_26_q_2")
     public void testWifiPdResponderSession() throws InterruptedException {
         testWifiPdSessionInternal(DEVICE_ROLE_RESPONDER);
     }
 
     @Test
-    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @CddTest(requirements = {"7.4.3/C-11-1,C-11-2", "7.4.3/C-10-1"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_updates_26_q_2")
     public void testBluetoothDeviceSetAndUsedInOobFlow() throws InterruptedException {
         assumeTrue(mSupportedTechnologies.contains(RangingManager.BLE_CS)
@@ -1456,7 +1455,7 @@ public class RangingManagerTest {
     }
 
     @Test
-    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @CddTest(requirements = {"7.4.2.5/C-1-1,C-1-2"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_updates_25q4")
     public void testRttStationRanging() throws InterruptedException {
         assumeTrue(mSupportedTechnologies.contains(RangingManager.WIFI_STA_RTT));
@@ -1500,7 +1499,7 @@ public class RangingManagerTest {
     }
 
     @Test
-    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @CddTest(requirements = {"7.4.2.5/C-1-1,C-1-2"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_updates_25q4")
     public void testRttStationRangingParams() throws InterruptedException {
         createPreferenceAndTestRttRangingParams(0 /* channelWidth */);
@@ -1551,7 +1550,7 @@ public class RangingManagerTest {
     }
 
     @Test
-    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2", "7.4.3/C-11-1,C-11-2", "7.4.3/C-10-1"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_updates_25q4")
     public void testStartOobInitiatorRangingSession_withFilterSet() throws InterruptedException {
         assumeTrue(mSupportedTechnologies.contains(RangingManager.UWB)
@@ -1594,7 +1593,7 @@ public class RangingManagerTest {
     }
 
     @Test
-    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @CddTest(requirements = {"7.4.3/C-11-1,C-11-2"})
     @RequiresFlagsEnabled("com.android.ranging.flags.ranging_cs_enabled")
     public void testRangingIntervalValues() throws Exception {
         assumeTrue(mSupportedTechnologies.contains(RangingManager.BLE_CS)
@@ -1779,7 +1778,7 @@ public class RangingManagerTest {
 
     @Test
     @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
-    @RequiresFlagsEnabled("com.android.ranging.flags.ranging_stack_enabled")
+    @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
     public void testDlTdoaDtTagRangingSession() throws Exception {
         assumeTrue(mSupportedTechnologies.contains(RangingManager.UWB));
         enableUwb();
@@ -1858,45 +1857,123 @@ public class RangingManagerTest {
     }
 
     @Test
-    public void testRawDtTagRangingConfig_missingDlTdoaParams_throwsException() {
-        // Create a valid RawRangingDevice, but one that is invalid for RawDtTagRangingConfig
-        // by providing a different, non-DL-TDOA param.
-        RawRangingDevice rawTagDevice = new RawRangingDevice.Builder()
-                .setRangingDevice(new RangingDevice.Builder().build())
-                // Add a valid param so the RawRangingDevice.Builder doesn't throw.
-                .setUwbRangingParams(
-                        new UwbRangingParams.Builder(1, UwbRangingParams.CONFIG_UNICAST_DS_TWR,
-                                UwbAddress.createRandomShortAddress(),
-                                UwbAddress.createRandomShortAddress()).build())
-                .build();
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
+    @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
+    public void testDlTdoaRangingParams_createFromFiraConfigPacket_validBleCpConfig() {
+        byte[] config = {
+            // BLE Specific Header
+            (byte) 0x2D, (byte) 0x16, (byte) 0xF3, (byte) 0xFF,
+            // FiRa Specific Sub-Element Type and Length (with Extension)
+            (byte) 0x5F, (byte) 0x19,
+            // UWB Configuration Sub-Element Profile ID and UWB Config ID
+            (byte) 0x02, (byte) 0x00,
+            // Tag-Length-Value for DEVICE_MAC_ADDRESS
+            (byte) 0x06, (byte) 0x02, (byte) 0x20, (byte) 0x08,
+            // Tag-Length-Value for PREAMBLE_CODE_INDEX
+            (byte) 0x14, (byte) 0x01, (byte) 0x0C,
+            // Tag-Length-Value for VENDOR_ID
+            (byte) 0x27, (byte) 0x02, (byte) 0x08, (byte) 0x07,
+            // Tag-Length-Value for STATIC_STS_IV
+            (byte) 0x28, (byte) 0x06, (byte) 0xCA, (byte) 0xC8,
+            (byte) 0xA6, (byte) 0xF7, (byte) 0x6F, (byte) 0x08,
+            // Tag-Length-Value for SLOT_DURATION
+            (byte) 0x08, (byte) 0x02, (byte) 0x60, (byte) 0x09,
+            // Tag-Length-Value for SLOTS_PER_RR
+            (byte) 0x1B, (byte) 0x01, (byte) 0x0A,
+            // Tag-Length-Value for RANGING_DURATION
+            (byte) 0x09, (byte) 0x04, (byte) 0xE8, (byte) 0x03, (byte) 0x00, (byte) 0x00,
+            // Tag-Length-Value for SESSION_ID
+            (byte) 0x9F, (byte) 0x04, (byte) 0x67, (byte) 0x45, (byte) 0x23, (byte) 0x01,
+        };
+        DlTdoaRangingParams params = DlTdoaRangingParams.createFromFiraConfigPacket(config, null);
 
-        // This is the call we actually want to test. It should throw because
-        // DlTdoaRangingParams is missing.
-        assertThrows(IllegalArgumentException.class,
-                () -> new RawDtTagRangingConfig.Builder(rawTagDevice));
-    }
+        byte[] expectedDeviceAddress = new byte[] {(byte) 0x20, (byte) 0x08};
+        int expectedChannel = 9;
+        int expectedPreambleIndex = 12;
+        byte[] expectedSessionKeyInfo = new byte[] {
+            (byte) 0x08, (byte) 0x07, (byte) 0xCA, (byte) 0xC8,
+            (byte) 0xA6, (byte) 0xF7, (byte) 0x6F, (byte) 0x08};
+        int expectedSlotDuration = UwbRangingParams.DURATION_2_MS;
+        int expectedSlotsPerRangingRound = 10;
+        int expectedRangingIntervalMillis = 1000;
+        int expectedSessionId = 0x01234567;
+        byte[] expectedRangingRoundIndexes = new byte[] {(byte) 0x00};
+        int expectedMeasurementVersion = DlTdoaRangingParams.MEASUREMENT_VERSION_1;
 
-    @Test
-    public void testDlTdoaRangingParams_invalidRangingInterval_throwsException() {
-        assertThrows(IllegalArgumentException.class,
-                () -> new DlTdoaRangingParams.Builder(1).setRangingIntervalMillis(0).build());
-
-        assertThrows(IllegalArgumentException.class,
-                () -> new DlTdoaRangingParams.Builder(1).setRangingIntervalMillis(-1).build());
-    }
-
-    @Test
-    public void testDlTdoaRangingParams_invalidSlotsPerRangingRound_throwsException() {
-        assertThrows(IllegalArgumentException.class,
-                () -> new DlTdoaRangingParams.Builder(1).setSlotsPerRangingRound(0).build());
-
-        assertThrows(IllegalArgumentException.class,
-                () -> new DlTdoaRangingParams.Builder(1).setSlotsPerRangingRound(-1).build());
+        assertThat(params).isNotNull();
+        assertThat(params.getDeviceAddress()).isEqualTo(
+                UwbAddress.fromBytes(expectedDeviceAddress));
+        assertThat(params.getComplexChannel().getChannel()).isEqualTo(expectedChannel);
+        assertThat(params.getComplexChannel().getPreambleIndex()).isEqualTo(expectedPreambleIndex);
+        assertThat(params.getSessionKeyInfo()).isEqualTo(expectedSessionKeyInfo);
+        assertThat(params.getSlotDuration()).isEqualTo(expectedSlotDuration);
+        assertThat(params.getSlotsPerRangingRound()).isEqualTo(expectedSlotsPerRangingRound);
+        assertThat(params.getRangingIntervalMillis()).isEqualTo(expectedRangingIntervalMillis);
+        assertThat(params.getSessionId()).isEqualTo(expectedSessionId);
+        assertThat(params.getRangingRoundIndexes()).isEqualTo(expectedRangingRoundIndexes);
+        assertThat(params.getMeasurementVersion()).isEqualTo(expectedMeasurementVersion);
     }
 
     @Test
     @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
-    public void testDlTdoaRangingParams_createFromFiraConfigPacket_validConfig() {
+    public void testDlTdoaRangingParams_createFromFiraConfigPacket_validBleCsConfig() {
+        byte[] config = {
+            // BLE Specific Header
+            (byte) 0x2D, (byte) 0x16, (byte) 0xF4, (byte) 0xFF,
+            // FiRa Specific Sub-Element Type and Length (with Extension)
+            (byte) 0x5F, (byte) 0x19,
+            // UWB Configuration Sub-Element Profile ID and UWB Config ID
+            (byte) 0x02, (byte) 0x00,
+            // Tag-Length-Value for DEVICE_MAC_ADDRESS
+            (byte) 0x06, (byte) 0x02, (byte) 0x20, (byte) 0x08,
+            // Tag-Length-Value for PREAMBLE_CODE_INDEX
+            (byte) 0x14, (byte) 0x01, (byte) 0x0C,
+            // Tag-Length-Value for VENDOR_ID
+            (byte) 0x27, (byte) 0x02, (byte) 0x08, (byte) 0x07,
+            // Tag-Length-Value for STATIC_STS_IV
+            (byte) 0x28, (byte) 0x06, (byte) 0xCA, (byte) 0xC8,
+            (byte) 0xA6, (byte) 0xF7, (byte) 0x6F, (byte) 0x08,
+            // Tag-Length-Value for SLOT_DURATION
+            (byte) 0x08, (byte) 0x02, (byte) 0x60, (byte) 0x09,
+            // Tag-Length-Value for SLOTS_PER_RR
+            (byte) 0x1B, (byte) 0x01, (byte) 0x0A,
+            // Tag-Length-Value for RANGING_DURATION
+            (byte) 0x09, (byte) 0x04, (byte) 0xE8, (byte) 0x03, (byte) 0x00, (byte) 0x00,
+            // Tag-Length-Value for SESSION_ID
+            (byte) 0x9F, (byte) 0x04, (byte) 0x67, (byte) 0x45, (byte) 0x23, (byte) 0x01,
+        };
+        DlTdoaRangingParams params = DlTdoaRangingParams.createFromFiraConfigPacket(config, null);
+
+        byte[] expectedDeviceAddress = new byte[] {(byte) 0x20, (byte) 0x08};
+        int expectedChannel = 9;
+        int expectedPreambleIndex = 12;
+        byte[] expectedSessionKeyInfo = new byte[] {
+            (byte) 0x08, (byte) 0x07, (byte) 0xCA, (byte) 0xC8,
+            (byte) 0xA6, (byte) 0xF7, (byte) 0x6F, (byte) 0x08};
+        int expectedSlotDuration = UwbRangingParams.DURATION_2_MS;
+        int expectedSlotsPerRangingRound = 10;
+        int expectedRangingIntervalMillis = 1000;
+        int expectedSessionId = 0x01234567;
+        byte[] expectedRangingRoundIndexes = new byte[] {(byte) 0x00};
+        int expectedMeasurementVersion = DlTdoaRangingParams.MEASUREMENT_VERSION_1;
+
+        assertThat(params).isNotNull();
+        assertThat(params.getDeviceAddress()).isEqualTo(
+                UwbAddress.fromBytes(expectedDeviceAddress));
+        assertThat(params.getComplexChannel().getChannel()).isEqualTo(expectedChannel);
+        assertThat(params.getComplexChannel().getPreambleIndex()).isEqualTo(expectedPreambleIndex);
+        assertThat(params.getSessionKeyInfo()).isEqualTo(expectedSessionKeyInfo);
+        assertThat(params.getSlotDuration()).isEqualTo(expectedSlotDuration);
+        assertThat(params.getSlotsPerRangingRound()).isEqualTo(expectedSlotsPerRangingRound);
+        assertThat(params.getRangingIntervalMillis()).isEqualTo(expectedRangingIntervalMillis);
+        assertThat(params.getSessionId()).isEqualTo(expectedSessionId);
+        assertThat(params.getRangingRoundIndexes()).isEqualTo(expectedRangingRoundIndexes);
+        assertThat(params.getMeasurementVersion()).isEqualTo(expectedMeasurementVersion);
+    }
+
+    @Test
+    @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
+    public void testDlTdoaRangingParams_createFromFiraConfigPacket_validWifiConfig() {
         byte[] config = {
             // WiFi Specific Header
             (byte) 0xDD, (byte) 0x2D, (byte) 0x5A, (byte) 0x18, (byte) 0xFF,
@@ -1935,6 +2012,7 @@ public class RangingManagerTest {
         int expectedRangingIntervalMillis = 1000;
         int expectedSessionId = 0x01234567;
         byte[] expectedRangingRoundIndexes = new byte[] {(byte) 0x00};
+        int expectedMeasurementVersion = DlTdoaRangingParams.MEASUREMENT_VERSION_1;
 
         assertThat(params).isNotNull();
         assertThat(params.getDeviceAddress()).isEqualTo(
@@ -1947,9 +2025,11 @@ public class RangingManagerTest {
         assertThat(params.getRangingIntervalMillis()).isEqualTo(expectedRangingIntervalMillis);
         assertThat(params.getSessionId()).isEqualTo(expectedSessionId);
         assertThat(params.getRangingRoundIndexes()).isEqualTo(expectedRangingRoundIndexes);
+        assertThat(params.getMeasurementVersion()).isEqualTo(expectedMeasurementVersion);
     }
 
     @Test
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
     @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
     public void testDlTdoaRangingParams_defaultValues() {
         DlTdoaRangingParams params = new DlTdoaRangingParams.Builder(12345678).build();
@@ -1967,6 +2047,7 @@ public class RangingManagerTest {
     }
 
     @Test
+    @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
     @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
     public void testDlTdoaRangingParams_getters() {
         DlTdoaRangingParams params = new DlTdoaRangingParams.Builder(12345678)
