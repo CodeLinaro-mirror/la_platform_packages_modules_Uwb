@@ -30,6 +30,7 @@ public class DeviceConfigFacade {
     private static final String LOG_TAG = DeviceConfigFacade.class.getSimpleName();
 
     /**
+     *
      */
     private static final int MAX_FOV = 180;
 
@@ -106,6 +107,11 @@ public class DeviceConfigFacade {
     private boolean mIsRandomHopmodekeySupported;
     private boolean mFiraExtensionForCCCSupported;
     private boolean mIs16ByteHopmodekeyEnabled;
+    private boolean mIsAndroidSpecificTimesyncSupported;
+    private int mTimesyncUncertainty;
+    private int mTimesyncDeviceOffset;
+    private int mTimesyncClockSkewPpm;
+    private int mTimesyncBleTimeUncertainty;
 
     public DeviceConfigFacade(Handler handler, Context context) {
         mContext = context;
@@ -339,6 +345,35 @@ public class DeviceConfigFacade {
             mIs16ByteHopmodekeyEnabled = mContext.getResources()
                     .getBoolean(R.bool.enable_16_byte_hopmodekey);
 
+            mIsAndroidSpecificTimesyncSupported = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "android_specific_timesync_supported",
+                    mContext.getResources().getBoolean(R.bool.android_specific_timesync_supported)
+            );
+            mTimesyncUncertainty = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "timesync_uncertainty_override",
+                    mContext.getResources().getInteger(R.integer.timesync_uncertainty_override)
+            );
+
+            mTimesyncDeviceOffset = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "timesync_static_device_offset_us",
+                    mContext.getResources().getInteger(R.integer.timesync_static_device_offset_us)
+            );
+
+            mTimesyncClockSkewPpm = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "timesync_clock_skew_ppm",
+                    mContext.getResources().getInteger(R.integer.timesync_clock_skew_ppm)
+            );
+
+            mTimesyncBleTimeUncertainty = DeviceConfig.getInt(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "timesync_ble_time_uncertainty_us",
+                    mContext.getResources().getInteger(R.integer.timesync_ble_time_uncertainty_us)
+            );
+
             // A little parsing and cleanup:
             mFrontAzimuthRadiansPerSecond = (float) Math.toRadians(frontAzimuthDegreesPerSecond);
             mBackAzimuthRadiansPerSecond = (float) Math.toRadians(backAzimuthDegreesPerSecond);
@@ -356,7 +391,8 @@ public class DeviceConfigFacade {
             // device config override with array is not supported, so just read the resource.
             mFiraExtensionForCCCSupported = mContext.getResources()
                     .getBoolean(R.bool.fira_supported_extension_ccc);
-        } else { // resource is null (init with the default value in uwbResources/res/values/config.xml)
+        } else { // resource is null (init with the default value in
+            // uwbResources/res/values/config.xml)
             mEnableFilters = true;
             mFilterDistanceInliersPercent = 0;
             mFilterDistanceWindow = 3;
@@ -398,9 +434,14 @@ public class DeviceConfigFacade {
             mFusedCountryCodeProviderEnabled = false;
 
             // device config override with array is not supported, so just read the resource.
-            mMccMncOemOverrideList = new String[] {};
+            mMccMncOemOverrideList = new String[]{};
             mIsRandomHopmodekeySupported = false;
             mIs16ByteHopmodekeyEnabled = false;
+            mIsAndroidSpecificTimesyncSupported = false;
+            mTimesyncUncertainty = 255;
+            mTimesyncDeviceOffset = -36000;
+            mTimesyncClockSkewPpm = 100;
+            mTimesyncBleTimeUncertainty = 1000;
 
             // A little parsing and cleanup:
             mFrontAzimuthRadiansPerSecond = (float) Math.toRadians(frontAzimuthDegreesPerSecond);
@@ -631,8 +672,8 @@ public class DeviceConfigFacade {
     /**
      * Returns whether background ranging is enabled or not.
      * If enabled:
-     *  * Background 3p apps are allowed to open new ranging sessions
-     *  * When previously foreground 3p apps moves to background, sessions are not terminated
+     * * Background 3p apps are allowed to open new ranging sessions
+     * * When previously foreground 3p apps moves to background, sessions are not terminated
      */
     public boolean isBackgroundRangingEnabled() {
         return mBackgroundRangingEnabled;
@@ -726,7 +767,7 @@ public class DeviceConfigFacade {
         return mMccMncOemOverrideList;
     }
 
-     /**
+    /**
      * Returns whether random hopmodekey is supported or not.
      */
     public boolean isRandomHopmodekeySupported() {
@@ -745,5 +786,37 @@ public class DeviceConfigFacade {
      */
     public boolean is16ByteHopmodekeyEnabled() {
         return mIs16ByteHopmodekeyEnabled;
+    }
+
+    /** Returns the maximum frequency drift in parts per million. */
+    public int getTimesyncClockSkewPpm() {
+        return mTimesyncClockSkewPpm;
+    }
+
+    /**
+     * Returns the calibrated microsecond offset used to align the system clock with the UWB clock
+     * domain.
+     */
+    public int getTimesyncDeviceOffset() {
+        return mTimesyncDeviceOffset;
+    }
+
+    /**
+     * Returns the Log2-encoded uncertainty floor for time synchronization measurements in
+     * microseconds.
+     */
+    public int getTimesyncUncertainty() {
+        return mTimesyncUncertainty;
+    }
+
+    /**
+     * Returns whether the device supports proprietary Android UCI extensions for timesync.
+     */
+    public boolean isAndroidSpecificTimesyncSupported() {
+        return mIsAndroidSpecificTimesyncSupported;
+    }
+
+    public int getTimesyncBleTimeUncertainty() {
+        return mTimesyncBleTimeUncertainty;
     }
 }

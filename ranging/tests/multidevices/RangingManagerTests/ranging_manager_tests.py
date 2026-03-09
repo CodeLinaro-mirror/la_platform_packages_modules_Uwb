@@ -22,9 +22,11 @@ from lib import rssi
 from lib import rtt
 from lib import utils
 from lib import uwb
+from lib import wifipd
 from lib.session import RangingSession
 from lib.params import *
 from lib.ranging_decorator import *
+from android.platform.test.annotations import CddTest
 from mobly import asserts
 from mobly import config_parser
 from mobly import suite_runner
@@ -54,6 +56,8 @@ _TEST_CASES = [
     "test_uwb_ranging_app_switch_to_bg_and_fg",
     "test_ble_rssi_ranging_app_switch_to_bg_and_fg",
     "test_ble_cs_ranging_app_switch_to_bg_and_fg",
+    "test_on_motion_received",
+    "test_one_to_one_wifi_pd_ranging",
 ]
 
 
@@ -327,18 +331,22 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     'android.ranging.RangingSession.Callback#onStopped(android.ranging.RangingDevice, int)',
     'android.os.Parcel#writeBlob(byte[])',
   ])
+  @CddTest(requirements = ['7.3.13/C-1-1,C-1-2'])
   def test_one_to_one_uwb_ranging_unicast_static_sts(self):
     """Verifies uwb ranging with peer device using unicast static sts"""
     self._test_one_to_one_uwb_ranging(uwb.ConfigId.UNICAST_DS_TWR)
 
+  @CddTest(requirements = ['7.3.13/C-1-1,C-1-2'])
   def test_one_to_one_uwb_ranging_multicast_provisioned_sts(self):
     """Verifies uwb ranging with peer device using multicast provisioned sts"""
     self._test_one_to_one_uwb_ranging(uwb.ConfigId.PROVISIONED_MULTICAST_DS_TWR)
 
+  @CddTest(requirements = ['7.3.13/C-1-1,C-1-2'])
   def test_one_to_one_uwb_ranging_unicast_provisioned_sts(self):
       """Verifies uwb ranging with peer device using unicast provisioned sts"""
       self._test_one_to_one_uwb_ranging(uwb.ConfigId.PROVISIONED_UNICAST_DS_TWR)
 
+  @CddTest(requirements = ['7.3.13/C-1-1,C-1-2'])
   def test_one_to_one_uwb_ranging_disable_range_data_ntf(self):
     """Verifies device does not receive range data after disabling range data notifications"""
     SESSION_HANDLE = str(uuid4())
@@ -410,6 +418,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
     self.responder.stop_ranging_and_assert_closed(SESSION_HANDLE)
 
+  @CddTest(requirements = ['7.3.13/C-1-1,C-1-2'])
   def test_uwb_ranging_app_switch_to_bg_and_fg(self):
       """ verifies Uwb ranging with foreground and background"""
       #TODO: b/474105892 Add support via test api for AL.
@@ -492,7 +501,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
       self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
       self.responder.stop_ranging_and_assert_closed(SESSION_HANDLE)
-
+  @CddTest(requirements = ['7.4.3/C-10-1'])
   def test_ble_rssi_ranging_app_switch_to_bg_and_fg(self):
       """ verifies ble rssi ranging with foreground and background"""
       #TODO: b/474105892 Add support via test api for AL.
@@ -562,7 +571,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
       finally:
           self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
           self._ble_disconnect()
-
+  @CddTest(requirements = ['7.3.13/C-11-1,C-11-2'])
   def test_ble_cs_ranging_app_switch_to_bg_and_fg(self):
       """ verifies ble cs ranging with foreground and background"""
       #TODO: b/474105892 Add support via test api for AL.
@@ -637,6 +646,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
           self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
           self._ble_disconnect()
 
+  @CddTest(requirements = ['7.3.13/C-1-1,C-1-2'])
   def test_dynamic_peer_uwb_ranging(self):
       """verifies dynamic peer with UWB"""
 
@@ -736,7 +746,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
       )
 
       self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
-
+  @CddTest(requirements = ['7.4.2.5/C-1-1,C-1-2'])
   def test_uwb_ranging_measurement_limit(self):
       """Verifies device does not receive range data after measurement limit."""
       SESSION_HANDLE = str(uuid4())
@@ -805,6 +815,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
       self.initiator.assert_close_ranging_event_received(SESSION_HANDLE)
       self.responder.assert_close_ranging_event_received(SESSION_HANDLE)
 
+  @CddTest(requirements = ['7.4.3/C-10-1'])
   def test_ble_rssi_ranging_measurement_limit(self):
       """Verifies ble rssi ranging with measurement limit.
       """
@@ -855,6 +866,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
   @ApiTest(apis=[
           'android.net.wifi.rtt.WifiRttManager#cancelRanging(android.os.WorkSource)',
   ])
+  @CddTest(requirements = ['7.3.13/C-1-1,C-1-2'])
   def test_one_to_one_wifi_rtt_ranging(self):
     """Verifies wifi rtt ranging with peer device, devices range for 10 seconds."""
     asserts.skip_if(self._is_emulator_device(self.initiator.ad),
@@ -928,6 +940,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
     self.responder.stop_ranging_and_assert_closed(SESSION_HANDLE)
 
+  @CddTest(requirements = ['7.4.2.5/C-1-1,C-1-2'])
   def test_one_to_one_wifi_periodic_rtt_ranging(self):
     """Verifies wifi periodic rtt ranging with peer device, devices range for 10 seconds."""
     asserts.skip_if(self._is_emulator_device(self.initiator.ad),
@@ -1018,6 +1031,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
       'java.util#copyOf(byte[], int)',
       'java.util#copyOfRange(byte[], int, int)',
   ])
+  @CddTest(requirements = ['7.4.3/C-10-1'])
   def test_one_to_one_ble_rssi_ranging(self):
     """Verifies rssi ranging with peer device, devices range for 10 seconds."""
     asserts.skip_if(self._is_emulator_device(self.initiator.ad),
@@ -1104,6 +1118,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
       'android.bluetooth.le.DistanceMeasurementSession#stopSession',
       'android.bluetooth.le.DistanceMeasurementParams#getMaxDurationSeconds',
   ])
+  @CddTest(requirements = ['7.3.13/C-11-1,C-11-2'])
   def test_one_to_one_ble_cs_ranging(self):
     """
     Verifies cs ranging with peer device, devices range for 10 seconds.
@@ -1176,6 +1191,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     'android.ranging.oob.TransportHandle#registerReceiveCallback(java.util.concurrent.Executor, android.ranging.oob.TransportHandle.ReceiveCallback)',
     'android.ranging.oob.TransportHandle.ReceiveCallback#onSendFailed()',
   ])
+  @CddTest(requirements = ['7.3.13/C-1-1,C-1-2'])
   def test_one_to_one_uwb_ranging_with_oob(self):
     asserts.skip_if(
         not self.responder.is_ranging_technology_supported(RangingTechnology.UWB),
@@ -1204,6 +1220,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     session.assert_received_data()
     session.stop_and_assert_closed()
 
+  @CddTest(requirements = ['7.3.13/C-11-1,C-11-2'])
   def test_one_to_one_ble_cs_ranging_with_oob(self):
     asserts.skip_if(self.initiator.ad.adb.getprop("ro.build.type") == "user",
                     "Skipping OOB CS test on user build because BLE address is masked")
@@ -1261,6 +1278,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
       session.stop_and_assert_closed(check_responders=False)
       self._ble_disconnect()
 
+  @CddTest(requirements = ['7.3.13/C-11-1,C-11-2'])
   def test_ble_cs_ranging_measurement_limit(self):
       """Verifies ble cs ranging with measurement limit."""
       asserts.skip_if(self._is_emulator_device(self.initiator.ad),
@@ -1312,7 +1330,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
 
       finally:
         self._ble_disconnect()
-
+  @CddTest(requirements = ['7.4.2.5/C-1-1,C-1-2'])
   def test_one_to_one_wifi_rtt_ranging_with_oob(self):
       """Verifies wifi rtt ranging with oob.
       """
@@ -1359,6 +1377,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
       session.start_and_assert_opened(check_responders=False)
       session.assert_received_data(technologies=[RangingTechnology.WIFI_RTT], check_responders=False)
 
+  @CddTest(requirements = ['7.4.3/C-10-1'])
   def test_one_to_one_ble_rssi_ranging_with_oob(self):
     """Verifies ble rssi ranging with oob.
 
@@ -1422,6 +1441,7 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     finally:
         self._ble_disconnect()
 
+  @CddTest(requirements = ['7.3.13/C-1-1,C-1-2'])
   def test_oob_responder_persists_until_explicitly_stopped(self):
     """Verifies oob responder persists until explicitly stopped.
     """
@@ -1457,6 +1477,137 @@ class RangingManagerTest(ranging_base_test.RangingBaseTest):
     session.start_and_assert_opened(start_responders=False, check_responders=False)
     session.assert_received_data()
     session.stop_and_assert_closed()
+
+  @ApiTest(apis=[
+      'android.ranging.MotionState#getMotionState()',
+      'android.ranging.RangingSession.Callback#onMotionReceived(android.ranging.RangingDevice, android.ranging.MotionState)',
+  ])
+  @CddTest(requirements = ['7.3.13/C-1-1,C-1-2'])
+  def test_on_motion_received(self):
+    """Verifies onMotionReceived callback is triggered."""
+    asserts.skip_if(
+        not self.responder.is_ranging_technology_supported(RangingTechnology.UWB),
+        "UWB not supported by responder",
+    )
+    asserts.skip_if(
+        not self.initiator.is_ranging_technology_supported(RangingTechnology.UWB),
+        "UWB not supported by initiator",
+    )
+
+    initiator_preference = RangingPreference(
+        device_role=DeviceRole.INITIATOR,
+        ranging_params=OobInitiatorRangingParams(
+            peer_ids=[self.responder.id], ranging_mode=RangingMode.HIGH_ACCURACY
+        ),
+    )
+
+    responder_preference = RangingPreference(
+        device_role=DeviceRole.RESPONDER,
+        ranging_params=OobResponderRangingParams(peer_id=self.initiator.id),
+    )
+
+    session = RangingSession()
+    session.set_initiator(self.initiator, initiator_preference)
+    session.add_responder(self.responder, responder_preference)
+
+    session.start_and_assert_opened()
+    session.assert_received_data()
+
+    # Verify responder can send motion event to initiator.
+    session.send_motion_event_and_assert_received(self.responder.id, self.initiator.id)
+
+    session.stop_and_assert_closed()
+
+  @CddTest(requirements = ['7.4.2.10/C-1-1,C-1-2,C-1-3,C-1-4"'])
+  def test_one_to_one_wifi_pd_ranging(self):
+    """Verifies wifi pd ranging with peer device, devices range for 10 seconds."""
+    SESSION_HANDLE = str(uuid4())
+    TECHNOLOGIES = {RangingTechnology.WIFI_PD}
+
+    asserts.skip_if(
+        not self.responder.is_ranging_technology_supported(RangingTechnology.WIFI_PD),
+        f"Wifi PD not supported by responder",
+    )
+    asserts.skip_if(
+        not self.initiator.is_ranging_technology_supported(RangingTechnology.WIFI_PD),
+        f"Wifi PD not supported by initiator",
+    )
+
+    initiator_caps = self.initiator.ad.ranging.getWifiPdCapabilities()
+    responder_caps = self.responder.ad.ranging.getWifiPdCapabilities()
+
+    asserts.assert_true(
+        initiator_caps, "Failed to get Wifi PD capabilities from initiator"
+    )
+    asserts.assert_true(
+        responder_caps, "Failed to get Wifi PD capabilities from responder"
+    )
+    responder_mac_address = responder_caps.get("mac_address")
+    asserts.assert_true(
+        responder_mac_address,
+        "Failed to get Wifi PD MAC address from responder caps",
+    )
+    initiator_mac_address = initiator_caps.get("mac_address")
+    asserts.assert_true(
+        initiator_mac_address,
+        "Failed to get Wifi PD MAC address from initiator caps",
+    )
+
+    wifi_pd_params = wifipd.get_best_wifi_pd_params(
+        initiator_caps, responder_caps, responder_mac_address
+    )
+
+    initiator_preference = RangingPreference(
+        device_role=DeviceRole.INITIATOR,
+        ranging_params=RawInitiatorRangingParams(
+            peer_params=[
+                DeviceParams(
+                    peer_id=self.responder.id,
+                    wifi_pd_params=wifi_pd_params,
+                )
+            ],
+        ),
+        enable_range_data_notifications=True,
+    )
+
+    responder_wifi_pd_params = wifipd.get_best_wifi_pd_params(
+        initiator_caps, responder_caps, initiator_mac_address
+    )
+
+    responder_preference = RangingPreference(
+        device_role=DeviceRole.RESPONDER,
+        ranging_params=RawResponderRangingParams(
+            peer_params=DeviceParams(
+                peer_id=self.initiator.id,
+                wifi_pd_params=responder_wifi_pd_params,
+            ),
+        ),
+        enable_range_data_notifications=True,
+    )
+
+    self.responder.start_ranging_and_assert_opened(
+        SESSION_HANDLE, responder_preference
+    )
+    self.initiator.start_ranging_and_assert_opened(
+        SESSION_HANDLE, initiator_preference
+    )
+
+    time.sleep(10)
+    asserts.assert_true(
+        self.initiator.verify_received_data_from_peer_using_technologies(
+            SESSION_HANDLE, self.responder.id, TECHNOLOGIES
+        ),
+        "Initiator did not find responder",
+    )
+    asserts.assert_true(
+        self.responder.verify_received_data_from_peer_using_technologies(
+            SESSION_HANDLE, self.initiator.id, TECHNOLOGIES
+        ),
+        "Responder did not find initiator",
+    )
+
+    self.initiator.stop_ranging_and_assert_closed(SESSION_HANDLE)
+    self.responder.stop_ranging_and_assert_closed(SESSION_HANDLE)
 
 if __name__ == "__main__":
   if "--" in sys.argv:

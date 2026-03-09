@@ -20,6 +20,7 @@ import android.app.UiAutomation;
 import android.content.Context;
 import android.net.ConnectivityManager;
 import android.net.wifi.WifiManager;
+import android.ranging.MotionState;
 import android.ranging.RangingCapabilities;
 import android.ranging.RangingData;
 import android.ranging.RangingDevice;
@@ -29,6 +30,8 @@ import android.ranging.RangingMeasurement;
 import android.ranging.RangingPreference;
 import android.ranging.RangingSession;
 import android.ranging.oob.TransportHandle;
+import android.ranging.raw.RawResponderRangingConfig;
+import android.ranging.wifi.pd.WifiPdRangingCapabilities;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -39,8 +42,8 @@ import com.google.android.mobly.snippet.event.EventCache;
 import com.google.android.mobly.snippet.event.SnippetEvent;
 import com.google.android.mobly.snippet.rpc.AsyncRpc;
 import com.google.android.mobly.snippet.rpc.Rpc;
-import android.ranging.raw.RawResponderRangingConfig;
 
+import org.json.JSONArray;
 import org.json.JSONException;
 import org.json.JSONObject;
 
@@ -111,6 +114,7 @@ public class RangingSnippet implements Snippet {
         OPEN_FAILED,
         STARTED,
         DATA,
+        MOTION_RECEIVED,
         STOPPED,
         CLOSED,
         OOB_SEND_CAPABILITIES_REQUEST,
@@ -147,6 +151,17 @@ public class RangingSnippet implements Snippet {
             SnippetEvent event = new SnippetEvent(mCallbackId, Event.STARTED.toString());
             event.getData().putString("peer_id", peer.getUuid().toString());
             event.getData().putInt("technology", technology);
+            mEventCache.postEvent(event);
+        }
+
+        @Override
+        public void onMotionReceived(@NonNull RangingDevice rangingDevice,
+                @NonNull MotionState motionState) {
+            Log.d(TAG, "onMotionReceived");
+            SnippetEvent event =
+                    new SnippetEvent(mCallbackId, Event.MOTION_RECEIVED.toString());
+            event.getData().putString("rangingDevice", rangingDevice.getUuid().toString());
+            event.getData().putInt("motionState", motionState.getMotionState());
             mEventCache.postEvent(event);
         }
 
@@ -268,12 +283,16 @@ public class RangingSnippet implements Snippet {
                     return new SnippetEvent(
                             mCallbackId,
                             Event.OOB_SEND_STOP_RANGING.toString());
+                case 8:
+                    return new SnippetEvent(
+                            mCallbackId, Event.MOTION_RECEIVED.toString());
                 default:
                     return new SnippetEvent(
                             mCallbackId,
                             Event.OOB_SEND_UNKNOWN.toString());
             }
         }
+
         @Override
         public void sendData(@NonNull byte[] data) {
             SnippetEvent event = getOobEvent(data);
@@ -332,25 +351,25 @@ public class RangingSnippet implements Snippet {
         mSessions.clear();
     }
 
-    @AsyncRpc (description = " Add a responder device to ranging session")
+    @AsyncRpc(description = " Add a responder device to ranging session")
     public void addDeviceToRangingSession(
             String callbackId, String sessionHandle, JSONObject j
     ) throws JSONException {
 
         RangingSessionInfo sessionInfo = mSessions.get(sessionHandle);
-        OobTransportFactory transportFactory =new OobTransportFactory(callbackId, sessionInfo);
+        OobTransportFactory transportFactory = new OobTransportFactory(callbackId, sessionInfo);
         RangingPreferenceConverter converter = new RangingPreferenceConverter(transportFactory);
         RawResponderRangingConfig config = converter.getRawResponderRangingConfig(j);
         Log.d(TAG, "adding new device");
         sessionInfo.getSession().addDeviceToRangingSession(config);
     }
 
-    @AsyncRpc (description = " Remove a responder device to ranging session")
+    @AsyncRpc(description = " Remove a responder device to ranging session")
     public void removeDeviceFromRangingSession(
             String callbackId, String sessionHandle, JSONObject j
     ) throws JSONException {
         RangingSessionInfo sessionInfo = mSessions.get(sessionHandle);
-        OobTransportFactory transportFactory =new OobTransportFactory(callbackId, sessionInfo);
+        OobTransportFactory transportFactory = new OobTransportFactory(callbackId, sessionInfo);
         RangingPreferenceConverter converter = new RangingPreferenceConverter(transportFactory);
         RangingDevice device = converter.getRangingDevice(j);
         Log.d(TAG, "remove device from session");
@@ -359,12 +378,29 @@ public class RangingSnippet implements Snippet {
     }
 
     @Rpc(description = "clears all cached events")
-    public void clearEventCache(){
+    public void clearEventCache() {
         if (mEventCache != null) {
             mEventCache.clearAll();
         } else {
             throw new IllegalStateException("Event cache is not initialized");
         }
+    }
+
+    /**
+     * Handles motion state received from a peer via OOB.
+     *
+     * @param sessionHandle The handle for the ranging session.
+     * @param peerId        The UUID of the peer device.
+     * @param motionState   The motion state received from the peer.
+     */
+    @Rpc(description = "Handle motion state received from a peer via OOB")
+    public void handleMotionReceived(String sessionHandle, String peerId, int motionState) {
+        Log.d(TAG, "handleMotionReceived: motionState:" + motionState);
+        mSessions.get(sessionHandle)
+                .getCallback().onMotionReceived(
+                        new RangingDevice.Builder()
+                                .setUuid(UUID.fromString(peerId))
+                                .build(), new MotionState(motionState));
     }
 
     @Rpc(description = "Handle data received from a peer via OOB")
@@ -432,6 +468,28 @@ public class RangingSnippet implements Snippet {
             return false;
         }
         return capabilities.getRttRangingCapabilities().hasPeriodicRangingHardwareFeature();
+    }
+
+    @Rpc(description = "Get Wifi PD capabilities")
+    public JSONObject getWifiPdCapabilities() throws JSONException {
+        RangingCapabilities capabilities = mRangingCapabilities.get();
+        if (capabilities == null) {
+            return null;
+        }
+        WifiPdRangingCapabilities wifiPdCaps = capabilities.getWifiPdRangingCapabilities();
+        if (wifiPdCaps == null) {
+            return null;
+        }
+        JSONObject j = new JSONObject();
+        j.put("supported_pasn_modes", new JSONArray(wifiPdCaps.getSupportedPasnModes()));
+        j.put("is_80211mc_supported", wifiPdCaps.is80211mcSupported());
+        j.put("is_80211az_ntb_supported", wifiPdCaps.is80211azNtbSupported());
+        j.put("max_channel_width", wifiPdCaps.getMaxChannelWidth());
+        j.put("max_preamble", wifiPdCaps.getMaxPreamble());
+        j.put("supported_discovery_channel_frequencies_mhz",
+                new JSONArray(wifiPdCaps.getSupportedDiscoveryChannelFrequenciesMhz()));
+        j.put("mac_address", wifiPdCaps.getProximityDetectionMacAddress().toString());
+        return j;
     }
 
     @Rpc(description = "Set airplane mode")

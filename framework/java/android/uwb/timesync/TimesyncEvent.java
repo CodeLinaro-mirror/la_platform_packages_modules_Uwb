@@ -16,7 +16,7 @@
 
 package android.uwb.timesync;
 
-import android.annotation.DurationMillisLong;
+import android.annotation.DurationMicrosLong;
 import android.annotation.ElapsedRealtimeLong;
 import android.annotation.FlaggedApi;
 import android.annotation.Hide;
@@ -44,7 +44,7 @@ public final class TimesyncEvent implements Parcelable {
     @BleLmpEvent private int mEvent;
     @Direction private int mDirection;
     private long mUwbTimestamp;
-    private int mDeviceTimeUncertainty;
+    private long mDeviceTimeUncertainty;
     private int mMaxClockSkewPpm;
     private int mEventCounter;
 
@@ -60,14 +60,17 @@ public final class TimesyncEvent implements Parcelable {
     }
 
     /**
-     * LMP event id to be monitored CONNECT_IND indicator for initiating connection, timestamp will
-     * be at the anchor point LL_PHY_UPDATE_IND indicator for PHY update
+     * LMP event id to be monitored BLE_LMP_EVENT_CONNECT_IND indicator for initiating connection,
+     * timestamp will be at the anchor point BLE_LMP_EVENT_LL_PHY_UPDATE_IND indicator for PHY
+     * update.
+     *
+     * @hide
      */
     @Retention(RetentionPolicy.SOURCE)
-    @IntDef({CONNECT_IND, LL_PHY_UPDATE_IND})
+    @IntDef({BLE_LMP_EVENT_CONNECT_IND, BLE_LMP_EVENT_LL_PHY_UPDATE_IND})
     private @interface BleLmpEvent {}
-    public static final int CONNECT_IND = 0;
-    public static final int LL_PHY_UPDATE_IND = 1;
+    public static final int BLE_LMP_EVENT_CONNECT_IND = 0;
+    public static final int BLE_LMP_EVENT_LL_PHY_UPDATE_IND = 1;
 
     /** Direction of the LMP event */
     @Retention(RetentionPolicy.SOURCE)
@@ -127,7 +130,7 @@ public final class TimesyncEvent implements Parcelable {
      *
      * @return device time uncertainty in microseconds.
      */
-    public @DurationMillisLong long getDeviceTimeUncertaintyUs() {
+    public @DurationMicrosLong long getDeviceTimeUncertaintyUs() {
         return mDeviceTimeUncertainty;
     }
 
@@ -163,7 +166,7 @@ public final class TimesyncEvent implements Parcelable {
                             in.readInt(),
                             in.readInt(),
                             in.readLong(),
-                            in.readInt(),
+                            in.readLong(),
                             in.readInt(),
                             in.readInt());
 
@@ -183,7 +186,7 @@ public final class TimesyncEvent implements Parcelable {
         dest.writeInt(mEvent);
         dest.writeInt(mDirection);
         dest.writeLong(mUwbTimestamp);
-        dest.writeInt(mDeviceTimeUncertainty);
+        dest.writeLong(mDeviceTimeUncertainty);
         dest.writeInt(mMaxClockSkewPpm);
         dest.writeInt(mEventCounter);
     }
@@ -201,7 +204,7 @@ public final class TimesyncEvent implements Parcelable {
         @BleLmpEvent private int mEvent;
         @Direction private int mDirection;
         private long mUwbTimestamp;
-        private int mDeviceTimeUncertainty;
+        private long mDeviceTimeUncertainty;
         private int mMaxClockSkewPpm;
         private int mEventCounter;
 
@@ -211,7 +214,7 @@ public final class TimesyncEvent implements Parcelable {
                 @BleLmpEvent int event,
                 @Direction int direction,
                 long uwbTimestamp,
-                int deviceTimeUncertainty,
+                long deviceTimeUncertainty,
                 int maxClockSkewPpm,
                 int eventCounter) {
             mMacAddress = macAddress;

@@ -32,6 +32,7 @@ import android.hardware.bluetooth.lmp_event.Timestamp;
 import android.os.IBinder;
 import android.os.RemoteException;
 import android.os.ServiceManager;
+import android.os.SystemClock;
 import android.util.Log;
 import android.uwb.UwbManager;
 import android.uwb.timesync.ITimesyncCallbackListener;
@@ -54,8 +55,8 @@ import java.util.concurrent.FutureTask;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 
-public class TimesyncManager {
-    private static final String TAG = TimesyncManager.class.getSimpleName();
+public class UwbTimesyncManager {
+    private static final String TAG = UwbTimesyncManager.class.getSimpleName();
     private static final String HAL_INSTANCE_NAME = IBluetoothLmpEvent.DESCRIPTOR + "/default";
 
     // TODO (b/422469744):
@@ -68,9 +69,7 @@ public class TimesyncManager {
     //   to the implementation. Runtime Resource Overlays
     //   (https://source.android.com/docs/core/runtime/rros) are a potential
     //   solution for that.
-    public static final int DEVICE_TIME_OFFSET_US = -36000;
     public static final int DEVICE_TIME_UNCERTAINTY = 18000;
-    public static final int MAX_CLOCK_SKEW_PPM = 100;
 
     // TODO (b/422751710): These ought to come from
     // android.hardware.uwb.fira_android.UwbVendorGids and
@@ -124,7 +123,30 @@ public class TimesyncManager {
         return result;
     }
 
+    /**
+     * Decodes the 1-byte time uncertainty back into microseconds.
+     * * @param encoded The 1-byte encoded uncertainty (0-255).
+     *
+     * @return The uncertainty in microseconds (us).
+     */
+    private static long decodeTimeUncertainty(int encoded) {
+        // Handling the base case: 0 maps to 0us (or 1us depending on strictness)
+        if (encoded <= 0) {
+            return 0;
+        }
+
+        // Reverse the formula: 2^(encoded / 8.0)
+        // We use 8.0 to ensure floating point division
+        double microseconds = Math.pow(2, (double) encoded / 8.0);
+
+        // Rounding to long then casting to int to prevent overflow issues
+        // though 0xFF yields ~2.3 billion, which fits in a signed int.
+        return Math.round(microseconds);
+    }
+
     private static class BluetoothCccCallback extends IBluetoothLmpEventCallback.Stub {
+
+        private Object mClockLock = new Object();
 
         // A small structure to pass results between threads w/ the BlockingQueue.
         private static class TimestampConversionResult {
@@ -171,7 +193,32 @@ public class TimesyncManager {
         }
 
         private BleTimestamp timestampFromHal(Timestamp timestamp) {
+            if (timestamp.systemTimeUs == timestamp.bluetoothTimeUs) {
+                Log.i(TAG, "Using combo chip systemtime==uwbstime");
+                // If the device has combo chip, use system time as uwb time is in the same domain.
+                return new BleTimestamp(
+                        timestamp.systemTimeUs,
+                        mUwbInjector.getDeviceConfigFacade().getTimesyncUncertainty(),
+                        mUwbInjector.getDeviceConfigFacade().getTimesyncClockSkewPpm()
+                );
+            } else if (mUwbInjector.getDeviceConfigFacade().isAndroidSpecificTimesyncSupported()) {
+                // If Android proprietary timesync calculation is supported
+                Log.i(TAG, "Android specific timesync calculation");
+                return androidUwbTimestamp(timestamp);
+            } else if (mUwbInjector.getUwbServiceCore().getCachedSpecificationParams(
+                            mUwbInjector.getMultichipData().getDefaultChipId())
+                    .getFiraSpecificationParams().getUciVersionSupported() >= 2) {
+                // Fira based uci query uwbs timestamp
+                Log.i(TAG, "Fira 2.0 UCI query uwbs timestamp based timesync");
+                return uciUwbTimestamp(timestamp);
+            } else {
+                // All other scenarios
+                Log.i(TAG, "Default timesync calculation");
+                return defaultTimestamp(timestamp);
+            }
+        }
 
+        private BleTimestamp androidUwbTimestamp(Timestamp timestamp) {
             // Kick off a call to the UWB HAL via a UCI message. We'll get
             // a callback and the response will be passed back via a queue.
             ByteBuffer systemTimeBuffer = ByteBuffer.allocate(16);
@@ -179,6 +226,7 @@ public class TimesyncManager {
             systemTimeBuffer.putLong(timestamp.systemTimeUs);
             systemTimeBuffer.putLong(timestamp.bluetoothTimeUs);
 
+            // The uncertainty for ble hal's system time calculation will be accounted by uwb HAL.
             FutureTask<UwbVendorUciResponse> sendVendorCmdTask = new FutureTask<>(
                     () -> mNativeUwbManager.sendRawVendorCmd(MESSAGE_TYPE_COMMAND,
                             ANDROID_GID, ANDROID_TIMESTAMP_ANCHOR_TO_UWBS,
@@ -250,18 +298,12 @@ public class TimesyncManager {
                 // is in BOOTTIME and use `queryUwbsTimestampMicros()` to
                 // convert.
                 Log.i(TAG, String.format("UWB HAL doesn't convert timestamps: %d", result.mStatus));
-                uwbsTimeOffsetUs = DEVICE_TIME_OFFSET_US;
+                uwbsTimeOffsetUs = mUwbInjector.getDeviceConfigFacade().getTimesyncDeviceOffset();
                 uwbsConversionUncertaintyUs = DEVICE_TIME_UNCERTAINTY;
             } else {
                 throw new RuntimeException(String.format("Timestamp conversion failed: %d",
                         result.mStatus));
             }
-
-            Log.i(TAG, String.format("systemTime=%d => %d, bluetoothTime=%d, uncertainty=%d us",
-                    timestamp.systemTimeUs,
-                    timestamp.systemTimeUs + uwbsTimeOffsetUs,
-                    timestamp.bluetoothTimeUs,
-                    uwbsConversionUncertaintyUs));
 
             // Fill in the BleTimestamp structure after converting the time
             // domain of systemTime (if no conversion is needed,
@@ -289,9 +331,69 @@ public class TimesyncManager {
             //               Procedure 1).
             return new BleTimestamp(
                     timestamp.systemTimeUs + uwbsTimeOffsetUs,
-                    encodeTimeUncertainty(uwbsConversionUncertaintyUs),
-                    MAX_CLOCK_SKEW_PPM);
+                    Math.max(encodeTimeUncertainty(uwbsConversionUncertaintyUs),
+                            mUwbInjector.getDeviceConfigFacade().getTimesyncUncertainty()),
+                    mUwbInjector.getDeviceConfigFacade().getTimesyncClockSkewPpm());
         }
+
+        private BleTimestamp uciUwbTimestamp(Timestamp timestamp) {
+            long systemTimestampUs0;
+            long uwbDeviceTime;
+            long systemTimestampUs1;
+            long elapsedTime;
+            long uwbTimeOffsetUs;
+            long bestTimeOffsetUs = 0; // The offset between UWB and System clocks
+            long bestElapsedTime = Long.MAX_VALUE;
+
+            // Perform 3 iterations to find the execution path with the lowest latency (lowest
+            // jitter).
+            // A shorter elapsedTime means the midpoint calculation is more accurate.
+            for (int i = 0; i < 3; i++) {
+                systemTimestampUs0 = SystemClock.elapsedRealtimeNanos() / 1000;
+
+                synchronized (mClockLock) {
+                    // Fetch the current absolute microsecond counter from the UWB hardware
+                    uwbDeviceTime = mUwbInjector.getUwbServiceCore().queryUwbsTimestampMicros();
+                }
+
+                systemTimestampUs1 = SystemClock.elapsedRealtimeNanos() / 1000;
+                elapsedTime = systemTimestampUs1 - systemTimestampUs0;
+
+                // Calculate the offset using the 'Midpoint' assumption:
+                // We assume the hardware captured its timestamp exactly halfway through the
+                // request.
+                // Offset = UWB_Hardware_Time - Estimated_System_Time_At_Capture
+                uwbTimeOffsetUs = uwbDeviceTime - (systemTimestampUs0 + elapsedTime / 2);
+
+                // Keep the result from the "tightest" bracket (least amount of system noise).
+                if (bestElapsedTime > elapsedTime) {
+                    bestElapsedTime = elapsedTime;
+                    bestTimeOffsetUs = uwbTimeOffsetUs;
+                }
+            }
+            long uncertaintyUs = (bestElapsedTime) / 2
+                    + mUwbInjector.getDeviceConfigFacade().getTimesyncBleTimeUncertainty();
+            return new BleTimestamp(
+                    timestamp.systemTimeUs + bestTimeOffsetUs,
+                    Math.max(encodeTimeUncertainty((int) uncertaintyUs),
+                            mUwbInjector.getDeviceConfigFacade().getTimesyncUncertainty()),
+                    mUwbInjector.getDeviceConfigFacade().getTimesyncClockSkewPpm()
+            );
+        }
+
+        private BleTimestamp defaultTimestamp(Timestamp timestamp) {
+            long uncertaintyUs = DEVICE_TIME_UNCERTAINTY
+                    + mUwbInjector.getDeviceConfigFacade().getTimesyncBleTimeUncertainty();
+            return new BleTimestamp(
+                    // Shift the system time by a pre-configured device-specific offset
+                    timestamp.systemTimeUs
+                            + mUwbInjector.getDeviceConfigFacade().getTimesyncDeviceOffset(),
+                    Math.max(encodeTimeUncertainty((int) uncertaintyUs),
+                            mUwbInjector.getDeviceConfigFacade().getTimesyncUncertainty()),
+                    mUwbInjector.getDeviceConfigFacade().getTimesyncClockSkewPpm()
+            );
+        }
+
 
         //TODO (b/467707737) check if switch case implementation correct
         private static int directionFromHal(int direction) {
@@ -307,9 +409,9 @@ public class TimesyncManager {
 
         private static int eventFromHal(int event) {
             switch (event) {
-                case TimesyncEvent.CONNECT_IND:
+                case TimesyncEvent.BLE_LMP_EVENT_CONNECT_IND:
                     return 0;
-                case TimesyncEvent.LL_PHY_UPDATE_IND:
+                case TimesyncEvent.BLE_LMP_EVENT_LL_PHY_UPDATE_IND:
                     return 1;
                 default:
                     return 0;
@@ -337,7 +439,16 @@ public class TimesyncManager {
                 byte lmpEventId,
                 char eventCounter)
                 throws RemoteException {
+            Log.i(TAG, "Received system timestamp: "
+                    + String.format("systemTime=%d, bluetoothTime=%d,",
+                    timestamp.systemTimeUs,
+                    timestamp.bluetoothTimeUs));
             BleTimestamp mBleTimestamp = timestampFromHal(timestamp);
+            Log.i(TAG, "Calculated uwb timestamp: " + String.format(
+                    "mUwbTimestamp=%d, mDeviceTimeUncertainty=%d, mMaxClockSkewPpm=%d us",
+                    mBleTimestamp.mUwbTimestamp,
+                    mBleTimestamp.mDeviceTimeUncertainty,
+                    mBleTimestamp.mMaxClockSkewPpm));
             BluetoothAddress bluetoothAddress = new BluetoothAddress(
                     bytesToStringBluetoothAddress(address), addressType);
             //TODO check injector for on delivery check
@@ -350,7 +461,8 @@ public class TimesyncManager {
                                         eventFromHal(lmpEventId),
                                         directionFromHal(direction),
                                         mBleTimestamp.getUwbTimestamp(),
-                                        mBleTimestamp.getDeviceTimeUncertainty(),
+                                        decodeTimeUncertainty(
+                                                mBleTimestamp.getDeviceTimeUncertainty()),
                                         mBleTimestamp.getMaxClockSkewPpm(),
                                         eventCounter)
                                         .build());
@@ -391,8 +503,8 @@ public class TimesyncManager {
             new ConcurrentHashMap<>();
 
 
-    public TimesyncManager(@NonNull UwbContext context, @NonNull NativeUwbManager nativeUwbManager,
-            @NonNull UwbInjector uwbInjector) {
+    public UwbTimesyncManager(@NonNull UwbContext context,
+            @NonNull NativeUwbManager nativeUwbManager, @NonNull UwbInjector uwbInjector) {
         mContext = context;
         mUwbInjector = uwbInjector;
         mNativeUwbManager = nativeUwbManager;
@@ -421,9 +533,6 @@ public class TimesyncManager {
 
     /**
      *
-     * @param callback
-     * @param bluetoothAddress
-     * @throws RemoteException
      */
     public void registerEventCallback(
             ITimesyncCallbackListener callback,
@@ -436,6 +545,8 @@ public class TimesyncManager {
             Log.e(TAG, "Unable to obtain mBtCccHal");
             return;
         }
+        Log.i(TAG, "Registering for  timesync events address xx:xx:xx:xx:"
+                + bluetoothAddress.getAddress().substring(12));
         mBtCccHal.registerForLmpEvents(
                 bluetoothCccCallback,
                 (byte) bluetoothAddress.getAddressType(),
@@ -449,6 +560,8 @@ public class TimesyncManager {
         if (sAddressCallbackMap.containsKey(bluetoothAddress.getAddress())
                 && sAddressCallbackMap.get(
                 bluetoothAddress.getAddress()).mCallbackListener == callback) {
+            Log.i(TAG, "Unregistering for  timesync events xx:xx:xx:xx:"
+                    + bluetoothAddress.getAddress().substring(12));
             mBtCccHal.unregisterLmpEvents(
                     (byte) bluetoothAddress.getAddressType(),
                     bluetoothAddressToBytes(bluetoothAddress.getAddress()));

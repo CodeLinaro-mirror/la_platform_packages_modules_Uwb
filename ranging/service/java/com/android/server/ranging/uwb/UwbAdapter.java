@@ -21,8 +21,10 @@ import static com.android.ranging.uwb.backend.internal.RangingMeasurement.CONFID
 import static com.android.server.ranging.common.RangingUtils.InternalReason.INTERNAL_ERROR;
 import static com.android.server.ranging.uwb.UwbConfig.toBackend;
 
+import android.app.AlarmManager;
 import android.content.AttributionSource;
 import android.content.Context;
+import android.os.SystemClock;
 import android.ranging.DataNotificationConfig;
 import android.ranging.DlTdoaMeasurement;
 import android.ranging.RangingCapabilities;
@@ -31,6 +33,7 @@ import android.ranging.RangingDataExtras;
 import android.ranging.RangingDevice;
 import android.ranging.RangingMeasurement;
 import android.ranging.RangingPreference;
+import android.ranging.SessionConfig;
 import android.ranging.raw.RawResponderRangingConfig;
 import android.ranging.uwb.DlTdoaRangingParams;
 import android.ranging.uwb.UwbAddress;
@@ -74,14 +77,15 @@ import com.google.common.util.concurrent.ListeningExecutorService;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
-import java.util.Arrays;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 
 /** Ranging adapter for Ultra-wideband (UWB). */
 public class UwbAdapter implements RangingAdapter {
     private static final String TAG = UwbAdapter.class.getSimpleName();
+    private static final int DL_TDOA_BG_TIMEOUT_MILLIS = 120_000;
     private final Context mContext;
     private final RangingInjector mRangingInjector;
     private final com.android.ranging.uwb.backend.internal.RangingDevice mUwbClient;
@@ -101,8 +105,13 @@ public class UwbAdapter implements RangingAdapter {
 
     private AttributionSource mNonPrivilegedAttributionSource;
     boolean mIsBackgroundRangingSupported;
+    private List<Integer> mSupportedAntennaModes;
 
     private final AttributionSource mAttributionSource;
+
+    private final AlarmManager mAlarmManager;
+
+    private AlarmManager.OnAlarmListener mDlTdoaTimeoutListener;
 
     public UwbAdapter(
             @NonNull Context context,
@@ -158,18 +167,41 @@ public class UwbAdapter implements RangingAdapter {
                 new DataNotificationConfig.Builder().build(),
                 new DataNotificationConfig.Builder().build()
         );
-        mIsBackgroundRangingSupported = Optional.ofNullable(mRangingInjector)
+        UwbRangingCapabilities uwbCapabilities = Optional.ofNullable(mRangingInjector)
                 .map(RangingInjector::getCapabilitiesProvider)
                 .map(CapabilitiesProvider::getCapabilities)
                 .map(RangingCapabilities::getUwbCapabilities)
+                .orElse(null);
+        mIsBackgroundRangingSupported = Optional.ofNullable(uwbCapabilities)
                 .map(UwbRangingCapabilities::isBackgroundRangingSupported)
                 .orElse(true); // Defaults to true;
+        mSupportedAntennaModes = Optional.ofNullable(uwbCapabilities)
+                .map(UwbRangingCapabilities::getSupportedAntennaModes)
+                .orElse(List.of()); // Defaults to empty;
         mAttributionSource = attributionSource;
+        mAlarmManager = context.getSystemService(AlarmManager.class);
+        Objects.requireNonNull(mAlarmManager);
     }
 
     @Override
     public @NonNull RangingTechnology getTechnology() {
         return RangingTechnology.UWB;
+    }
+
+    /**
+     * Use this method to do some service side validation of params
+     * {@link android.ranging.RangingSession#start(RangingPreference)}.
+     */
+    public boolean isConfigValid(ConfigurationManager.TechnologyConfig config) {
+        if (config instanceof UwbConfig uwbConfig) {
+            int antennaMode = uwbConfig.getSessionConfig().getAntennaMode();
+            if (antennaMode != SessionConfig.ANTENNA_MODE_UNSET
+                && !mSupportedAntennaModes.contains(antennaMode)) {
+                Log.e(TAG,  "Invalid antenna mode: " + antennaMode);
+                return false;
+            }
+        }
+        return true;
     }
 
     @Override
@@ -184,6 +216,11 @@ public class UwbAdapter implements RangingAdapter {
         if (!mStateMachine.transition(State.STOPPED, State.STARTED)) {
             Log.v(TAG, "Attempted to start adapter when it was already started");
             closeForReason(InternalReason.INTERNAL_ERROR);
+            return;
+        }
+        if (!isConfigValid(config)) {
+            Log.v(TAG, "Invalid session config passed to start");
+            closeForReason(InternalReason.UNSUPPORTED);
             return;
         }
 
@@ -213,12 +250,24 @@ public class UwbAdapter implements RangingAdapter {
             }
         } else if (config instanceof DlTdoaConfig dlTdoaConfig) {
             mIsDlTdoaSession = true;
-            // TODO: Handle DataNotificationManager for DL-TDOA.
+            if (mNonPrivilegedAttributionSource != null
+                    && !mRangingInjector.isForegroundAppOrService(
+                            mNonPrivilegedAttributionSource.getUid(),
+                            mNonPrivilegedAttributionSource.getPackageName())) {
+                if (!mIsBackgroundRangingSupported) {
+                    Log.w(TAG, "Background ranging is not supported");
+                    closeForReason(InternalReason.BACKGROUND_RANGING_POLICY);
+                    return;
+                }
+                Log.e(TAG, "Starting Dl-tdoa ranging session in background, timing out in "
+                        + (DL_TDOA_BG_TIMEOUT_MILLIS / 1000) + " seconds");
+                setDlTdoaBackgroundSessionTimeout();
+            }
             mUwbClient.setLocalAddress(
                     toBackend(dlTdoaConfig.getDeviceAddress()));
             if (mUwbClient instanceof com.android.ranging.uwb.backend.internal.RangingTag) {
                 ((com.android.ranging.uwb.backend.internal.RangingTag) mUwbClient)
-                    .setComplexChannel(toBackend(dlTdoaConfig.getParams().getComplexChannel()));
+                        .setComplexChannel(toBackend(dlTdoaConfig.getParams().getComplexChannel()));
             }
             mUwbClient.setRangingParameters(
                     dlTdoaAsBackendParameters(dlTdoaConfig));
@@ -236,6 +285,25 @@ public class UwbAdapter implements RangingAdapter {
         }
         var future = Futures.submit(() -> mUwbClient.startRanging(mUwbListener), mExecutorService);
         Futures.addCallback(future, mUwbClientResultHandlers.startRanging, mExecutorService);
+    }
+
+    private void setDlTdoaBackgroundSessionTimeout() {
+        if (mDlTdoaTimeoutListener != null) {
+            mAlarmManager.cancel(mDlTdoaTimeoutListener);
+        }
+
+        mDlTdoaTimeoutListener = () -> {
+            Log.i(TAG, "Dl-TDoA background session timed out");
+            mExecutorService.execute(this::stop);
+        };
+
+        mAlarmManager.setExact(
+                AlarmManager.ELAPSED_REALTIME_WAKEUP,
+                SystemClock.elapsedRealtime() + DL_TDOA_BG_TIMEOUT_MILLIS,
+                "DlTdoaBgTimeout",
+                mDlTdoaTimeoutListener,
+                null
+        );
     }
 
     @Override
@@ -287,7 +355,8 @@ public class UwbAdapter implements RangingAdapter {
 
     @Override
     public void appMovedToBackground() {
-        if (mNonPrivilegedAttributionSource != null && mDataNotificationManager != null) {
+        if (mNonPrivilegedAttributionSource != null && mDataNotificationManager != null
+                && !mIsDlTdoaSession) {
             mDataNotificationManager.updateConfigAppMovedToBackground();
             var unused = Futures.submit(
                     () -> mUwbClient.reconfigureRangeDataNtfConfig(
@@ -298,7 +367,11 @@ public class UwbAdapter implements RangingAdapter {
 
     @Override
     public void appMovedToForeground() {
-        if (mNonPrivilegedAttributionSource != null && mDataNotificationManager != null) {
+        if (mIsDlTdoaSession && mDlTdoaTimeoutListener != null) {
+            mAlarmManager.cancel(mDlTdoaTimeoutListener);
+            mDlTdoaTimeoutListener = null;
+        } else if (mNonPrivilegedAttributionSource != null && mDataNotificationManager != null) {
+
             mDataNotificationManager.updateConfigAppMovedToForeground();
             var unused = Futures.submit(
                     () -> mUwbClient.reconfigureRangeDataNtfConfig(
