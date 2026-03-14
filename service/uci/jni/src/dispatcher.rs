@@ -125,7 +125,10 @@ impl Dispatcher {
     }
 
     /// Gets reference to the unique Dispatcher.
-    pub fn get_dispatcher<'a>(env: JNIEnv<'a>, obj: JObject<'a>) -> Result<GuardedDispatcher<'a>> {
+    pub fn get_dispatcher<'a>(
+        env: &mut JNIEnv<'a>,
+        obj: JObject<'a>,
+    ) -> Result<GuardedDispatcher<'a>> {
         let jni_guard = env.lock_obj(obj).map_err(|_| Error::ForeignFunctionInterface)?;
         let read_lock = DISPATCHER.read().map_err(|_| Error::Unknown)?;
         GuardedDispatcher::new(jni_guard, read_lock)
@@ -133,13 +136,13 @@ impl Dispatcher {
 
     /// Gets reference to UciManagerSync with chip_id.
     pub fn get_uci_manager<'a>(
-        env: JNIEnv<'a>,
+        env: &mut JNIEnv<'a>,
         obj: JObject<'a>,
         chip_id: JString,
     ) -> Result<GuardedUciManager<'a>> {
         let guarded_dispatcher = Self::get_dispatcher(env, obj)?;
         let chip_id_str =
-            String::from(env.get_string(chip_id).map_err(|_| Error::ForeignFunctionInterface)?);
+            String::from(env.get_string(&chip_id).map_err(|_| Error::ForeignFunctionInterface)?);
         guarded_dispatcher.into_guarded_uci_manager(&chip_id_str)
     }
 }
