@@ -69,6 +69,7 @@ public class IosAccessoryFragment extends Fragment {
     private Spinner mSpinnerBlockStride;
     private Button mButton;
     private LinearLayout mDistanceViewLayout;
+    private TextView mLogText;
 
     private IosAccessoryRangingViewModel mRangingViewModel;
     private BleConnectionIosAccessoryViewModel mBleConnectionViewModel;
@@ -98,10 +99,10 @@ public class IosAccessoryFragment extends Fragment {
         mDistanceText.setTextSize(96);
         mDistanceText.setGravity(Gravity.END);
         mDistanceCanvasView = new CanvasView(getContext(), "Distance");
-        mDistanceCanvasView.setLayoutParams(new LinearLayout.LayoutParams(
-                ViewGroup.LayoutParams.MATCH_PARENT, 1200));
         mDistanceViewLayout.addView(mDistanceCanvasView);
-        mLoggingListener = new LoggingListener(requireContext().getApplicationContext(), false);
+        mDistanceViewLayout.setPadding(0, 0, 0, 600);
+        mLoggingListener = new LoggingListener(getActivity().getApplicationContext(), false);
+        mLogText = (TextView) root.findViewById(R.id.text_log);
         return root;
     }
 
@@ -110,9 +111,7 @@ public class IosAccessoryFragment extends Fragment {
                 (SlotDurationItem) mSpinnerSlotDuration.getSelectedItem();
         mSlotDurationArrayAdapter.clear();
         if (mSwitchFilterByCapabilities.isChecked()) {
-            if (mSlotDurationItemsFromCapabilities != null) {
-                mSlotDurationArrayAdapter.addAll(mSlotDurationItemsFromCapabilities);
-            }
+            mSlotDurationArrayAdapter.addAll(mSlotDurationItemsFromCapabilities);
         } else {
             mSlotDurationArrayAdapter.addAll(SlotDurationItem.values());
         }
@@ -130,9 +129,7 @@ public class IosAccessoryFragment extends Fragment {
                 (RangingIntervalItem) mSpinnerRangingInterval.getSelectedItem();
         mRangingIntervalArrayAdapter.clear();
         if (mSwitchFilterByCapabilities.isChecked()) {
-            if (mRangingIntervalFromCapabilities != null) {
-                mRangingIntervalArrayAdapter.addAll(mRangingIntervalFromCapabilities);
-            }
+            mRangingIntervalArrayAdapter.addAll(mRangingIntervalFromCapabilities);
         } else {
             mRangingIntervalArrayAdapter.addAll(RangingIntervalItem.values());
         }
@@ -202,17 +199,23 @@ public class IosAccessoryFragment extends Fragment {
                 android.R.layout.simple_spinner_dropdown_item);
         mSpinnerBlockStride.setAdapter(mBlockStrideArrayAdapter);
 
+        mLoggingListener
+                .getLogText()
+                .observe(
+                        getActivity(),
+                        log -> {
+                            mLogText.setText(log);
+                        });
         mRangingViewModel =
                 new ViewModelProvider(
                         this,
-                        new IosAccessoryRangingViewModel.Factory(
-                                requireActivity(), mLoggingListener))
+                        new IosAccessoryRangingViewModel.Factory(getActivity(), mLoggingListener))
                         .get(IosAccessoryRangingViewModel.class);
         mBleConnectionViewModel =
                 new ViewModelProvider(
                         this,
                         new BleConnectionIosAccessoryViewModel.Factory(
-                                requireActivity().getApplication(), mLoggingListener,
+                                getActivity().getApplication(), mLoggingListener,
                                 mRangingViewModel.getRangingHandler()))
                         .get(BleConnectionIosAccessoryViewModel.class);
         mSwitchFilterByCapabilities.setOnCheckedChangeListener(
@@ -227,7 +230,7 @@ public class IosAccessoryFragment extends Fragment {
         mRangingViewModel
                 .getSlotDurationItems()
                 .observe(
-                        getViewLifecycleOwner(),
+                        getActivity(),
                         slotDurationItems -> {
                             mSlotDurationItemsFromCapabilities = slotDurationItems;
                             updateSlotDurationItems();
@@ -236,7 +239,7 @@ public class IosAccessoryFragment extends Fragment {
         mRangingViewModel
                 .getRangingIntervalItems()
                 .observe(
-                        getViewLifecycleOwner(),
+                        getActivity(),
                         rangingIntervalItems -> {
                             mRangingIntervalFromCapabilities = rangingIntervalItems;
                             updateRangingIntervalItems();
@@ -245,7 +248,7 @@ public class IosAccessoryFragment extends Fragment {
         mRangingViewModel
                 .getBlockStrideSupported()
                 .observe(
-                        getViewLifecycleOwner(),
+                        getActivity(),
                         blockStrideSupported -> {
                             mBlockStrideSupported.getAndSet(blockStrideSupported);
                         }
@@ -253,7 +256,7 @@ public class IosAccessoryFragment extends Fragment {
         mRangingViewModel
                 .getSessionState()
                 .observe(
-                        getViewLifecycleOwner(),
+                        getActivity(),
                         state-> {
                             mRangeSessionState.set(state);
                             switch (state) {
@@ -306,15 +309,11 @@ public class IosAccessoryFragment extends Fragment {
         mRangingViewModel
                 .getDistanceResult()
                 .observe(
-                        getViewLifecycleOwner(),
-                        distanceResult -> {
-                            mDistanceCanvasView.addNode(
-                                    distanceResult.technology,
-                                    distanceResult.distanceMeters,
-                                    /* abort= */ false);
+                        getActivity(),
+                        distanceMeters -> {
+                            mDistanceCanvasView.addNode(distanceMeters, /* abort= */ false);
                             mDistanceText.setText(
-                                    DISTANCE_DECIMAL_FMT.format(distanceResult.distanceMeters)
-                                            + " m");
+                                    DISTANCE_DECIMAL_FMT.format(distanceMeters) + " m");
                         });
 
         mDeviceRoleArrayAdapter.addAll(DeviceRoleItem.values());

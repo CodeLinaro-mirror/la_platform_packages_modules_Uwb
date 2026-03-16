@@ -18,6 +18,7 @@ package com.android.ranging.rangingtestapp;
 
 import android.app.Activity;
 import android.bluetooth.BluetoothDevice;
+import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.lifecycle.AndroidViewModel;
@@ -31,22 +32,13 @@ import java.util.List;
 /** ViewModel for the Initiator/Responder. */
 public class DistanceMeasurementViewModel extends AndroidViewModel {
 
-    public static class DistanceResult {
-        public final int technology;
-        public final double distanceMeters;
-        public DistanceResult(int technology, double distanceMeters) {
-            this.technology = technology;
-            this.distanceMeters = distanceMeters;
-        }
-    }
-
     private final MutableLiveData<Constants.RangeSessionState> mSessionState =
             new MutableLiveData<>(Constants.RangeSessionState.STOPPED);
 
-    private final MutableLiveData<DistanceResult> mDistanceResult = new MutableLiveData<>();
+    private final MutableLiveData<Double> mDistanceResult = new MutableLiveData<>();
 
     private final DistanceMeasurementManager
-            mDistanceMeasurementManager;
+            mDistanceMeasurementManager; // mDistanceMeasurementManager;
 
     public static class Factory implements ViewModelProvider.Factory {
         private Activity mActivity;
@@ -63,6 +55,7 @@ public class DistanceMeasurementViewModel extends AndroidViewModel {
             mLoggingListener = loggingListener;
             mIsResponder = isResponder;
         }
+
 
         @Override
         public <T extends ViewModel> T create(Class<T> modelClass) {
@@ -93,7 +86,7 @@ public class DistanceMeasurementViewModel extends AndroidViewModel {
         return mSessionState;
     }
 
-    LiveData<DistanceResult> getDistanceResult() {
+    LiveData<Double> getDistanceResult() {
         return mDistanceResult;
     }
 
@@ -143,8 +136,8 @@ public class DistanceMeasurementViewModel extends AndroidViewModel {
                 }
 
                 @Override
-                public void onDistanceResult(int technology, double distanceMeters) {
-                    mDistanceResult.postValue(new DistanceResult(technology, distanceMeters));
+                public void onDistanceResult(double distanceMeters) {
+                    mDistanceResult.postValue(distanceMeters);
                 }
             };
 }

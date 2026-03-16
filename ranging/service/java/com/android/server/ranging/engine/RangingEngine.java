@@ -39,8 +39,7 @@ public interface RangingEngine {
     /** Called by a {@link RangingEngine} to start or stop technologies. */
     interface EngineListener {
         void startTechnologies(Set<RangingTechnology> technologies);
-        void stopTechnologies(Set<RangingTechnology> technologies, @InternalReason int reason);
-        void stopSession();
+        void stopTechnologies(Set<RangingTechnology> technologies);
     }
 
     /** Get the set of technologies to start ranging with when the session begins. */

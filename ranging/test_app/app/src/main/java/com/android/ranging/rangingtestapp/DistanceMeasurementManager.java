@@ -16,15 +16,12 @@
 
 package com.android.ranging.rangingtestapp;
 
-import static android.os.Looper.getMainLooper;
-
 import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.bluetooth.BluetoothDevice;
 import android.bluetooth.BluetoothManager;
 import android.content.DialogInterface;
 import android.os.CancellationSignal;
-import android.os.Handler;
 import android.ranging.RangingCapabilities;
 import android.ranging.RangingData;
 import android.ranging.RangingDevice;
@@ -49,7 +46,6 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicReference;
 
 class DistanceMeasurementManager {
-    private static final long START_TIMEOUT_MILLIS = 5_000;
     private final RangingManager mRangingManager;
     private final LoggingListener mLoggingListener;
 
@@ -57,7 +53,6 @@ class DistanceMeasurementManager {
     private final BleConnection mBleConnection;
     private final Executor mExecutor;
     private final Callback mCallback;
-    private final Handler mHandler;
     private final boolean mIsResponder;
     @Nullable private RangingSession mSession = null;
     private AtomicReference<CancellationSignal> mCancellationSignal =
@@ -67,7 +62,6 @@ class DistanceMeasurementManager {
             new AtomicReference<>();
     @Nullable private BluetoothDevice mTargetDevice = null;
     private AlertDialog mAlertDialog = null;
-    private boolean mIsStarted = false;
 
     DistanceMeasurementManager(
             Activity activity,
@@ -80,9 +74,10 @@ class DistanceMeasurementManager {
         mCallback = distanceMeasurementCallback;
         mLoggingListener = loggingListener;
         mIsResponder = isResponder;
+
         mRangingManager = mActivity.getApplication().getSystemService(RangingManager.class);
-        mHandler = new Handler(getMainLooper());
         mExecutor = Executors.newSingleThreadExecutor();
+
         mRangingManager.registerCapabilitiesCallback(mExecutor, (capabilities -> {
             mRangingCapabilities.set(capabilities);
             mCapabilitiesCountDownLatch.countDown();
@@ -173,13 +168,6 @@ class DistanceMeasurementManager {
         mAlertDialog.show();
     }
 
-    private final Runnable mStartTimeoutRunnable = () -> {
-        if (!mIsStarted) {
-            printLog("DistanceMeasurementManager onStarted timed out!");
-            stop();
-        }
-    };
-
     @SuppressLint("MissingPermission") // permissions are checked upfront
     boolean start(
             String rangingTechnologyName, String freqName, int duration) {
@@ -228,7 +216,6 @@ class DistanceMeasurementManager {
                 return;
             }
             mCancellationSignal.set(mSession.start(rangingPreference));
-            mHandler.postDelayed(mStartTimeoutRunnable, START_TIMEOUT_MILLIS);
         });
         return true;
     }
@@ -259,9 +246,7 @@ class DistanceMeasurementManager {
                 }
 
                 public void onStarted(RangingDevice peer, int technology) {
-                    printLog("DistanceMeasurementManager onStarted!");
-                    mIsStarted = true;
-                    mHandler.removeCallbacks(mStartTimeoutRunnable);
+                    printLog("DistanceMeasurementManager onStarted ! ");
                     mCallback.onStartSuccess();
                 }
 
@@ -277,7 +262,7 @@ class DistanceMeasurementManager {
                 public void onResults(RangingDevice peer, RangingData data) {
                     printLog(
                             "DistanceMeasurementManager onResults ! " + peer + ": " + data);
-                    mCallback.onDistanceResult(data.getRangingTechnology(),
+                    mCallback.onDistanceResult(
                             data.getDistance().getMeasurement());
                 }
             };
@@ -290,6 +275,6 @@ class DistanceMeasurementManager {
 
         void onStop();
 
-        void onDistanceResult(int technology, double distanceMeters);
+        void onDistanceResult(double distanceMeters);
     }
 }
