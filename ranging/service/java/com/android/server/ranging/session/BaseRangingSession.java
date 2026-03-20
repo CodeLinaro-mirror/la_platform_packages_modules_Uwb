@@ -16,6 +16,9 @@
 
 package com.android.server.ranging.session;
 
+import static android.ranging.RangingCapabilities.ENABLED;
+import static android.ranging.RangingCapabilities.NOT_SUPPORTED;
+
 import android.app.AlarmManager;
 import android.content.AttributionSource;
 import android.os.Binder;
@@ -40,9 +43,7 @@ import com.android.server.ranging.common.RangingUtils.InternalReason;
 import com.android.server.ranging.common.StateMachine;
 import com.android.server.ranging.fusion.FusionEngine;
 import com.android.server.ranging.heuristic.RangeHeuristicEventFactory;
-import com.android.server.ranging.session.ConfigurationManager.MulticastTechnologyConfig;
 import com.android.server.ranging.session.ConfigurationManager.TechnologyConfig;
-import com.android.server.ranging.session.ConfigurationManager.UnicastTechnologyConfig;
 import com.android.server.ranging.session.Peer.PeerInfo;
 
 import com.google.common.collect.ImmutableSet;
@@ -147,21 +148,14 @@ public class BaseRangingSession {
                 mInjector.getAnyNonPrivilegedAppInAttributionSource(mAttributionSource);
 
         for (TechnologyConfig config : Sets.difference(technologyConfigs, mAdapters.keySet())) {
-            ImmutableSet<RangingDevice> peerDevices;
-
-            if (config instanceof UnicastTechnologyConfig unicastConfig) {
-                peerDevices = ImmutableSet.of(unicastConfig.getPeerDevice());
-            } else if (config instanceof MulticastTechnologyConfig multicastConfig) {
-                peerDevices = multicastConfig.getPeerDevices();
-            } else if (config instanceof com.android.server.ranging.uwb.DlTdoaConfig) {
-                // DL-TDOA is peerless, so we create an empty set of peer devices.
-                peerDevices = ImmutableSet.of();
-            } else {
-                Log.e(TAG, "Received unknown RangingTechnology subclass "
-                        + config.getClass());
-                mSessionListener.onSessionClosed(InternalReason.INTERNAL_ERROR);
-                return;
+            if (mInjector.getCapabilitiesProvider()
+                    .getCapabilities()
+                    .getTechnologyAvailability()
+                    .getOrDefault(config.getTechnology().getValue(), NOT_SUPPORTED) != ENABLED) {
+                Log.e(TAG, "Cannot start ranging with tech " +  config.getTechnology());
+                continue;
             }
+            ImmutableSet<RangingDevice> peerDevices = config.getPeerDevices();
 
             peerDevices.forEach(device ->
                     mPeers.computeIfAbsent(device, unused -> createPeer(device))
@@ -413,6 +407,18 @@ public class BaseRangingSession {
                         && mStateMachine.getState() != State.STOPPED
                 ) {
                     mPeers.get(peerDevice).feedToFusionEngine(data);
+                }
+            }
+        }
+
+        @Override
+        public void onDlTdoaRangingResult(@NonNull RangingDevice anchor,
+                @NonNull android.ranging.DlTdoaMeasurement measurement) {
+            synchronized (BaseRangingSession.this) {
+                if (mStateMachine.getState() != State.STOPPING
+                        && mStateMachine.getState() != State.STOPPED
+                ) {
+                    mSessionListener.onDlTdoaResults(anchor, measurement);
                 }
             }
         }

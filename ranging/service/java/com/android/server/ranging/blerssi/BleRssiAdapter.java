@@ -56,6 +56,7 @@ import com.android.server.ranging.common.StateMachine;
 import com.android.server.ranging.session.ConfigurationManager;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 
 import java.util.concurrent.Executors;
 
@@ -132,7 +133,7 @@ public class BleRssiAdapter implements RangingAdapter {
                 mNonPrivilegedAttributionSource.getUid(),
                 mNonPrivilegedAttributionSource.getPackageName())) {
             Log.w(TAG, "Background ranging is not supported");
-            closeForReason(InternalReason.BACKGROUND_RANGING_POLICY);
+            mCallbacks.onClosed(InternalReason.BACKGROUND_RANGING_POLICY);
             return;
         }
         if (!(config instanceof BleRssiConfig bleRssiConfig)) {
@@ -140,26 +141,21 @@ public class BleRssiAdapter implements RangingAdapter {
             mCallbacks.onClosed(INTERNAL_ERROR);
             return;
         }
+        RangingDevice peerDevice = Iterables.getOnlyElement(bleRssiConfig.getPeerDevices());
         BleRssiRangingParams bleRssiRangingParams = bleRssiConfig.getRangingParams();
-        if ((bleRssiConfig.getPeerDevice() == null)
-                || (bleRssiRangingParams.getPeerBluetoothAddress() == null)) {
-            Log.e(TAG, "Peer device is null");
-            closeForReason(InternalReason.INTERNAL_ERROR);
-            return;
-        }
         if (mBluetoothAdapter.getState() == BluetoothAdapter.STATE_OFF) {
             Log.e(TAG, "Failed to start ranging, Bluetooth is turned off!");
-            closeForReason(InternalReason.UNSUPPORTED);
+            mCallbacks.onClosed(InternalReason.UNSUPPORTED);
             return;
         }
         if (!mStateMachine.transition(State.STOPPED, State.STARTED)) {
             Log.v(TAG, "Attempted to start adapter when it was already started");
-            closeForReason(InternalReason.INTERNAL_ERROR);
+            mCallbacks.onClosed(InternalReason.INTERNAL_ERROR);
             return;
         }
 
         mConfig = bleRssiConfig;
-        mRangingDevice = bleRssiConfig.getPeerDevice();
+        mRangingDevice = peerDevice;
         if (bleRssiConfig.getPeerBluetoothDevice() != null) {
             mPeerBluetoothDevice = bleRssiConfig.getPeerBluetoothDevice();
             Log.v(TAG,
@@ -193,7 +189,7 @@ public class BleRssiAdapter implements RangingAdapter {
             return;
         }
         // Added callback here to be consistent with other ranging technology.
-        mCallbacks.onStarted(ImmutableSet.of(bleRssiConfig.getPeerDevice()));
+        mCallbacks.onStarted(bleRssiConfig.getPeerDevices());
         if (mConfig.getSessionConfig().getRangingMeasurementsLimit() > 0) {
             RangingUtils.setMeasurementsLimitTimeout(
                     mAlarmManager,
