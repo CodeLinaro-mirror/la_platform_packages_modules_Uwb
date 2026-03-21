@@ -283,8 +283,12 @@ public class UwbTimesyncManager {
             if (result.mStatus == UCI_STATUS_OK) {
                 // The UWB HAL gave us an absolute time, but convert to an
                 // offset so the math is the same if we don't need to convert.
+                boolean bletimeUncertaintyIncluded =
+                        mUwbInjector.getDeviceConfigFacade().getBletimeUncertaintyIncluded();
                 uwbsTimeOffsetUs = result.mTimestampUs - timestamp.systemTimeUs;
-                uwbsConversionUncertaintyUs = result.mUncertaintyUs;
+                uwbsConversionUncertaintyUs = result.mUncertaintyUs
+                        + (!bletimeUncertaintyIncluded ?
+                        mUwbInjector.getDeviceConfigFacade().getTimesyncBleTimeUncertainty() : 0);
             } else if (result.mStatus == UCI_STATUS_UNKNOWN_GID
                     || result.mStatus == UCI_STATUS_UNKNOWN_OID) {
                 // If a HAL doesn't know about timestamp conversion then
@@ -558,6 +562,8 @@ public class UwbTimesyncManager {
     public void unregisterEventCallback(ITimesyncCallbackListener callback,
             BluetoothAddress bluetoothAddress)
             throws RemoteException {
+        Log.i(TAG, "Unregistering for  timesync events address xx:xx:xx:xx:"
+                + bluetoothAddress.getAddress().substring(12));
         if (sAddressCallbackMap.containsKey(bluetoothAddress.getAddress())
                 && sAddressCallbackMap.get(
                 bluetoothAddress.getAddress()).mCallbackListener == callback) {
