@@ -150,6 +150,8 @@ public class RangingManagerTest {
         assumeTrue(Flags.rangingStackEnabled());
         PackageManager packageManager = mContext.getPackageManager();
         assertThat(packageManager).isNotNull();
+        // Check is any ranging tech is supported.
+        assumeTrue(isAnyRangingTechSupported(packageManager));
         mRangingManager = mContext.getSystemService(RangingManager.class);
         assertThat(mRangingManager).isNotNull();
         CapabilitiesCallback callback = new CapabilitiesCallback(new CountDownLatch(1));
@@ -192,6 +194,13 @@ public class RangingManagerTest {
         // Just in case if some test failed.
         UiAutomation uiAutomation = getInstrumentation().getUiAutomation();
         uiAutomation.dropShellPermissionIdentity();
+    }
+
+    public boolean isAnyRangingTechSupported(PackageManager packageManager) {
+        return packageManager.hasSystemFeature(PackageManager.FEATURE_UWB)
+                || packageManager.hasSystemFeature(PackageManager.FEATURE_BLUETOOTH_LE)
+                || (packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_AWARE)
+                && packageManager.hasSystemFeature(PackageManager.FEATURE_WIFI_RTT));
     }
 
     @SuppressLint({"CheckResult", "CheckReturnValue"})
@@ -1780,6 +1789,7 @@ public class RangingManagerTest {
     @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
     @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
     public void testDlTdoaDtTagRangingSession() throws Exception {
+        checkUwbDlTDoaSupport();
         assumeTrue(mSupportedTechnologies.contains(RangingManager.UWB));
         enableUwb();
 
@@ -1859,7 +1869,9 @@ public class RangingManagerTest {
     @Test
     @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
     @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
-    public void testDlTdoaRangingParams_createFromFiraConfigPacket_validBleCpConfig() {
+    public void testDlTdoaRangingParams_createFromFiraConfigPacket_validBleCpConfig()
+            throws Exception {
+        checkUwbDlTDoaSupport();
         byte[] config = {
             // BLE Specific Header
             (byte) 0x2D, (byte) 0x16, (byte) 0xF3, (byte) 0xFF,
@@ -1916,7 +1928,9 @@ public class RangingManagerTest {
 
     @Test
     @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
-    public void testDlTdoaRangingParams_createFromFiraConfigPacket_validBleCsConfig() {
+    public void testDlTdoaRangingParams_createFromFiraConfigPacket_validBleCsConfig()
+            throws Exception {
+        checkUwbDlTDoaSupport();
         byte[] config = {
             // BLE Specific Header
             (byte) 0x2D, (byte) 0x16, (byte) 0xF4, (byte) 0xFF,
@@ -1973,7 +1987,9 @@ public class RangingManagerTest {
 
     @Test
     @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
-    public void testDlTdoaRangingParams_createFromFiraConfigPacket_validWifiConfig() {
+    public void testDlTdoaRangingParams_createFromFiraConfigPacket_validWifiConfig()
+            throws Exception  {
+        checkUwbDlTDoaSupport();
         byte[] config = {
             // WiFi Specific Header
             (byte) 0xDD, (byte) 0x2D, (byte) 0x5A, (byte) 0x18, (byte) 0xFF,
@@ -2031,7 +2047,8 @@ public class RangingManagerTest {
     @Test
     @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
     @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
-    public void testDlTdoaRangingParams_defaultValues() {
+    public void testDlTdoaRangingParams_defaultValues() throws Exception {
+        checkUwbDlTDoaSupport();
         DlTdoaRangingParams params = new DlTdoaRangingParams.Builder(12345678).build();
         assertThat(params.getSessionId()).isEqualTo(12345678);
         assertThat(params.getSessionKeyInfo()).isEqualTo(
@@ -2049,7 +2066,8 @@ public class RangingManagerTest {
     @Test
     @CddTest(requirements = {"7.3.13/C-1-1,C-1-2"})
     @RequiresFlagsEnabled(Flags.FLAG_RANGING_STACK_UPDATES_26_Q_2)
-    public void testDlTdoaRangingParams_getters() {
+    public void testDlTdoaRangingParams_getters() throws Exception {
+        checkUwbDlTDoaSupport();
         DlTdoaRangingParams params = new DlTdoaRangingParams.Builder(12345678)
                 .setDeviceAddress(UwbAddress.fromBytes(new byte[] {(byte) 0x01, (byte) 0x02}))
                 .setSessionKeyInfo(new byte[] {0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A})
@@ -2076,5 +2094,21 @@ public class RangingManagerTest {
         assertThat(params.getRangingRoundIndexes()).isEqualTo(new byte[] {1, 3, 5, 7, 9});
         assertThat(params.getMeasurementVersion()).isEqualTo(
                 DlTdoaRangingParams.MEASUREMENT_VERSION_2);
+    }
+
+    public void checkUwbDlTDoaSupport() throws Exception {
+        assumeTrue(mSupportedTechnologies.contains(RangingManager.UWB));
+        enableUwb();
+
+        CapabilitiesCallback capabilitiesCallback = new CapabilitiesCallback(new CountDownLatch(1));
+        mRangingManager.registerCapabilitiesCallback(Executors.newSingleThreadExecutor(),
+                capabilitiesCallback);
+
+        assertThat(capabilitiesCallback.mCountDownLatch.await(2, TimeUnit.SECONDS)).isTrue();
+        RangingCapabilities rangingCapabilities = capabilitiesCallback.mRangingCapabilities;
+        assertThat(rangingCapabilities).isNotNull();
+        UwbRangingCapabilities uwbCapabilities = rangingCapabilities.getUwbCapabilities();
+        assertThat(uwbCapabilities).isNotNull();
+        assumeTrue(uwbCapabilities.isDlTdoaSupported());
     }
 }
