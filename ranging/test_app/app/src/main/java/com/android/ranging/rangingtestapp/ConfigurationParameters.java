@@ -76,7 +76,6 @@ public class ConfigurationParameters {
         bleCs.toPref(prefEditor);
         bleRssi.toPref(prefEditor);
         wifiNanRtt.toPref(prefEditor);
-        wifiPd.toPref(prefEditor);
         oob.toPref(prefEditor);
         prefEditor.apply();
     }

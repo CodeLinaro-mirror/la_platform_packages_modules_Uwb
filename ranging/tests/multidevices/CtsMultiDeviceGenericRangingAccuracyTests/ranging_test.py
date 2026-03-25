@@ -73,7 +73,6 @@ class CtsMultiDeviceGenericRangingAccuracyTests(
         ranging_utils.log_uwb_distance_within_tolerance.
     """
     technology = ranging_params.RangingTechnology.UWB
-    ranging_utils.skip_if_any_device_is_wear([self.initiator, self.responder])
     ranging_utils.skip_if_technology_not_supported(
         [self.initiator, self.responder], technology
     )
@@ -164,7 +163,6 @@ class CtsMultiDeviceGenericRangingAccuracyTests(
       * Devices are successfully unbonded.
     """
     technology = ranging_params.RangingTechnology.BLE_CS
-    ranging_utils.skip_if_any_device_is_wear([self.initiator, self.responder])
     ranging_utils.skip_if_technology_not_supported(
         [self.initiator, self.responder], technology
     )
@@ -252,7 +250,6 @@ class CtsMultiDeviceGenericRangingAccuracyTests(
     """
 
     technology = ranging_params.RangingTechnology.WIFI_RTT
-    ranging_utils.skip_if_any_device_is_wear([self.initiator, self.responder])
     ranging_utils.skip_if_technology_not_supported(
         [self.initiator, self.responder], technology
     )
@@ -344,7 +341,6 @@ class CtsMultiDeviceGenericRangingAccuracyTests(
       """
 
       technology = ranging_params.RangingTechnology.WIFI_PD
-      ranging_utils.skip_if_any_device_is_wear([self.initiator, self.responder])
       ranging_utils.skip_if_technology_not_supported(
           [self.initiator, self.responder], technology
       )
@@ -442,7 +438,6 @@ class CtsMultiDeviceGenericRangingAccuracyTests(
       * The RSSI samples can be collected successfully without any error.
     """
     technology = ranging_params.RangingTechnology.BLE_RSSI
-    ranging_utils.skip_if_any_device_is_wear([self.initiator, self.responder])
 
     ranging_utils.skip_if_technology_not_supported(
         [self.initiator, self.responder], technology
@@ -492,7 +487,6 @@ class CtsMultiDeviceGenericRangingAccuracyTests(
       * The RSSI samples can be collected successfully without any error.
     """
     technology = ranging_params.RangingTechnology.BLE_RSSI
-    ranging_utils.skip_if_any_device_is_wear([self.initiator, self.responder])
 
     ranging_utils.skip_if_technology_not_supported(
         [self.initiator, self.responder], technology
