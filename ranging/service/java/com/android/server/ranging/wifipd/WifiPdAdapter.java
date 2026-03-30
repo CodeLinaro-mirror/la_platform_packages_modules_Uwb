@@ -59,6 +59,7 @@ import com.android.server.ranging.common.StateMachine;
 import com.android.server.ranging.session.ConfigurationManager;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 import com.google.common.util.concurrent.ListeningExecutorService;
 
 import java.util.List;
@@ -121,7 +122,7 @@ public class WifiPdAdapter implements RangingAdapter {
                 mNonPrivilegedAttributionSource.getUid(),
                 mNonPrivilegedAttributionSource.getPackageName())) {
             Log.w(TAG, "Background ranging is not supported");
-            closeForReason(RangingUtils.InternalReason.BACKGROUND_RANGING_POLICY);
+            mCallback.onClosed(RangingUtils.InternalReason.BACKGROUND_RANGING_POLICY);
             return;
         }
 
@@ -133,12 +134,12 @@ public class WifiPdAdapter implements RangingAdapter {
 
         if (!mStateMachine.transition(State.STOPPED, State.STARTED)) {
             Log.v(TAG, "Attempted to start adapter when it was already started");
-            closeForReason(INTERNAL_ERROR);
+            mCallback.onClosed(INTERNAL_ERROR);
             return;
         }
 
         WifiPdRangingParams wifiPdRangingParams = wifiPdConfig.getPdRangingParams();
-        mPeer = wifiPdConfig.getPeerDevice();
+        mPeer = Iterables.getOnlyElement(wifiPdConfig.getPeerDevices());
         mDataNotificationManager = new DataNotificationManager(
                 wifiPdConfig.getSessionConfig().getDataNotificationConfig(),
                 wifiPdConfig.getSessionConfig().getDataNotificationConfig()
@@ -150,7 +151,7 @@ public class WifiPdAdapter implements RangingAdapter {
                     || wifiPdRangingParams.getDeviceIk() == null) {
                 Log.e(TAG,
                         " Password or DeviceIK cannot be null when using Authenticated PASN mode");
-                closeForReason(INTERNAL_ERROR);
+                mCallback.onClosed(INTERNAL_ERROR);
                 return;
             }
             pasnConfigBuilder
@@ -191,7 +192,7 @@ public class WifiPdAdapter implements RangingAdapter {
         mWifiRttManager.startContinuousRanging(null /*WorkSource*/, request, mExecutorService,
                 mContinuousRangingResultCallback);
         // Callback here to be consistent with other ranging technologies.
-        mCallback.onStarted(ImmutableSet.of(mPeer));
+        mCallback.onStarted(wifiPdConfig.getPeerDevices());
     }
 
     @Override

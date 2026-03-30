@@ -40,6 +40,7 @@ import com.android.server.ranging.common.StateMachine;
 import com.android.server.ranging.session.ConfigurationManager;
 
 import com.google.common.collect.ImmutableSet;
+import com.google.common.collect.Iterables;
 
 import java.util.UUID;
 
@@ -125,30 +126,22 @@ public class CsAdapter implements RangingAdapter {
                 mNonPrivilegedAttributionSource.getUid(),
                 mNonPrivilegedAttributionSource.getPackageName())) {
             Log.e(TAG, "Background ranging is not supported");
-            closeForReason(InternalReason.BACKGROUND_RANGING_POLICY);
+            mCallbacks.onClosed(InternalReason.BACKGROUND_RANGING_POLICY);
             return;
         }
         if (!(config instanceof CsConfig csConfig)) {
             Log.w(TAG, "Tried to start adapter with invalid ranging parameters");
-            closeForReason(InternalReason.INTERNAL_ERROR);
+            mCallbacks.onClosed(InternalReason.INTERNAL_ERROR);
             return;
         }
 
         mConfig = csConfig;
         BleCsRangingParams bleCsRangingParams = mConfig.getRangingParams();
-
-        if ((mConfig.getPeerDevice() == null)
-                || (bleCsRangingParams.getPeerBluetoothAddress() == null)) {
-            Log.e(TAG, "Peer device is null");
-            closeForReason(InternalReason.INTERNAL_ERROR);
-            return;
-        }
-
-        mRangingDevice = mConfig.getPeerDevice();
+        mRangingDevice = Iterables.getOnlyElement(mConfig.getPeerDevices());
 
         if (mBluetoothAdapter.getState() == BluetoothAdapter.STATE_OFF) {
             Log.e(TAG, "Failed to start ranging, Bluetooth is turned off!");
-            closeForReason(InternalReason.UNSUPPORTED);
+            mCallbacks.onClosed(InternalReason.UNSUPPORTED);
             return;
         }
         if (mConfig.getPeerBluetoothDevice() != null) {
@@ -160,7 +153,9 @@ public class CsAdapter implements RangingAdapter {
                     mBluetoothAdapter.getRemoteDevice(bleCsRangingParams.getPeerBluetoothAddress());
             Log.v(TAG, "BluetoothDevice not provided, using provided BLE address");
         }
-        mPeerIdentityAddress = mPeerBluetoothDevice.getIdentityAddress();
+        mPeerIdentityAddress = mPeerBluetoothDevice.getIdentityAddress() != null
+                ? mPeerBluetoothDevice.getIdentityAddress()
+                : mPeerBluetoothDevice.getAddress();
         mDataNotificationManager = new DataNotificationManager(
                 mConfig.getSessionConfig().getDataNotificationConfig(),
                 mConfig.getSessionConfig().getDataNotificationConfig());
