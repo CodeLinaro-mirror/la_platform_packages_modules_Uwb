@@ -685,7 +685,8 @@ public class UwbSessionManager implements INativeUwbManager.SessionNotification,
                     // stopRanging method.
                     mUwbInjector.getUwbServiceCore().updateChannelUsageOnRangingStopped(
                             uwbSession.mChannel);
-                    if (reasonCode != REASON_STATE_CHANGE_WITH_SESSION_MANAGEMENT_COMMANDS) {
+                    if (reasonCode != REASON_STATE_CHANGE_WITH_SESSION_MANAGEMENT_COMMANDS
+                            || uwbSession.getProtocolName().equals(RfTestParams.PROTOCOL_NAME)) {
                         mSessionNotificationManager.onRangingStoppedWithUciReasonCode(
                                 uwbSession, reasonCode);
                         mUwbMetrics.longRangingStopEvent(uwbSession);
