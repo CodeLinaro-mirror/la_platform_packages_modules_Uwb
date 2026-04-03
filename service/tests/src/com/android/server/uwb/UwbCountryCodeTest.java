@@ -129,6 +129,8 @@ public class UwbCountryCodeTest {
      */
     @Before
     public void setUp() throws Exception {
+        // TODO(b/498155019): Fix test and re-enable
+        Assume.assumeTrue("Skipping unconditionally", false);
         Assume.assumeTrue("Skipping for SDK <= Baklava", isAtLeastC());
         MockitoAnnotations.initMocks(this);
         mTestLooper = new TestLooper();

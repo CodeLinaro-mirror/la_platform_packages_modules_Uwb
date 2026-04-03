@@ -1034,6 +1034,7 @@ public class UwbSessionManagerTest {
         mUwbSessionManager.mSessionTable.put(mock(SessionHandle.class), mockUwbSession);
         when(mockUwbSession.getWaitObj()).thenReturn(mock(WaitObj.class));
         when(mockUwbSession.getSessionState()).thenReturn(UwbUciConstants.UWB_SESSION_STATE_ACTIVE);
+        when(mockUwbSession.getProtocolName()).thenReturn(PROTOCOL_NAME);
         AtomicReference<UwbSession.State> apiState = new AtomicReference<>(UwbSession.State.ACTIVE);
         doReturn(apiState).when(mockUwbSession).getApiState();
 
