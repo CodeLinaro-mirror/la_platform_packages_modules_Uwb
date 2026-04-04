@@ -28,7 +28,6 @@ import android.ranging.SessionConfig;
 import android.ranging.wifi.rtt.RttRangingParams;
 import android.ranging.wifi.rtt.RttStationRangingParams;
 
-import android.ranging.wifi.rtt.WifiRttConstants;
 import androidx.annotation.NonNull;
 
 import com.android.ranging.flags.Flags;
@@ -55,7 +54,8 @@ public class RttConfig implements TechnologyConfig {
             int deviceRole,
             @NonNull RttRangingParams rttRangingParams,
             @NonNull SessionConfig sessionConfig,
-            @NonNull RangingDevice peerDevice) {
+            @NonNull RangingDevice peerDevice
+    ) {
         mDeviceRole = deviceRole;
         mRangingParams = rttRangingParams;
         mSessionConfig = sessionConfig;
@@ -69,7 +69,8 @@ public class RttConfig implements TechnologyConfig {
             int deviceRole,
             @NonNull RttStationRangingParams rttStationRangingParams,
             @NonNull SessionConfig sessionConfig,
-            @NonNull RangingDevice peerDevice) {
+            @NonNull RangingDevice peerDevice
+    ) {
         mDeviceRole = deviceRole;
         mStationRangingParams = rttStationRangingParams;
         mSessionConfig = sessionConfig;
@@ -81,7 +82,7 @@ public class RttConfig implements TechnologyConfig {
     @Override
     @NonNull
     public RangingTechnology getTechnology() {
-        // return RangingTechnology.RTT;
+        //return RangingTechnology.RTT;
         return mTech;
     }
 
@@ -100,18 +101,9 @@ public class RttConfig implements TechnologyConfig {
 
     @Override
     public Duration getRangingInterval() {
-        if (mTech == RangingTechnology.RTT_STATION) {
-            return getStationRangingInterval();
-        } else {
-            return getNanRangingInterval();
-        }
-    }
-
-    private Duration getNanRangingInterval() {
-        RttRangingParams params = getRangingParams();
-        return switch (params.getRangingUpdateRate()) {
+        return switch (getRangingParams().getRangingUpdateRate()) {
             case UPDATE_RATE_NORMAL -> {
-                if (params.isPeriodicRangingHwFeatureEnabled()) {
+                if (getRangingParams().isPeriodicRangingHwFeatureEnabled()) {
                     yield Duration.ofMillis(256);
                 } else {
                     yield Duration.ofMillis(512);
@@ -119,7 +111,7 @@ public class RttConfig implements TechnologyConfig {
             }
             case UPDATE_RATE_INFREQUENT -> Duration.ofMillis(8192);
             case UPDATE_RATE_FREQUENT -> {
-                if (params.isPeriodicRangingHwFeatureEnabled()) {
+                if (getRangingParams().isPeriodicRangingHwFeatureEnabled()) {
                     yield Duration.ofMillis(128);
                 } else {
                     yield Duration.ofMillis(256);
@@ -127,12 +119,6 @@ public class RttConfig implements TechnologyConfig {
             }
             default -> throw new IllegalStateException("Unknown update rate");
         };
-    }
-
-    private Duration getStationRangingInterval() {
-        return Duration.ofMillis(
-                WifiRttConstants.getIntervalMs(
-                        getStationRangingParams().getRangingUpdateRate(), true));
     }
 
     @Override

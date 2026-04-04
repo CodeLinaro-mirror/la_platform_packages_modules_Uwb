@@ -397,10 +397,8 @@ public class UwbManagerSnippet implements Snippet {
             uwbAddress = getComputedMacAddress(remoteDeviceAddress);
             dataReceived = data;
             persistableBundle = params;
-            if (params != null && !params.isEmpty()) {
-              mConnectId = FiraLogicalLinkInfo.fromBundle(persistableBundle)
+            mConnectId = FiraLogicalLinkInfo.fromBundle(persistableBundle)
                     .getLogicalLinkConnectId();
-            }
             handleEvent(Event.DataReceived);
         }
 
