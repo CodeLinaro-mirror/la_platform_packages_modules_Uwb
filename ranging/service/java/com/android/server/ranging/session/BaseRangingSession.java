@@ -16,6 +16,9 @@
 
 package com.android.server.ranging.session;
 
+import static android.ranging.RangingCapabilities.ENABLED;
+import static android.ranging.RangingCapabilities.NOT_SUPPORTED;
+
 import android.app.AlarmManager;
 import android.content.AttributionSource;
 import android.os.Binder;
@@ -40,10 +43,8 @@ import com.android.server.ranging.common.RangingUtils.InternalReason;
 import com.android.server.ranging.common.StateMachine;
 import com.android.server.ranging.fusion.FusionEngine;
 import com.android.server.ranging.heuristic.RangeHeuristicEventFactory;
-import com.android.server.ranging.oob.packets.DeviceType;
-import com.android.server.ranging.session.ConfigurationManager.MulticastTechnologyConfig;
 import com.android.server.ranging.session.ConfigurationManager.TechnologyConfig;
-import com.android.server.ranging.session.ConfigurationManager.UnicastTechnologyConfig;
+import com.android.server.ranging.session.Peer.PeerInfo;
 
 import com.google.common.collect.ImmutableSet;
 import com.google.common.collect.Sets;
@@ -77,6 +78,8 @@ public class BaseRangingSession {
 
     private final AlarmManager mAlarmManager;
     private AlarmManager.OnAlarmListener mNonPrivilegedBgAppTimerListener;
+
+    private boolean mKeepAliveUntilClosedExplicitly = false;
 
     /**
      * Keeps track of state of the ranging session.
@@ -127,6 +130,13 @@ public class BaseRangingSession {
         mEventFactory = new RangeHeuristicEventFactory(mAdapterExecutor);
     }
 
+    public synchronized void startAndKeepAliveUntilClosedExplicitly(
+            ImmutableSet<TechnologyConfig> technologyConfigs
+    ) {
+        mKeepAliveUntilClosedExplicitly = true;
+        start(technologyConfigs);
+    }
+
     /** Start ranging in this session with the provided configs. */
     public synchronized void start(ImmutableSet<TechnologyConfig> technologyConfigs) {
         if (mStateMachine.transition(State.STOPPED, State.STARTING)) {
@@ -138,21 +148,14 @@ public class BaseRangingSession {
                 mInjector.getAnyNonPrivilegedAppInAttributionSource(mAttributionSource);
 
         for (TechnologyConfig config : Sets.difference(technologyConfigs, mAdapters.keySet())) {
-            ImmutableSet<RangingDevice> peerDevices;
-
-            if (config instanceof UnicastTechnologyConfig unicastConfig) {
-                peerDevices = ImmutableSet.of(unicastConfig.getPeerDevice());
-            } else if (config instanceof MulticastTechnologyConfig multicastConfig) {
-                peerDevices = multicastConfig.getPeerDevices();
-            } else if (config instanceof com.android.server.ranging.uwb.DlTdoaConfig) {
-                // DL-TDOA is peerless, so we create an empty set of peer devices.
-                peerDevices = ImmutableSet.of();
-            } else {
-                Log.e(TAG, "Received unknown RangingTechnology subclass "
-                        + config.getClass());
-                onSessionClosed(InternalReason.INTERNAL_ERROR);
-                return;
+            if (mInjector.getCapabilitiesProvider()
+                    .getCapabilities()
+                    .getTechnologyAvailability()
+                    .getOrDefault(config.getTechnology().getValue(), NOT_SUPPORTED) != ENABLED) {
+                Log.e(TAG, "Cannot start ranging with tech " +  config.getTechnology());
+                continue;
             }
+            ImmutableSet<RangingDevice> peerDevices = config.getPeerDevices();
 
             peerDevices.forEach(device ->
                     mPeers.computeIfAbsent(device, unused -> createPeer(device))
@@ -183,7 +186,7 @@ public class BaseRangingSession {
     }
 
     private Peer createPeer(RangingDevice device) {
-        return new Peer(device, getPeerType(device), mSessionHandle, mSessionConfig,
+        return new Peer(device, getPeerInfo(device), mSessionHandle, mSessionConfig,
                 new FusionEngineListener(device), mEventFactory, mAdapterExecutor,
                 mInjector);
     }
@@ -258,12 +261,12 @@ public class BaseRangingSession {
      * adapters, override the reason code provided in the callback with this one.
      * @return true if there are currently any active adapters in the session.
      */
-    protected synchronized boolean stop(@InternalReason int reason) {
+    protected synchronized void stop(@InternalReason int reason) {
         Log.v(TAG, "Stop ranging, stopping all adapters");
         if (mStateMachine.getState() == State.STOPPING
                 || mStateMachine.getState() == State.STOPPED) {
             Log.v(TAG, "Ranging already stopping or stopped, skipping");
-            return false;
+            return;
         }
         stopNonPrivilegedBgAppTimerIfSet();
         mStateMachine.setState(State.STOPPING);
@@ -277,7 +280,12 @@ public class BaseRangingSession {
             mAdapters.get(config).stop();
         }
         Binder.restoreCallingIdentity(token);
-        return existsAdaptersWithActiveRanging;
+        if (mKeepAliveUntilClosedExplicitly && !existsAdaptersWithActiveRanging) {
+            // If there are no adapters actively ranging we can send the notification synchronously.
+            mSessionListener.onSessionClosed(reason);
+            // Otherwise, we need to wait for the active adapters to stop, and the notification
+            // will be delivered asynchronously from within the adapter callback below.
+        }
     }
 
     /**
@@ -342,9 +350,12 @@ public class BaseRangingSession {
         mSessionListener.onSessionClosed(reason);
     }
 
-    /** Let subclasses provide the type of each peer. */
-    protected DeviceType getPeerType(RangingDevice peer) {
-        return DeviceType.Unknown;
+    /**
+     * Let subclasses provide info for a peer.
+     * {@link OobInitiatorRangingSession} can provide info it receives over the oob protocol.
+     */
+    protected PeerInfo getPeerInfo(RangingDevice peer) {
+        return new PeerInfo.Builder().build();
     }
 
     private class AdapterListener implements RangingAdapter.Callback {
@@ -401,12 +412,26 @@ public class BaseRangingSession {
         }
 
         @Override
+        public void onDlTdoaRangingResult(@NonNull RangingDevice anchor,
+                @NonNull android.ranging.DlTdoaMeasurement measurement) {
+            synchronized (BaseRangingSession.this) {
+                if (mStateMachine.getState() != State.STOPPING
+                        && mStateMachine.getState() != State.STOPPED
+                ) {
+                    mSessionListener.onDlTdoaResults(anchor, measurement);
+                }
+            }
+        }
+
+        @Override
         public void onClosed(@InternalReason int reason) {
             synchronized (BaseRangingSession.this) {
                 mAdapters.remove(mConfig);
-                if (mAdapters.isEmpty()) {
+                boolean shouldClose = !mKeepAliveUntilClosedExplicitly
+                        || mStateMachine.getState() == State.STOPPING;
+                if (mAdapters.isEmpty() && shouldClose) {
                     mStateMachine.setState(State.STOPPED);
-                    onSessionClosed(maybeOverridden(reason));
+                    mSessionListener.onSessionClosed(maybeOverridden(reason));
                 }
                 mStopReasonOverride.remove(mConfig);
             }
@@ -456,6 +481,7 @@ public class BaseRangingSession {
         pw.println("Attribution source: " + mAttributionSource);
         pw.println("Session Config: " + mSessionConfig);
         pw.println("Ranging Config: " + mRangingConfig);
+        pw.println("KeepAliveUntilClosedExplicitly: " + mKeepAliveUntilClosedExplicitly);
         pw.println("Adapters:");
         for (RangingAdapter adapter : mAdapters.values()) {
             pw.println(adapter);

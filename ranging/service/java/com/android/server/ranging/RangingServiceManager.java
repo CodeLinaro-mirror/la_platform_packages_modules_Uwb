@@ -25,6 +25,7 @@ import android.os.IBinder;
 import android.os.Looper;
 import android.os.Message;
 import android.os.RemoteException;
+import android.ranging.DlTdoaMeasurement;
 import android.ranging.IRangingCallbacks;
 import android.ranging.IRangingCapabilitiesCallback;
 import android.ranging.MotionState;
@@ -345,6 +346,15 @@ public final class RangingServiceManager implements ActivityManager.OnUidImporta
             }
         }
 
+        public void onDlTdoaResults(@NonNull RangingDevice peer,
+                @NonNull DlTdoaMeasurement measurement) {
+            try {
+                mRangingCallbacks.onDlTdoaResults(mSessionHandle, peer, measurement);
+            } catch (RemoteException e) {
+                Log.e(TAG, "onData callback failed: " + e);
+            }
+        }
+
         public synchronized void onSessionClosed(@InternalReason int reason) {
             Log.v(TAG, "onSessionClosed reason " + reason);
             RangingSession rangingSession = mSessions.remove(mSessionHandle);
@@ -392,9 +402,9 @@ public final class RangingServiceManager implements ActivityManager.OnUidImporta
                      InternalReason.REMOTE_REQUEST, InternalReason.UNSUPPORTED,
                      InternalReason.SYSTEM_POLICY, InternalReason.NO_PEERS_FOUND -> reason;
                 case InternalReason.INTERNAL_ERROR -> Callback.REASON_UNKNOWN;
-                case InternalReason.BACKGROUND_RANGING_POLICY -> Callback.REASON_SYSTEM_POLICY;
+                case InternalReason.BACKGROUND_RANGING_POLICY,
+                     InternalReason.ENGINE_REQUEST -> Callback.REASON_SYSTEM_POLICY;
                 case InternalReason.PEER_CAPABILITIES_MISMATCH -> Callback.REASON_UNSUPPORTED;
-                case InternalReason.ENGINE_REQUEST -> InternalReason.LOCAL_REQUEST;
                 default -> Callback.REASON_UNKNOWN;
             };
         }
