@@ -45,7 +45,6 @@ import com.google.common.util.concurrent.FutureCallback;
 import com.google.common.util.concurrent.ListeningExecutorService;
 
 import java.util.concurrent.ScheduledExecutorService;
-import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * OOB responder session. For this session, the callbacks have different semantics:
@@ -67,18 +66,19 @@ public class OobResponderRangingSession extends BaseRangingSession implements Ra
     private OobHandle mPeer;
     private OobController.OobConnection mOobConnection;
     private OobResponderProtocol mProtocol;
-    private AtomicBoolean mKeepAliveFlag;
 
     public OobResponderRangingSession(
             @NonNull AttributionSource attributionSource,
             @NonNull SessionHandle sessionHandle,
             @NonNull RangingInjector injector,
-            @NonNull SessionConfig config,
+            @NonNull SessionConfig sessionConfig,
+            @NonNull RangingConfig rangingConfig,
             @NonNull SessionListener listener,
             @NonNull ListeningExecutorService adapterExecutor,
             @NonNull ScheduledExecutorService oobExecutor
     ) {
-        super(attributionSource, sessionHandle, injector, config, listener, adapterExecutor);
+        super(attributionSource, sessionHandle, injector, sessionConfig, rangingConfig,
+                listener, adapterExecutor);
         mOobExecutor = oobExecutor;
         mOobConnectionListener = new OobConnectionListener();
     }
@@ -95,22 +95,8 @@ public class OobResponderRangingSession extends BaseRangingSession implements Ra
         mPeer = new OobHandle(mSessionHandle, config.getDeviceHandle().getRangingDevice());
         mOobConnection = mInjector.getOobController().createConnection(mPeer);
         mProtocol = new OobResponderProtocol(mInjector);
-        mKeepAliveFlag = new AtomicBoolean(true);
 
         mOobConnection.receiveData().addCallback(mOobConnectionListener, mOobExecutor);
-        mSessionListener.onSessionOpened();
-    }
-
-    @Override
-    public void stop() {
-        stopSessionForReason(InternalReason.LOCAL_REQUEST);
-    }
-
-    @Override
-    protected void onSessionClosed(@InternalReason int reason) {
-        if (!mKeepAliveFlag.getAndSet(true)) {
-            mSessionListener.onSessionClosed(reason);
-        }
     }
 
     private class OobConnectionListener implements FutureCallback<byte[]> {
@@ -123,12 +109,12 @@ public class OobResponderRangingSession extends BaseRangingSession implements Ra
                     sendCapabilityResponse(request).transformAsync(
                             unused -> mOobConnection.receiveData(), mOobExecutor);
                 case ConfigurationRequestV1 request -> {
-                    OobResponderRangingSession.super.start(
+                    OobResponderRangingSession.super.startAndKeepAliveUntilClosedExplicitly(
                             mProtocol.getConfigurations(mPeer, request));
                     yield mOobConnection.receiveData();
                 }
                 case ConfigurationRequestV3 request -> {
-                    OobResponderRangingSession.super.start(
+                    OobResponderRangingSession.super.startAndKeepAliveUntilClosedExplicitly(
                             mProtocol.getConfigurations(mPeer, request));
                     yield mOobConnection.receiveData();
                 }
@@ -155,11 +141,11 @@ public class OobResponderRangingSession extends BaseRangingSession implements Ra
                 case ConnectionClosedException e -> {
                     Log.w(TAG, "Stopping session due to unexpected OOB connection closure with "
                             + "reason " + e.getReason());
-                    stopSessionForReason(InternalReason.NO_PEERS_FOUND);
+                    stop(InternalReason.NO_PEERS_FOUND);
                 }
                 default -> {
                     Log.e(TAG, "Stopping session due to OOB connection failure " + t);
-                    stopSessionForReason(InternalReason.INTERNAL_ERROR);
+                    stop(InternalReason.INTERNAL_ERROR);
                 }
             }
         }
@@ -172,12 +158,5 @@ public class OobResponderRangingSession extends BaseRangingSession implements Ra
     @Override
     public void close() {
         mOobConnection.close();
-    }
-
-    private void stopSessionForReason(@InternalReason int reason) {
-        mKeepAliveFlag.set(false);
-        boolean existsAdaptersWithActiveRanging = super.stop(reason);
-        // We want to trigger onSessionClosed even if there are no active adapters to close.
-        if (!existsAdaptersWithActiveRanging) onSessionClosed(reason);
     }
 }

@@ -75,6 +75,158 @@ pub enum DTAnchorLocationType {
 
 #[allow(dead_code)]
 #[derive(Debug, Clone, PartialEq)]
+pub struct DlTdoaRangingMeasurementV2 {
+    pub status: u8,
+    pub message_type: u8,
+    pub block_index: u16,
+    pub round_index: u8,
+    pub nlos: u8,
+    pub aoa_azimuth: u16,
+    pub aoa_azimuth_fom: u8,
+    pub aoa_elevation: u16,
+    pub aoa_elevation_fom: u8,
+    pub rssi: u8,
+    pub anchor_cfo: u16,
+    pub cfo: u16,
+    pub initiator_reply_time: u32,
+    pub responder_reply_time: u32,
+    pub initiator_responder_tof: u16,
+    pub rx_timestamp: Vec<u8>,
+    pub message_control: u32,
+    pub tx_timestamp: Vec<u8>,
+    pub ranging_rounds: Vec<u8>,
+    pub anchor_location: Vec<u8>,
+    pub supercluster_id: Option<u8>,
+}
+
+impl DlTdoaRangingMeasurementV2 {
+    pub fn parse_one(bytes: &[u8], mac_address_len: usize) -> Option<(Self, usize)> {
+        let mut ptr = 0;
+        let measurement_size = extract_u16(bytes, &mut ptr, 2)? as usize;
+        if bytes.len() < measurement_size {
+            return None;
+        }
+
+        // The MAC address is part of the measurement in v2
+        ptr += mac_address_len;
+
+        let status = extract_u8(bytes, &mut ptr, 1)?;
+        let message_type = extract_u8(bytes, &mut ptr, 1)?;
+        let block_index = extract_u16(bytes, &mut ptr, 2)?;
+        let round_index = extract_u8(bytes, &mut ptr, 1)?;
+        let nlos = extract_u8(bytes, &mut ptr, 1)?;
+        let aoa_azimuth = extract_u16(bytes, &mut ptr, 2)?;
+        let aoa_azimuth_fom = extract_u8(bytes, &mut ptr, 1)?;
+        let aoa_elevation = extract_u16(bytes, &mut ptr, 2)?;
+        let aoa_elevation_fom = extract_u8(bytes, &mut ptr, 1)?;
+        let rssi = extract_u8(bytes, &mut ptr, 1)?;
+        let anchor_cfo = extract_u16(bytes, &mut ptr, 2)?;
+        let cfo = extract_u16(bytes, &mut ptr, 2)?;
+        let initiator_reply_time = extract_u32(bytes, &mut ptr, 4)?;
+        let responder_reply_time = extract_u32(bytes, &mut ptr, 4)?;
+        let initiator_responder_tof = extract_u16(bytes, &mut ptr, 2)?;
+
+        let rx_timestamp_len = extract_u8(bytes, &mut ptr, 1)? as usize;
+        let rx_timestamp = extract_vec(bytes, &mut ptr, rx_timestamp_len)?;
+
+        let message_control = extract_u32(bytes, &mut ptr, 4)?;
+
+        let tx_timestamp_len = extract_u8(bytes, &mut ptr, 1)? as usize;
+        let tx_timestamp = extract_vec(bytes, &mut ptr, tx_timestamp_len)?;
+
+        let ranging_rounds = if (message_control & 0x2) != 0 {
+            let len = extract_u8(bytes, &mut ptr, 1)? as usize;
+            extract_vec(bytes, &mut ptr, len)?
+        } else {
+            vec![]
+        };
+
+        let anchor_location = if (message_control & 0x4) != 0 {
+            let len = extract_u8(bytes, &mut ptr, 1)? as usize;
+            extract_vec(bytes, &mut ptr, len)?
+        } else {
+            vec![]
+        };
+
+        let supercluster_id =
+            if (message_control & 0x8) != 0 { Some(extract_u8(bytes, &mut ptr, 1)?) } else { None };
+
+        Some((
+            DlTdoaRangingMeasurementV2 {
+                status,
+                message_type,
+                block_index,
+                round_index,
+                nlos,
+                aoa_azimuth,
+                aoa_azimuth_fom,
+                aoa_elevation,
+                aoa_elevation_fom,
+                rssi,
+                anchor_cfo,
+                cfo,
+                initiator_reply_time,
+                responder_reply_time,
+                initiator_responder_tof,
+                rx_timestamp,
+                message_control,
+                tx_timestamp,
+                ranging_rounds,
+                anchor_location,
+                supercluster_id,
+            },
+            measurement_size,
+        ))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ShortAddressDlTdoaRangingMeasurementV2 {
+    pub mac_address: u16,
+    pub measurement: DlTdoaRangingMeasurementV2,
+}
+
+impl ShortAddressDlTdoaRangingMeasurementV2 {
+    pub fn decode_full(bytes: &[u8], no_of_ranging_measurement: u8) -> Option<Vec<Self>> {
+        let mut ptr = 0;
+        let mut measurements = vec![];
+        for _ in 0..no_of_ranging_measurement {
+            let rem = &bytes[ptr..];
+            let mut mac_ptr = 2; // Skip measurement size
+            let mac_address = extract_u16(rem, &mut mac_ptr, 2)?;
+            let (measurement, size) = DlTdoaRangingMeasurementV2::parse_one(rem, 2)?;
+            ptr += size;
+            measurements.push(ShortAddressDlTdoaRangingMeasurementV2 { mac_address, measurement });
+        }
+        Some(measurements)
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct ExtendedAddressDlTdoaRangingMeasurementV2 {
+    pub mac_address: u64,
+    pub measurement: DlTdoaRangingMeasurementV2,
+}
+
+impl ExtendedAddressDlTdoaRangingMeasurementV2 {
+    pub fn decode_full(bytes: &[u8], no_of_ranging_measurement: u8) -> Option<Vec<Self>> {
+        let mut ptr = 0;
+        let mut measurements = vec![];
+        for _ in 0..no_of_ranging_measurement {
+            let rem = &bytes[ptr..];
+            let mut mac_ptr = 2; // Skip measurement size
+            let mac_address = extract_u64(rem, &mut mac_ptr, 8)?;
+            let (measurement, size) = DlTdoaRangingMeasurementV2::parse_one(rem, 8)?;
+            ptr += size;
+            measurements
+                .push(ExtendedAddressDlTdoaRangingMeasurementV2 { mac_address, measurement });
+        }
+        Some(measurements)
+    }
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct DlTdoaRangingMeasurement {
     pub status: u8,
     pub message_type: u8,
@@ -161,7 +313,7 @@ impl DlTdoaRangingMeasurement {
             total_size: ptr,
         })
     }
-    pub fn get_total_size(&self) -> usize {
+    pub fn total_size(&self) -> usize {
         self.total_size
     }
 }
@@ -174,7 +326,7 @@ pub struct ShortAddressDlTdoaRangingMeasurement {
 
 impl ShortAddressDlTdoaRangingMeasurement {
     /// Parse the `payload` byte buffer from PDL to the vector of measurement.
-    pub fn parse(bytes: &[u8], no_of_ranging_measurement: u8) -> Option<Vec<Self>> {
+    pub fn decode_full(bytes: &[u8], no_of_ranging_measurement: u8) -> Option<Vec<Self>> {
         let mut ptr = 0;
         let mut measurements = vec![];
         let mut count = 0;
@@ -184,7 +336,7 @@ impl ShortAddressDlTdoaRangingMeasurement {
             let measurement = DlTdoaRangingMeasurement::parse_one(rem);
             match measurement {
                 Some(measurement) => {
-                    ptr += measurement.get_total_size();
+                    ptr += measurement.total_size();
                     measurements
                         .push(ShortAddressDlTdoaRangingMeasurement { mac_address, measurement });
                     count = count + 1;
@@ -204,7 +356,7 @@ pub struct ExtendedAddressDlTdoaRangingMeasurement {
 
 impl ExtendedAddressDlTdoaRangingMeasurement {
     /// Parse the `payload` byte buffer from PDL to the vector of measurement.
-    pub fn parse(bytes: &[u8], no_of_ranging_measurement: u8) -> Option<Vec<Self>> {
+    pub fn decode_full(bytes: &[u8], no_of_ranging_measurement: u8) -> Option<Vec<Self>> {
         let mut ptr = 0;
         let mut measurements = vec![];
         let mut count = 0;
@@ -214,7 +366,7 @@ impl ExtendedAddressDlTdoaRangingMeasurement {
             let measurement = DlTdoaRangingMeasurement::parse_one(rem);
             match measurement {
                 Some(measurement) => {
-                    ptr += measurement.get_total_size();
+                    ptr += measurement.total_size();
                     measurements
                         .push(ExtendedAddressDlTdoaRangingMeasurement { mac_address, measurement });
                     count = count + 1;
@@ -314,27 +466,27 @@ impl UciControlPacketHeader {
 }
 
 // Helper methods to extract the UCI Packet header fields.
-fn get_mt_from_uci_packet(packet: &[u8]) -> u8 {
+fn mt_from_uci_packet(packet: &[u8]) -> u8 {
     (packet[UCI_HEADER_MT_BYTE_POSITION] >> UCI_HEADER_MT_BIT_SHIFT) & UCI_HEADER_MT_MASK
 }
 
-fn get_pbf_from_uci_packet(packet: &[u8]) -> u8 {
+fn pbf_from_uci_packet(packet: &[u8]) -> u8 {
     (packet[UCI_HEADER_PBF_BYTE_POSITION] >> UCI_HEADER_PBF_BIT_SHIFT) & UCI_HEADER_PBF_MASK
 }
 
-fn get_gid_from_uci_control_packet(packet: &[u8]) -> u8 {
+fn gid_from_uci_control_packet(packet: &[u8]) -> u8 {
     packet[UCI_CONTROL_HEADER_GID_BYTE_POSITION] & UCI_CONTROL_HEADER_GID_MASK
 }
 
-fn get_oid_from_uci_control_packet(packet: &[u8]) -> u8 {
+fn oid_from_uci_control_packet(packet: &[u8]) -> u8 {
     packet[UCI_CONTROL_HEADER_OID_BYTE_POSITION] & UCI_CONTROL_HEADER_OID_MASK
 }
 
 // This function parses the packet bytes to return the Control Packet Opcode (OID) field. The
 // caller should check that the packet bytes represent a UCI control packet. The code will not
 // panic because UciPacketHal::encode_to_bytes() should always be larger then the place we access.
-fn get_opcode_from_uci_control_packet(packet: &UciPacketHal) -> u8 {
-    get_oid_from_uci_control_packet(&packet.encode_to_bytes().unwrap())
+fn opcode_from_uci_control_packet(packet: &UciPacketHal) -> u8 {
+    oid_from_uci_control_packet(&packet.encode_to_bytes().unwrap())
 }
 
 fn is_uci_control_packet(message_type: MessageType) -> bool {
@@ -352,27 +504,27 @@ pub fn build_uci_control_packet(
     message_type: MessageType,
     group_id: GroupId,
     opcode: u8,
-    payload: Option<Bytes>,
+    payload: Vec<u8>,
 ) -> Option<UciControlPacket> {
     if !is_uci_control_packet(message_type) {
         error!("Only control packets are allowed, MessageType: {message_type:?}");
         return None;
     }
-    Some(UciControlPacketBuilder { group_id, message_type, opcode, payload }.build())
+    Some(UciControlPacket { group_id, message_type, opcode, payload })
 }
 
 // Ensure that the new packet fragment belong to the same packet.
 fn is_same_control_packet(header: &UciControlPacketHeader, packet: &UciPacketHal) -> bool {
     is_uci_control_packet(header.message_type)
-        && header.message_type == packet.get_message_type()
-        && header.group_id == packet.get_group_id_or_data_packet_format().into()
-        && header.opcode == get_opcode_from_uci_control_packet(packet)
+        && header.message_type == packet.message_type()
+        && header.group_id == packet.group_id_or_data_packet_format().into()
+        && header.opcode == opcode_from_uci_control_packet(packet)
 }
 
 fn is_device_state_err_control_packet(packet: &UciPacketHal) -> bool {
-    packet.get_message_type() == MessageType::Notification.into()
-        && packet.get_group_id_or_data_packet_format() == GroupIdOrDataPacketFormat::Core.into()
-        && get_opcode_from_uci_control_packet(packet) == CoreOpCode::CoreDeviceStatusNtf.into()
+    packet.message_type() == MessageType::Notification.into()
+        && packet.group_id_or_data_packet_format() == GroupIdOrDataPacketFormat::Core.into()
+        && opcode_from_uci_control_packet(packet) == CoreOpCode::CoreDeviceStatusNtf.into()
         && packet.encode_to_vec().unwrap()[UCI_PACKET_HAL_HEADER_LEN]
             == DeviceState::DeviceStateError.into()
 }
@@ -396,13 +548,13 @@ impl TryFrom<Vec<UciPacketHal>> for UciControlPacket {
 
         // Store header info from the first packet.
         let header = UciControlPacketHeader::new(
-            packets[0].get_message_type(),
-            packets[0].get_group_id_or_data_packet_format().into(),
-            get_opcode_from_uci_control_packet(&packets[0]),
+            packets[0].message_type(),
+            packets[0].group_id_or_data_packet_format().into(),
+            opcode_from_uci_control_packet(&packets[0]),
         )?;
 
         // Create the reassembled payload.
-        let mut payload_buf = BytesMut::new();
+        let mut payload_buf = Vec::new();
         for packet in packets {
             // Ensure that the new fragment is part of the same packet.
             if !is_same_control_packet(&header, &packet) {
@@ -410,19 +562,17 @@ impl TryFrom<Vec<UciPacketHal>> for UciControlPacket {
                 // process it and send to upper layer for device recovery
                 if is_device_state_err_control_packet(&packet) {
                     error!("Received device reset error: {:?}", packet);
-                    return UciControlPacket::parse(
-                        &UciControlPacketBuilder {
-                            message_type: packet.get_message_type(),
-                            group_id: packet.get_group_id_or_data_packet_format().into(),
-                            opcode: get_opcode_from_uci_control_packet(&packet),
-                            payload: Some(
-                                packet
-                                    .encode_to_bytes()
-                                    .unwrap()
-                                    .slice(UCI_PACKET_HAL_HEADER_LEN..),
-                            ),
+                    return UciControlPacket::decode_full(
+                        &UciControlPacket {
+                            message_type: packet.message_type(),
+                            group_id: packet.group_id_or_data_packet_format().into(),
+                            opcode: opcode_from_uci_control_packet(&packet),
+                            payload: packet
+                                .encode_to_bytes()
+                                .unwrap()
+                                .slice(UCI_PACKET_HAL_HEADER_LEN..)
+                                .to_vec(),
                         }
-                        .build()
                         .encode_to_bytes()
                         .unwrap(),
                     );
@@ -438,14 +588,13 @@ impl TryFrom<Vec<UciPacketHal>> for UciControlPacket {
 
         // Create assembled |UciControlPacket| and convert to bytes again since we need to
         // reparse the packet after defragmentation to get the appropriate message.
-        UciControlPacket::parse(
-            &UciControlPacketBuilder {
+        UciControlPacket::decode_full(
+            &UciControlPacket {
                 message_type: header.message_type,
                 group_id: header.group_id,
                 opcode: header.opcode,
-                payload: Some(payload_buf.into()),
+                payload: payload_buf,
             }
-            .build()
             .encode_to_bytes()
             .unwrap(),
         )
@@ -465,8 +614,8 @@ impl RawUciControlPacket {
     // the same as the stored signature. We don't match the MT because they can be
     // different (eg: CMD/RSP pair).
     pub fn is_same_signature_bytes(&self, header: &[u8]) -> bool {
-        let gid = get_gid_from_uci_control_packet(header);
-        let oid = get_oid_from_uci_control_packet(header);
+        let gid = gid_from_uci_control_packet(header);
+        let oid = oid_from_uci_control_packet(header);
         gid == self.gid && oid == self.oid
     }
 }
@@ -485,8 +634,8 @@ fn try_into_data_payload(
     packet: UciPacketHal,
     expected_data_packet_format: DataPacketFormat,
 ) -> Result<Bytes, DecodeError> {
-    let dpf: DataPacketFormat = packet.get_group_id_or_data_packet_format().try_into()?;
-    if is_uci_data_packet(packet.get_message_type()) && dpf == expected_data_packet_format {
+    let dpf: DataPacketFormat = packet.group_id_or_data_packet_format().try_into()?;
+    if is_uci_data_packet(packet.message_type()) && dpf == expected_data_packet_format {
         Ok(packet.encode_to_bytes().unwrap().slice(UCI_PACKET_HAL_HEADER_LEN..))
     } else {
         error!("Received unexpected data packet fragment: {:?}", packet);
@@ -504,7 +653,7 @@ impl TryFrom<Vec<UciPacketHal>> for UciDataPacket {
             return Err(DecodeError::InvalidPacketError);
         }
 
-        let dpf: DataPacketFormat = packets[0].get_group_id_or_data_packet_format().try_into()?;
+        let dpf: DataPacketFormat = packets[0].group_id_or_data_packet_format().try_into()?;
         if !is_data_rcv_or_radar_format(dpf) {
             error!("Unexpected data packet format {:?}", dpf);
         }
@@ -519,13 +668,12 @@ impl TryFrom<Vec<UciPacketHal>> for UciDataPacket {
 
         // Create assembled |UciDataPacket| and convert to bytes again since we need to
         // reparse the packet after defragmentation to get the appropriate message.
-        UciDataPacket::parse(
-            &UciDataPacketBuilder {
+        UciDataPacket::decode_full(
+            &UciDataPacket {
                 message_type: MessageType::Data,
                 data_packet_format: dpf,
-                payload: Some(payload_buf.into()),
+                payload: payload_buf.into(),
             }
-            .build()
             .encode_to_bytes()
             .unwrap(),
         )
@@ -538,9 +686,9 @@ impl From<UciControlPacket> for Vec<UciControlPacketHal> {
     fn from(packet: UciControlPacket) -> Self {
         // Store header info.
         let header = match UciControlPacketHeader::new(
-            packet.get_message_type(),
-            packet.get_group_id(),
-            packet.get_opcode(),
+            packet.message_type(),
+            packet.group_id(),
+            packet.opcode(),
         ) {
             Ok(hdr) => hdr,
             _ => {
@@ -556,16 +704,13 @@ impl From<UciControlPacket> for Vec<UciControlPacketHal> {
         // get payload by stripping the header.
         let payload = packet.encode_to_bytes().unwrap().slice(UCI_PACKET_HEADER_LEN..);
         if payload.is_empty() {
-            fragments.push(
-                UciControlPacketHalBuilder {
-                    message_type: header.message_type,
-                    group_id_or_data_packet_format: header.group_id.into(),
-                    opcode: header.opcode,
-                    packet_boundary_flag: PacketBoundaryFlag::Complete,
-                    payload: None,
-                }
-                .build(),
-            );
+            fragments.push(UciControlPacketHal {
+                message_type: header.message_type,
+                group_id_or_data_packet_format: header.group_id.into(),
+                opcode: header.opcode,
+                packet_boundary_flag: PacketBoundaryFlag::Complete,
+                payload: vec![],
+            });
         } else {
             let mut fragments_iter = payload.chunks(MAX_PAYLOAD_LEN).peekable();
             while let Some(fragment) = fragments_iter.next() {
@@ -575,16 +720,13 @@ impl From<UciControlPacket> for Vec<UciControlPacketHal> {
                 } else {
                     PacketBoundaryFlag::Complete
                 };
-                fragments.push(
-                    UciControlPacketHalBuilder {
-                        message_type: header.message_type,
-                        group_id_or_data_packet_format: header.group_id.into(),
-                        opcode: header.opcode,
-                        packet_boundary_flag: pbf,
-                        payload: Some(Bytes::from(fragment.to_owned())),
-                    }
-                    .build(),
-                );
+                fragments.push(UciControlPacketHal {
+                    message_type: header.message_type,
+                    group_id_or_data_packet_format: header.group_id.into(),
+                    opcode: header.opcode,
+                    packet_boundary_flag: pbf,
+                    payload: fragment.to_owned(),
+                });
             }
         }
         fragments
@@ -598,24 +740,24 @@ pub enum DataPacket {
 }
 
 impl DataPacket {
-    pub fn get_session_token(&self) -> u32 {
+    pub fn session_token(&self) -> u32 {
         match self {
-            DataPacket::Bypass(p) => p.get_session_token(),
-            DataPacket::LogicalLink(p) => p.get_connect_id(),
+            DataPacket::Bypass(p) => p.session_token(),
+            DataPacket::LogicalLink(p) => p.connect_id(),
         }
     }
 
-    pub fn get_uci_sequence_number(&self) -> u16 {
+    pub fn uci_sequence_number(&self) -> u16 {
         match self {
-            DataPacket::Bypass(p) => p.get_uci_sequence_number(),
-            DataPacket::LogicalLink(p) => p.get_uci_sequence_number(),
+            DataPacket::Bypass(p) => p.uci_sequence_number(),
+            DataPacket::LogicalLink(p) => p.uci_sequence_number(),
         }
     }
 
-    pub fn get_data_packet_format(&self) -> GroupIdOrDataPacketFormat {
+    pub fn data_packet_format(&self) -> GroupIdOrDataPacketFormat {
         match self {
-            DataPacket::Bypass(p) => p.get_data_packet_format().into(),
-            DataPacket::LogicalLink(p) => p.get_data_packet_format().into(),
+            DataPacket::Bypass(p) => p.data_packet_format().into(),
+            DataPacket::LogicalLink(p) => p.data_packet_format().into(),
         }
     }
 
@@ -636,18 +778,15 @@ impl DataPacket {
 // example usage is for fragmentation in the Data Packet Tx flow.
 pub fn fragment_data_msg_send(packet: DataPacket, max_payload_len: usize) -> Vec<UciDataPacketHal> {
     let mut fragments = Vec::new();
-    let dpf = packet.get_data_packet_format();
+    let dpf = packet.data_packet_format();
     let payload = packet.encode_payload();
 
     if payload.is_empty() {
-        fragments.push(
-            UciDataPacketHalBuilder {
-                group_id_or_data_packet_format: dpf,
-                packet_boundary_flag: PacketBoundaryFlag::Complete,
-                payload: None,
-            }
-            .build(),
-        );
+        fragments.push(UciDataPacketHal {
+            group_id_or_data_packet_format: dpf,
+            packet_boundary_flag: PacketBoundaryFlag::Complete,
+            payload: vec![],
+        });
     } else {
         let mut fragments_iter = payload.chunks(max_payload_len).peekable();
         while let Some(fragment) = fragments_iter.next() {
@@ -657,14 +796,11 @@ pub fn fragment_data_msg_send(packet: DataPacket, max_payload_len: usize) -> Vec
             } else {
                 PacketBoundaryFlag::Complete
             };
-            fragments.push(
-                UciDataPacketHalBuilder {
-                    group_id_or_data_packet_format: dpf,
-                    packet_boundary_flag: pbf,
-                    payload: Some(Bytes::from(fragment.to_owned())),
-                }
-                .build(),
-            );
+            fragments.push(UciDataPacketHal {
+                group_id_or_data_packet_format: dpf,
+                packet_boundary_flag: pbf,
+                payload: fragment.to_owned(),
+            });
         }
     }
     fragments
@@ -695,7 +831,7 @@ impl PacketDefrager {
         last_raw_cmd: Option<RawUciControlPacket>,
     ) -> Option<UciDefragPacket> {
         if let Some(raw_cmd) = last_raw_cmd {
-            let mt_u8 = get_mt_from_uci_packet(msg);
+            let mt_u8 = mt_from_uci_packet(msg);
             match MessageType::try_from(u8::from(mt_u8)) {
                 Ok(mt) => match mt {
                     // Parse only a UCI response packet as a Raw packet.
@@ -714,19 +850,19 @@ impl PacketDefrager {
             };
         }
 
-        let packet = UciPacketHal::parse(msg)
+        let packet = UciPacketHal::decode_full(msg)
             .or_else(|e| {
                 error!("Failed to parse packet: {:?}", e);
                 Err(e)
             })
             .ok()?;
 
-        let pbf = packet.get_packet_boundary_flag();
+        let pbf = packet.packet_boundary_flag();
 
         // TODO(b/261762781): The current implementation allows for the possibility that we receive
         // interleaved Control/Data HAL packets, and so uses separate caches for them. In the
         // future, if we determine that interleaving is not possible, this can be simplified.
-        if is_uci_control_packet(packet.get_message_type()) {
+        if is_uci_control_packet(packet.message_type()) {
             // Add the incoming fragment to the control packet cache.
             self.control_fragment_cache.push(packet);
             if pbf == PacketBoundaryFlag::NotComplete {
@@ -766,10 +902,10 @@ impl PacketDefrager {
         msg: &[u8],
         raw_cmd: RawUciControlPacket,
     ) -> Option<UciDefragPacket> {
-        let mt_u8 = get_mt_from_uci_packet(msg);
-        let pbf = get_pbf_from_uci_packet(msg);
-        let gid = get_gid_from_uci_control_packet(msg);
-        let oid = get_oid_from_uci_control_packet(msg);
+        let mt_u8 = mt_from_uci_packet(msg);
+        let pbf = pbf_from_uci_packet(msg);
+        let gid = gid_from_uci_control_packet(msg);
+        let oid = oid_from_uci_control_packet(msg);
         if raw_cmd.is_same_signature_bytes(msg) {
             // Store only the packet payload bytes (UCI header should not be stored).
             self.raw_fragment_cache.extend_from_slice(&msg[UCI_PACKET_HAL_HEADER_LEN..]);
@@ -825,31 +961,31 @@ pub struct ParsedFrameReport {
 pub fn parse_diagnostics_ntf(
     evt: AndroidRangeDiagnosticsNtf,
 ) -> Result<ParsedDiagnosticNtfPacket, DecodeError> {
-    let session_token = evt.get_session_token();
-    let sequence_number = evt.get_sequence_number();
+    let session_token = evt.session_token();
+    let sequence_number = evt.sequence_number();
     let mut parsed_frame_reports = Vec::new();
-    for report in evt.get_frame_reports() {
+    for report in evt.frame_reports() {
         let mut rssi_vec = Vec::new();
         let mut aoa_vec = Vec::new();
         let mut cir_vec = Vec::new();
         let mut segment_metrics_vec = Vec::new();
         for tlv in &report.frame_report_tlvs {
-            match FrameReportTlvPacket::parse(
+            match FrameReportTlvPacket::decode_full(
                 &[vec![tlv.t as u8, tlv.v.len() as u8, (tlv.v.len() >> 8) as u8], tlv.v.clone()]
                     .concat(),
             ) {
                 Ok(pkt) => match pkt.specialize() {
-                    FrameReportTlvPacketChild::Rssi(rssi) => {
-                        rssi_vec.append(&mut rssi.get_rssi().clone())
+                    Ok(FrameReportTlvPacketChild::Rssi(rssi)) => {
+                        rssi_vec.append(&mut rssi.rssi().clone())
                     }
-                    FrameReportTlvPacketChild::Aoa(aoa) => {
-                        aoa_vec.append(&mut aoa.get_aoa().clone())
+                    Ok(FrameReportTlvPacketChild::Aoa(aoa)) => {
+                        aoa_vec.append(&mut aoa.aoa().clone())
                     }
-                    FrameReportTlvPacketChild::Cir(cir) => {
-                        cir_vec.append(&mut cir.get_cir_value().clone())
+                    Ok(FrameReportTlvPacketChild::Cir(cir)) => {
+                        cir_vec.append(&mut cir.cir_value().clone())
                     }
-                    FrameReportTlvPacketChild::SegmentMetrics(sm) => {
-                        segment_metrics_vec.append(&mut sm.get_segment_metrics().clone())
+                    Ok(FrameReportTlvPacketChild::SegmentMetrics(sm)) => {
+                        segment_metrics_vec.append(&mut sm.segment_metrics().clone())
                     }
                     _ => return Err(DecodeError::InvalidPacketError),
                 },
@@ -919,7 +1055,7 @@ pub fn build_session_update_controller_multicast_list_cmd(
     action: UpdateMulticastListAction,
     controlees: Controlees,
 ) -> Result<SessionUpdateControllerMulticastListCmd, DecodeError> {
-    let mut controlees_buf = BytesMut::new();
+    let mut controlees_buf = Vec::new();
     match controlees {
         Controlees::NoSessionKey(controlee_v1) => {
             controlees_buf.extend_from_slice(&(controlee_v1.len() as u8).to_le_bytes());
@@ -945,12 +1081,7 @@ pub fn build_session_update_controller_multicast_list_cmd(
         }
         _ => return Err(DecodeError::InvalidPacketError),
     }
-    Ok(SessionUpdateControllerMulticastListCmdBuilder {
-        session_token,
-        action,
-        payload: Some(controlees_buf.freeze()),
-    }
-    .build())
+    Ok(SessionUpdateControllerMulticastListCmd { session_token, action, payload: controlees_buf })
 }
 
 /// building Data transfer phase config command
@@ -963,7 +1094,7 @@ pub fn build_data_transfer_phase_config_cmd(
     slot_bitmap: Vec<u8>,
     stop_data_transfer: Vec<u8>,
 ) -> Result<SessionDataTransferPhaseConfigCmd, DecodeError> {
-    let mut dtpml_buffer = BytesMut::new();
+    let mut dtpml_buffer = Vec::new();
 
     //calculate mac address mode from data transfer control
     let mac_address_mode = data_transfer_control & 0x01;
@@ -1005,14 +1136,13 @@ pub fn build_data_transfer_phase_config_cmd(
         dtpml_buffer.extend_from_slice(&[stop_data_transfer[i]]);
     }
 
-    Ok(SessionDataTransferPhaseConfigCmdBuilder {
+    Ok(SessionDataTransferPhaseConfigCmd {
         session_token,
         dtpcm_repetition,
         data_transfer_control,
         dtpml_size,
-        payload: Some(dtpml_buffer.freeze()),
-    }
-    .build())
+        payload: dtpml_buffer,
+    })
 }
 
 impl Drop for AppConfigTlv {
@@ -1042,10 +1172,10 @@ mod tests {
     #[test]
     fn test_parse_diagnostics_ntf() {
         let rssi_vec = vec![0x01, 0x02, 0x03];
-        let rssi = RssiBuilder { rssi: rssi_vec.clone() }.build();
+        let rssi = Rssi { rssi: rssi_vec.clone() };
         let aoa_1 = AoaMeasurement { tdoa: 1, pdoa: 2, aoa: 3, fom: 4, t: 1 };
         let aoa_2 = AoaMeasurement { tdoa: 5, pdoa: 6, aoa: 7, fom: 8, t: 2 };
-        let aoa = AoaBuilder { aoa: vec![aoa_1.clone(), aoa_2.clone()] }.build();
+        let aoa = Aoa { aoa: vec![aoa_1.clone(), aoa_2.clone()] };
         let cir_vec = vec![CirValue {
             first_path_index: 1,
             first_path_snr: 2,
@@ -1057,35 +1187,30 @@ mod tests {
             samples_number: 2,
             sample_window: vec![0, 1, 2, 3],
         }];
-        let cir = CirBuilder { cir_value: cir_vec.clone() }.build();
+        let cir = Cir { cir_value: cir_vec.clone() };
         let segment_metrics_vec = vec![SegmentMetricsValue {
-            receiver_and_segment: ReceiverAndSegmentValue::parse(&[1]).unwrap(),
+            receiver_and_segment: ReceiverAndSegmentValue::decode_full(&[1]).unwrap(),
             rf_noise_floor: 2,
             segment_rsl: 3,
             first_path: PathSample { index: 4, rsl: 5, time_ns: 6 },
             peak_path: PathSample { index: 7, rsl: 8, time_ns: 9 },
         }];
-        let segment_metrics =
-            SegmentMetricsBuilder { segment_metrics: segment_metrics_vec.clone() }.build();
+        let segment_metrics = SegmentMetrics { segment_metrics: segment_metrics_vec.clone() };
         let mut frame_reports = Vec::new();
         let tlvs = vec![
-            FrameReportTlv { t: rssi.get_t(), v: rssi.get_rssi().to_vec() },
-            FrameReportTlv { t: aoa.get_t(), v: aoa.encode_to_vec().unwrap()[3..].to_vec() },
-            FrameReportTlv { t: cir.get_t(), v: cir.encode_to_vec().unwrap()[3..].to_vec() },
+            FrameReportTlv { t: rssi.t(), v: rssi.rssi().to_vec() },
+            FrameReportTlv { t: aoa.t(), v: aoa.encode_to_vec().unwrap()[3..].to_vec() },
+            FrameReportTlv { t: cir.t(), v: cir.encode_to_vec().unwrap()[3..].to_vec() },
             FrameReportTlv {
-                t: segment_metrics.get_t(),
+                t: segment_metrics.t(),
                 v: segment_metrics.encode_to_vec().unwrap()[3..].to_vec(),
             },
         ];
         let frame_report =
             FrameReport { uwb_msg_id: 1, action: 1, antenna_set: 1, frame_report_tlvs: tlvs };
         frame_reports.push(frame_report);
-        let packet = AndroidRangeDiagnosticsNtfBuilder {
-            session_token: 1,
-            sequence_number: 1,
-            frame_reports,
-        }
-        .build();
+        let packet =
+            AndroidRangeDiagnosticsNtf { session_token: 1, sequence_number: 1, frame_reports };
         let mut parsed_packet = parse_diagnostics_ntf(packet).unwrap();
         let parsed_frame_report = parsed_packet.frame_reports.pop().unwrap();
         assert_eq!(rssi_vec, parsed_frame_report.rssi);
@@ -1096,11 +1221,149 @@ mod tests {
     }
 
     #[test]
+    fn test_short_dltdoa_ranging_measurement_v2() {
+        let bytes = [
+            // All Fields in Little Endian (LE)
+            // First measurement
+            0x3a, 0x00, // 2(Measurement Size = 58)
+            0x0a, 0x01, // 2(Mac address)
+            0x00, 0x05, // Status, Message Type
+            0x02, 0x05, // 2(Block Index)
+            0x07, 0x09, // Round Index, NLoS
+            0x0a, 0x01, // 2(AoA Azimuth)
+            0x02, 0x05, 0x07, // 1AoA Azimuth FOM, 2(AoA Elevation)
+            0x09, 0x0a, // AoA Elevation FOM, RSSI
+            0x01, 0x02, // 2(Anchor Cfo)
+            0x05, 0x07, // 2(Cfo)
+            0x09, 0x05, 0x07, 0x09, // 4(Initiator Reply Time)
+            0x0a, 0x01, 0x02, 0x05, // 4(Responder Reply Time)
+            0x07, 0x09, // 2(Initiator-Responder ToF)
+            0x05, // RX Timestamp Length
+            0x01, 0x02, 0x03, 0x04, 0x05, // 5(RX Timestamp)
+            0x0e, 0x00, 0x00, 0x00, // 4(Message Control: b1, b2, b3 set)
+            0x08, // TX Timestamp Length
+            0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, // 8(TX Timestamp)
+            0x02, // Active Ranging Rounds Length
+            0x11, 0x22, // 2(Active Ranging Rounds)
+            0x03, // Anchor Location Length
+            0xaa, 0xbb, 0xcc, // 3(Anchor Location)
+            0x55, // Supercluster ID
+            // Second measurement
+            0x31, 0x00, // 2(Measurement Size = 49)
+            0x0b, 0x02, // 2(Mac address)
+            0x01, 0x05, // Status, Message Type
+            0x06, 0x03, // 2(Block Index)
+            0x08, 0x01, // Round Index, NLoS
+            0x0b, 0x02, // 2(AoA Azimuth)
+            0x03, 0x06, 0x08, // AoA Azimuth FOM, 2(AoA Elevation)
+            0x0a, 0x0b, // AoA Elevation FOM, RSSI
+            0x03, 0x02, // 2(Anchor Cfo)
+            0x08, 0x06, // 2(Cfo)
+            0x0a, 0x08, 0x06, 0x0a, // 4(Initiator Reply Time)
+            0x06, 0x03, 0x02, 0x0b, // 4(Responder Reply Time)
+            0x0a, 0x08, // 2(Initiator-Responder ToF)
+            0x04, // RX Timestamp Length
+            0x02, 0x03, 0x04, 0x05, // 4(RX Timestamp)
+            0x02, 0x00, 0x00, 0x00, // 4(Message Control: b1 set)
+            0x06, // TX Timestamp Length
+            0x02, 0x03, 0x04, 0x05, 0x06, 0x07, // 6(TX Timestamp)
+            0x01, // Active Ranging Rounds Length
+            0x33, // 1(Active Ranging Rounds)
+        ];
+
+        let measurements = ShortAddressDlTdoaRangingMeasurementV2::decode_full(&bytes, 2).unwrap();
+        assert_eq!(measurements.len(), 2);
+        let measurement_1 = &measurements[0].measurement;
+        let mac_address_1 = &measurements[0].mac_address;
+        assert_eq!(*mac_address_1, 0x010a);
+        assert_eq!(measurement_1.status, 0x00);
+        assert_eq!(measurement_1.message_type, 0x05);
+        assert_eq!(measurement_1.block_index, 0x0502);
+        assert_eq!(measurement_1.round_index, 0x07);
+        assert_eq!(measurement_1.nlos, 0x09);
+        assert_eq!(measurement_1.aoa_azimuth, 0x010a);
+        assert_eq!(measurement_1.aoa_azimuth_fom, 0x02);
+        assert_eq!(measurement_1.aoa_elevation, 0x0705);
+        assert_eq!(measurement_1.aoa_elevation_fom, 0x09);
+        assert_eq!(measurement_1.rssi, 0x0a);
+        assert_eq!(measurement_1.rx_timestamp, vec![0x01, 0x02, 0x03, 0x04, 0x05]);
+        assert_eq!(measurement_1.message_control, 0x0000000e);
+        assert_eq!(
+            measurement_1.tx_timestamp,
+            vec![0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08]
+        );
+        assert_eq!(measurement_1.ranging_rounds, vec![0x11, 0x22]);
+        assert_eq!(measurement_1.anchor_location, vec![0xaa, 0xbb, 0xcc]);
+        assert_eq!(measurement_1.supercluster_id, Some(0x55));
+
+        let measurement_2 = &measurements[1].measurement;
+        let mac_address_2 = &measurements[1].mac_address;
+        assert_eq!(*mac_address_2, 0x020b);
+        assert_eq!(measurement_2.status, 0x01);
+        assert_eq!(measurement_2.message_type, 0x05);
+        assert_eq!(measurement_2.block_index, 0x0306);
+        assert_eq!(measurement_2.round_index, 0x08);
+        assert_eq!(measurement_2.nlos, 0x01);
+        assert_eq!(measurement_2.aoa_azimuth, 0x020b);
+        assert_eq!(measurement_2.aoa_azimuth_fom, 0x03);
+        assert_eq!(measurement_2.aoa_elevation, 0x0806);
+        assert_eq!(measurement_2.aoa_elevation_fom, 0x0a);
+        assert_eq!(measurement_2.rssi, 0x0b);
+        assert_eq!(measurement_2.rx_timestamp, vec![0x02, 0x03, 0x04, 0x05]);
+        assert_eq!(measurement_2.message_control, 0x00000002);
+        assert_eq!(measurement_2.tx_timestamp, vec![0x02, 0x03, 0x04, 0x05, 0x06, 0x07]);
+        assert_eq!(measurement_2.ranging_rounds, vec![0x33]);
+        assert_eq!(measurement_2.anchor_location, vec![]);
+        assert_eq!(measurement_2.supercluster_id, None);
+    }
+
+    #[test]
+    fn test_short_dltdoa_ranging_measurement_v2_minimal() {
+        let bytes = [
+            // All Fields in Little Endian (LE)
+            // First measurement
+            0x26, 0x00, // 2(Measurement Size = 38)
+            0x0b, 0x02, // 2(Mac address)
+            0x00, 0x05, // Status, Message Type
+            0x01, 0x04, // 2(Block Index)
+            0x06, 0x08, // Round Index, NLoS
+            0x0b, 0x02, // 2(AoA Azimuth)
+            0x03, 0x06, 0x08, // AoA Azimuth FOM, 2(AoA Elevation)
+            0x0a, 0x0b, // AoA Elevation FOM, RSSI
+            0x02, 0x03, // 2(Anchor Cfo)
+            0x06, 0x08, // 2(Cfo)
+            0x0a, 0x06, 0x08, 0x0a, // 4(Initiator Reply Time)
+            0x0b, 0x02, 0x03, 0x06, // 4(Responder Reply Time)
+            0x08, 0x0a, // 2(Initiator-Responder ToF)
+            0x04, // RX Timestamp Length
+            0x02, 0x03, 0x04, 0x05, // 4(RX Timestamp)
+            0x08, 0x00, 0x00, 0x00, // 4(Message Control: b3 set, b1=0, b2=0)
+            0x00, // TX Timestamp Length (0)
+            // No Active Ranging Rounds length/bytes (b1=0)
+            // No Anchor Location length/bytes (b2=0)
+            0x77, // Supercluster ID (b3=1)
+        ];
+
+        let measurements = ShortAddressDlTdoaRangingMeasurementV2::decode_full(&bytes, 1).unwrap();
+        assert_eq!(measurements.len(), 1);
+        let measurement_1 = &measurements[0].measurement;
+        let mac_address_1 = &measurements[0].mac_address;
+        assert_eq!(*mac_address_1, 0x020b);
+        assert_eq!(measurement_1.rx_timestamp, vec![0x02, 0x03, 0x04, 0x05]);
+        assert_eq!(measurement_1.message_control, 0x00000008);
+        assert_eq!(measurement_1.tx_timestamp, vec![]);
+        assert_eq!(measurement_1.ranging_rounds, vec![]);
+
+        assert_eq!(measurement_1.anchor_location, vec![]);
+        assert_eq!(measurement_1.supercluster_id, Some(0x77));
+    }
+
+    #[test]
     fn test_write_controlee() {
         let short_address: [u8; 2] = [2, 3];
         let controlee: Controlee = Controlee { short_address, subsession_id: 3 };
         let bytes = write_controlee(&controlee);
-        let parsed_controlee = Controlee::parse(&bytes).unwrap();
+        let parsed_controlee = Controlee::decode_full(&bytes).unwrap();
         assert_eq!(controlee, parsed_controlee);
     }
 
@@ -1114,7 +1377,8 @@ mod tests {
             Controlees::NoSessionKey(vec![controlee; 1]),
         )
         .unwrap()
-        .into();
+        .try_into()
+        .unwrap();
         let packet_fragments: Vec<UciControlPacketHal> = packet.into();
         let uci_packet = packet_fragments[0].encode_to_vec();
         assert_eq!(
@@ -1145,7 +1409,8 @@ mod tests {
             Controlees::ShortSessionKey(vec![controlee; 1]),
         )
         .unwrap()
-        .into();
+        .try_into()
+        .unwrap();
         let packet_fragments: Vec<UciControlPacketHal> = packet.into();
         let uci_packet = packet_fragments[0].encode_to_vec();
         assert_eq!(
@@ -1179,7 +1444,8 @@ mod tests {
             Controlees::LongSessionKey(vec![controlee; 1]),
         )
         .unwrap()
-        .into();
+        .try_into()
+        .unwrap();
         let packet_fragments: Vec<UciControlPacketHal> = packet.into();
         let uci_packet = packet_fragments[0].encode_to_vec();
         assert_eq!(
@@ -1200,13 +1466,12 @@ mod tests {
     fn test_to_raw_payload() {
         let payload = vec![0x11, 0x22, 0x33];
         let payload_clone = payload.clone();
-        let packet = UciControlPacketBuilder {
+        let packet = UciControlPacket {
             group_id: GroupId::Test,
             message_type: MessageType::Response,
             opcode: 0x5,
-            payload: Some(payload_clone.into()),
-        }
-        .build();
+            payload: payload_clone,
+        };
 
         assert_eq!(payload, packet.to_raw_payload());
     }
@@ -1214,13 +1479,12 @@ mod tests {
     #[test]
     fn test_to_raw_payload_empty() {
         let payload: Vec<u8> = vec![];
-        let packet = UciControlPacketBuilder {
+        let packet = UciControlPacket {
             group_id: GroupId::Test,
             message_type: MessageType::Response,
             opcode: 0x5,
-            payload: None,
-        }
-        .build();
+            payload: vec![],
+        };
 
         assert_eq!(payload, packet.to_raw_payload());
     }
@@ -1296,7 +1560,7 @@ mod tests {
             0x09, 0x05, // 2(Active Ranging Rounds)
         ];
 
-        let measurements = ShortAddressDlTdoaRangingMeasurement::parse(&bytes, 2).unwrap();
+        let measurements = ShortAddressDlTdoaRangingMeasurement::decode_full(&bytes, 2).unwrap();
         assert_eq!(measurements.len(), 2);
         let measurement_1 = &measurements[0].measurement;
         let mac_address_1 = &measurements[0].mac_address;
@@ -1315,7 +1579,9 @@ mod tests {
         assert_eq!(measurement_1.tx_timestamp, 0x02010a0907050201);
         assert_eq!(measurement_1.rx_timestamp, 0x0705090705);
         assert_eq!(measurement_1.anchor_cfo, 0x0a09);
+
         assert_eq!(measurement_1.cfo, 0x0201);
+
         assert_eq!(measurement_1.initiator_reply_time, 0x05090705);
         assert_eq!(measurement_1.responder_reply_time, 0x010a0907);
         assert_eq!(measurement_1.initiator_responder_tof, 0x0502);
@@ -1345,7 +1611,9 @@ mod tests {
         assert_eq!(measurement_2.tx_timestamp, 0x02010a0907050201);
         assert_eq!(measurement_2.rx_timestamp, 0x0705090705);
         assert_eq!(measurement_2.anchor_cfo, 0x0a09);
+
         assert_eq!(measurement_2.cfo, 0x0201);
+
         assert_eq!(measurement_2.initiator_reply_time, 0x05090705);
         assert_eq!(measurement_2.responder_reply_time, 0x010a0907);
         assert_eq!(measurement_2.initiator_responder_tof, 0x0502);
@@ -1380,7 +1648,7 @@ mod tests {
             0x02, 0x05, 0x02, 0x05, // 2(Initiator-Responder ToF), 2(Active Ranging Rounds)
         ];
 
-        let measurements = ExtendedAddressDlTdoaRangingMeasurement::parse(&bytes, 1).unwrap();
+        let measurements = ExtendedAddressDlTdoaRangingMeasurement::decode_full(&bytes, 1).unwrap();
         assert_eq!(measurements.len(), 1);
         let measurement = &measurements[0].measurement;
         let mac_address = &measurements[0].mac_address;
@@ -1398,6 +1666,7 @@ mod tests {
         assert_eq!(measurement.rx_timestamp, 0x070509070502010a);
         assert_eq!(measurement.anchor_cfo, 0x0a09);
         assert_eq!(measurement.cfo, 0x0201);
+
         assert_eq!(measurement.initiator_reply_time, 0x05090705);
         assert_eq!(measurement.responder_reply_time, 0x010a0907);
         assert_eq!(measurement.initiator_responder_tof, 0x0502);
@@ -1417,7 +1686,8 @@ mod tests {
             vec![0x00],
         )
         .unwrap()
-        .into();
+        .try_into()
+        .unwrap();
         let packet_fragments: Vec<UciControlPacketHal> = packet.into();
         let uci_packet = packet_fragments[0].encode_to_vec();
         assert_eq!(

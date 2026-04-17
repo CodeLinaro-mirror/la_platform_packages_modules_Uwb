@@ -53,6 +53,8 @@ import android.util.Log;
 import androidx.annotation.NonNull;
 
 import com.android.server.ranging.RangingInjector;
+import com.android.server.ranging.RangingTechnology;
+import com.android.server.ranging.common.EmptyTechnologyConfig;
 import com.android.server.ranging.oob.packets.BleCsCapabilities;
 import com.android.server.ranging.oob.packets.BleCsConfiguration;
 import com.android.server.ranging.oob.packets.BleRssiCapabilities;
@@ -76,9 +78,8 @@ import com.android.server.ranging.oob.packets.Version;
 import com.android.server.ranging.oob.packets.WifiBandwidth;
 import com.android.server.ranging.oob.packets.WifiNanRttCapabilities;
 import com.android.server.ranging.oob.packets.WifiNanRttConfiguration;
-import com.android.server.ranging.oob.packets.WifiPdAuthenticatedConfiguration;
 import com.android.server.ranging.oob.packets.WifiPdCapabilities;
-import com.android.server.ranging.oob.packets.WifiPdUnauthenticatedConfiguration;
+import com.android.server.ranging.oob.packets.WifiPdConfiguration;
 import com.android.server.ranging.rtt.RttConfig;
 import com.android.server.ranging.session.ConfigurationManager.TechnologyConfig;
 import com.android.server.ranging.uwb.UwbConfig;
@@ -271,12 +272,16 @@ public class OobResponderProtocol {
                                 UwbAddress.fromBytes(uwb.getAddress())))
                         .setDeviceRole(uwbDeviceRole(uwb.getDeviceRole()))
                         .build());
-                case BleCsConfiguration unused -> {
-                    // Skip: BLE CS does not need to be configured on responder.
-                }
-                case BleRssiConfiguration unused -> {
-                    // Skip: BLE RSSI does not need to be configured on responder.
-                }
+                case BleCsConfiguration unused ->
+                    // BLE CS does not need to be configured on responder.
+                    configsBuilder.add(new EmptyTechnologyConfig(
+                            RangingTechnology.CS, RangingPreference.DEVICE_ROLE_RESPONDER,
+                            ImmutableSet.of(handle.getRangingDevice())));
+                case BleRssiConfiguration unused ->
+                    // BLE RSSI does not need to be configured on responder.
+                    configsBuilder.add(new EmptyTechnologyConfig(
+                            RangingTechnology.RSSI, RangingPreference.DEVICE_ROLE_RESPONDER,
+                            ImmutableSet.of(handle.getRangingDevice())));
                 case WifiNanRttConfiguration wifiNan -> configsBuilder.add(new RttConfig(
                         Byte.toUnsignedInt(wifiNan.getDeviceRole().toByte()),
                         new RttRangingParams.Builder(
@@ -285,22 +290,7 @@ public class OobResponderProtocol {
                                 .build(),
                         new SessionConfig.Builder().build(),
                         handle.getRangingDevice()));
-                case WifiPdUnauthenticatedConfiguration wifiPd -> configsBuilder.add(
-                        new WifiPdConfig(
-                                RangingPreference.DEVICE_ROLE_RESPONDER,
-                                new WifiPdRangingParams.Builder(
-                                        MacAddress.fromBytes(wifiPd.getPeerAddress()))
-                                        .setRangingUpdateRate(WifiPdConstants.getUpdateRateFromMs(
-                                                wifiPd.getRangingInterval()))
-                                        .setPreambleType(wifiPd.getPreamble().toByte())
-                                        .setChannelWidth(wifiPd.getChannelWidth().toByte())
-                                        .setDiscoveryChannelFrequencyMhz(
-                                                WifiPdConfigSelector.convertChannelToFrequency(
-                                                        wifiPd.getChannel()))
-                                        .build(),
-                                new SessionConfig.Builder().build(),
-                                handle.getRangingDevice()));
-                case WifiPdAuthenticatedConfiguration wifiPd -> configsBuilder.add(
+                case WifiPdConfiguration wifiPd -> configsBuilder.add(
                         new WifiPdConfig(
                                 RangingPreference.DEVICE_ROLE_RESPONDER,
                                 new WifiPdRangingParams.Builder(

@@ -195,6 +195,7 @@ public class UwbUciConstants {
     public static final byte RANGING_MEASUREMENT_TYPE_TWO_WAY = 0X01;
     public static final byte RANGING_MEASUREMENT_TYPE_DL_TDOA = 0x02;
     public static final byte RANGING_MEASUREMENT_TYPE_OWR_AOA = 0x03;
+    public static final byte RANGING_MEASUREMENT_TYPE_DL_TDOA_V2 = 0x06;
 
     public static final byte MAC_ADDRESSING_MODE_SHORT = 0x00;
     public static final byte MAC_ADDRESSING_MODE_EXTENDED = 0x01;
@@ -334,8 +335,14 @@ public class UwbUciConstants {
             (byte) LogicalLinkCreationParams.LINK_LAYER_MODE_CONNECTIONLESS_NON_SECURE;
     public static final byte LINK_LAYER_MODE_CONNECTIONLESS_SECURE =
             (byte) LogicalLinkCreationParams.LINK_LAYER_MODE_CONNECTIONLESS_SECURE;
+    public static final byte LINK_LAYER_MODE_CONNECTION_ORIENTED_NON_SECURE =
+            (byte) LogicalLinkCreationParams.LINK_LAYER_MODE_CONNECTION_ORIENTED_NON_SECURE;
+    public static final byte LINK_LAYER_MODE_CONNECTION_ORIENTED_SECURE =
+            (byte) LogicalLinkCreationParams.LINK_LAYER_MODE_CONNECTION_ORIENTED_SECURE;
     public static final byte LINK_LAYER_MODE_CONNECTIONLESS_UWBS_TO_UWBS =
             (byte) LogicalLinkCreationParams.LINK_LAYER_MODE_CONNECTIONLESS_UWBS_TO_UWBS;
+    public static final byte LINK_LAYER_MODE_CONNECTION_ORIENTED_UWBS_UWBS =
+            (byte) LogicalLinkCreationParams.LINK_LAYER_MODE_CONNECTION_ORIENTED_UWBS_UWBS;
 
     /**
      * Table 42: Status code of LOGICAL_LINK_CREATE_NTF

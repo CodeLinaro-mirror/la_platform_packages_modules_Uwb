@@ -112,6 +112,8 @@ public class DeviceConfigFacade {
     private int mTimesyncDeviceOffset;
     private int mTimesyncClockSkewPpm;
     private int mTimesyncBleTimeUncertainty;
+    private boolean mTimesyncAccuracyVerified;
+    private boolean mTimesyncBleTimeUncertaintyIncluded;
 
     public DeviceConfigFacade(Handler handler, Context context) {
         mContext = context;
@@ -374,6 +376,18 @@ public class DeviceConfigFacade {
                     mContext.getResources().getInteger(R.integer.timesync_ble_time_uncertainty_us)
             );
 
+            mTimesyncAccuracyVerified = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "timesync_accuracy_verified",
+                    mContext.getResources().getBoolean(R.bool.timesync_accuracy_verified)
+            );
+
+            mTimesyncBleTimeUncertaintyIncluded = DeviceConfig.getBoolean(
+                    DeviceConfig.NAMESPACE_UWB,
+                    "timesync_ble_uncertainty_included",
+                    mContext.getResources().getBoolean(R.bool.timesync_ble_uncertainty_included)
+            );
+
             // A little parsing and cleanup:
             mFrontAzimuthRadiansPerSecond = (float) Math.toRadians(frontAzimuthDegreesPerSecond);
             mBackAzimuthRadiansPerSecond = (float) Math.toRadians(backAzimuthDegreesPerSecond);
@@ -442,6 +456,8 @@ public class DeviceConfigFacade {
             mTimesyncDeviceOffset = -36000;
             mTimesyncClockSkewPpm = 100;
             mTimesyncBleTimeUncertainty = 1000;
+            mTimesyncAccuracyVerified = false;
+            mTimesyncBleTimeUncertaintyIncluded = true;
 
             // A little parsing and cleanup:
             mFrontAzimuthRadiansPerSecond = (float) Math.toRadians(frontAzimuthDegreesPerSecond);
@@ -818,5 +834,13 @@ public class DeviceConfigFacade {
 
     public int getTimesyncBleTimeUncertainty() {
         return mTimesyncBleTimeUncertainty;
+    }
+
+    public boolean isTimesyncAccuracyVerified() {
+        return mTimesyncAccuracyVerified;
+    }
+
+    public boolean getBletimeUncertaintyIncluded() {
+        return mTimesyncBleTimeUncertaintyIncluded;
     }
 }
