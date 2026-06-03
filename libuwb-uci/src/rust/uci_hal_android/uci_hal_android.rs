@@ -249,7 +249,7 @@ impl UciHal for UciHalAndroid {
         // Reset UciHalAndroid regardless of whether hal_close is successful or not.
         // Release the reference to the top-level binder object i_uwb to allow the lazy HAL
         // mechanism to stop the HAL implementation.
-        let _ = self.hal_uci_iuwb.take();
+        let _hal_uci_iuwb = self.hal_uci_iuwb.take();
         let hal_uci_iuwb_chip = self.hal_uci_iuwb_chip.take();
         let _hal_death_recipient = self.hal_death_recipient.take();
         let hal_close_result_receiver = self.hal_close_result_receiver.take();
