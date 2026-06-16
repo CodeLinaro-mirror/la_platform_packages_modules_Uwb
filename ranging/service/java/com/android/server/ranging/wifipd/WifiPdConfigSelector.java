@@ -65,7 +65,9 @@ import com.google.common.collect.ImmutableSet;
 import java.nio.charset.StandardCharsets;
 import java.security.SecureRandom;
 import java.time.Duration;
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.Map;
 import java.util.Random;
 import java.util.Set;
 
@@ -98,13 +100,14 @@ public class WifiPdConfigSelector extends ConfigSelector {
     private final OobInitiatorRangingConfig mOobConfig;
 
     private final MacAddress mLocalMacAddress;
+    private final Map<RangingDevice, MacAddress> mPeerMacAddresses = new HashMap<>();
 
     @WifiPdRangingCapabilities.PasnMode
     private final Set<Integer> mSupportedPasnModes;
     @WifiAnnotations.PreambleType
     private int mMaxCompatiblePreamble;
-    private Duration mMinRangingInterval11mc = Duration.ofMillis(200);
-    private Duration mMinRangingInterval11az = Duration.ofMillis(200);
+    private Duration mMinRangingInterval11mc;
+    private Duration mMinRangingInterval11az;
     private final Set<Integer> mSupportedChannels;
     private int mMaxCompatibleChannelWidth;
     private boolean mSupports80211az;
@@ -124,6 +127,8 @@ public class WifiPdConfigSelector extends ConfigSelector {
         mMaxCompatibleChannelWidth = capabilities.getMaxChannelWidth();
         mSupports80211az = capabilities.is80211azNtbSupported();
         mLocalMacAddress = capabilities.getProximityDetectionMacAddress();
+        mMinRangingInterval11mc = capabilities.get80211mcMinRangingInterval();
+        mMinRangingInterval11az = capabilities.get80211azNtbMinRangingInterval();
     }
 
     public static boolean isCapableOfConfig(
@@ -154,6 +159,7 @@ public class WifiPdConfigSelector extends ConfigSelector {
             throw new ConfigurationManager.ConfigSelectionException(
                     "Unexpected capabilities: " + capabilities, InternalReason.UNKNOWN);
         }
+        mPeerMacAddresses.put(peer, MacAddress.fromBytes(pdCapabilities.getAddress()));
         mSelectedConfig = null;
         mSupports80211az =
                 mSupports80211az && pdCapabilities.getFeature11az();
@@ -258,9 +264,9 @@ public class WifiPdConfigSelector extends ConfigSelector {
         private boolean isRangingRateSupportedByCapabilities(int rate) {
             long intervalMs = WifiPdConstants.getIntervalInMs(rate);
             if (mSupports80211az) {
-                return mMinRangingInterval11az.toMillis() >= intervalMs;
+                return mMinRangingInterval11az.toMillis() <= intervalMs;
             } else {
-                return mMinRangingInterval11mc.toMillis() >= intervalMs;
+                return mMinRangingInterval11mc.toMillis() <= intervalMs;
             }
         }
 
@@ -276,12 +282,27 @@ public class WifiPdConfigSelector extends ConfigSelector {
 
         @NonNull
         private ImmutableSet<TechnologyConfig> getLocalConfigs(Set<RangingDevice> peers) {
-            return peers.stream().map(peer -> new WifiPdConfig(
-                    DEVICE_ROLE_INITIATOR,
-                    mSelectedParams,
-                    mSessionConfig,
-                    peer
-            )).collect(ImmutableSet.toImmutableSet());
+            return peers.stream().map(peer -> {
+                MacAddress peerMacAddress = mPeerMacAddresses.get(peer);
+                WifiPdRangingParams localParams = new WifiPdRangingParams.Builder(peerMacAddress)
+                        .setChannelWidth(mSelectedParams.getChannelWidth())
+                        .setPreambleType(mSelectedParams.getPreambleType())
+                        .setResponder80211azNtbSupported(
+                                mSelectedParams.isResponder80211azNtbSupported())
+                        .setDiscoveryChannelFrequencyMhz(
+                                mSelectedParams.getDiscoveryChannelFrequencyMhz())
+                        .setRangingUpdateRate(mSelectedParams.getRangingUpdateRate())
+                        .setPasnMode(mSelectedParams.getPasnMode())
+                        .setPassword(mSelectedParams.getPassword())
+                        .setDeviceIk(mSelectedParams.getDeviceIk())
+                        .build();
+                return new WifiPdConfig(
+                        DEVICE_ROLE_INITIATOR,
+                        localParams,
+                        mSessionConfig,
+                        peer
+                );
+            }).collect(ImmutableSet.toImmutableSet());
         }
 
         @NonNull
