@@ -17,6 +17,7 @@
 package com.android.server.ranging.wifipd;
 
 import static android.net.wifi.rtt.PasnConfig.AKM_PASN;
+import static android.net.wifi.rtt.PasnConfig.AKM_SAE;
 import static android.net.wifi.rtt.PasnConfig.CIPHER_GCMP_256;
 import static android.net.wifi.rtt.ProximityDetectionConfig.RANGING_SERVICE_ROLE_ADVERTISER;
 import static android.net.wifi.rtt.ProximityDetectionConfig.RANGING_SERVICE_ROLE_SEEKER;
@@ -144,7 +145,10 @@ public class WifiPdAdapter implements RangingAdapter {
                 wifiPdConfig.getSessionConfig().getDataNotificationConfig(),
                 wifiPdConfig.getSessionConfig().getDataNotificationConfig()
         );
-        PasnConfig.Builder pasnConfigBuilder = new PasnConfig.Builder(AKM_PASN, CIPHER_GCMP_256);
+        PasnConfig.Builder pasnConfigBuilder = new PasnConfig.Builder(
+                wifiPdRangingParams.getPasnMode()
+                        == WifiPdRangingCapabilities.AUTHENTICATED_PASN_MODE ? AKM_SAE : AKM_PASN,
+                CIPHER_GCMP_256);
         if (wifiPdRangingParams.getPasnMode()
                 == WifiPdRangingCapabilities.AUTHENTICATED_PASN_MODE) {
             if (wifiPdRangingParams.getPassword() == null
@@ -272,6 +276,7 @@ public class WifiPdAdapter implements RangingAdapter {
                 public void onRangingResults(@NonNull List<RangingResult> results) {
                     if (results == null || results.isEmpty()) {
                         Log.w(TAG, "Wifi PD range results are empty");
+                        return;
                     }
                     RangingResult result = results.get(0);
                     int status = result.getStatus();
