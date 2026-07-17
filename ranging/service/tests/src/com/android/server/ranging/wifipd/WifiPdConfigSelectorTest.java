@@ -112,6 +112,7 @@ public class WifiPdConfigSelectorTest {
                 mOobInitiatorRangingConfig, localCapabilities);
 
         Capabilities peerCapabilities = new WifiPdCapabilities.Builder()
+                .setAddress(MAC_ADDRESS.toByteArray())
                 .setChannels(new DiscoveryChannels.Builder().setChannel11(true).build())
                 .setMaxPreamble(PreambleType.fromByte((byte) PREAMBLE_HE))
                 .setMaxChannelWidth(com.android.server.ranging.oob.packets.WifiBandwidth.Mhz80)
@@ -137,6 +138,7 @@ public class WifiPdConfigSelectorTest {
                 mOobInitiatorRangingConfig, localCapabilities);
 
         Capabilities peerCapabilities = new WifiPdCapabilities.Builder()
+                .setAddress(MAC_ADDRESS.toByteArray())
                 .setChannels(new DiscoveryChannels.Builder().setChannel1(true).build())
                 .setMaxPreamble(PreambleType.fromByte((byte) PREAMBLE_HE))
                 .setMaxChannelWidth(com.android.server.ranging.oob.packets.WifiBandwidth.Mhz80)
@@ -166,6 +168,7 @@ public class WifiPdConfigSelectorTest {
                 mOobInitiatorRangingConfig, localCapabilities);
 
         Capabilities peerCapabilities = new WifiPdCapabilities.Builder()
+                .setAddress(MAC_ADDRESS.toByteArray())
                 .setChannels(new DiscoveryChannels.Builder().setChannel1(true).setChannel36(true)
                         .build())
                 .setMaxPreamble(PreambleType.fromByte((byte) PREAMBLE_HE))

@@ -303,6 +303,8 @@ public class OobResponderProtocol {
                                         .setDiscoveryChannelFrequencyMhz(
                                                 WifiPdConfigSelector.convertChannelToFrequency(
                                                         wifiPd.getChannel()))
+                                        .setPasnMode(
+                                        WifiPdRangingCapabilities.UNAUTHENTICATED_PASN_MODE)
                                         .build(),
                                 new SessionConfig.Builder().build(),
                                 handle.getRangingDevice()));
@@ -322,6 +324,8 @@ public class OobResponderProtocol {
                                         .setPassword(
                                                 new String(wifiPd.getPassword(),
                                                         StandardCharsets.UTF_8))
+                                        .setPasnMode(
+                                                WifiPdRangingCapabilities.AUTHENTICATED_PASN_MODE)
                                         .build(),
                                 new SessionConfig.Builder().build(),
                                 handle.getRangingDevice()));

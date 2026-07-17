@@ -49,8 +49,7 @@ public class WifiPdConfig implements TechnologyConfig {
             SessionConfig sessionConfig,
             RangingDevice peerDevice
     ) {
-        mDeviceRole = deviceRole == DEVICE_ROLE_RESPONDER ? RANGING_SERVICE_ROLE_ADVERTISER
-                : RANGING_SERVICE_ROLE_SEEKER;
+        mDeviceRole = deviceRole;
         mPdRangingParams = wifiPdRangingParams;
         mSessionConfig = sessionConfig;
         mPeerDevice = peerDevice;
