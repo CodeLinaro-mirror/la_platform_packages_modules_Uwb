@@ -34,6 +34,7 @@ import android.net.wifi.rtt.ProximityDetectionCharacteristics;
 import android.net.wifi.rtt.WifiRttManager;
 import android.ranging.RangingCapabilities;
 import android.ranging.wifi.pd.WifiPdRangingCapabilities;
+import android.util.Log;
 
 import androidx.annotation.Nullable;
 
@@ -58,6 +59,7 @@ public class WifiPdCapabilitiesAdapter extends CapabilitiesAdapter {
     private final WifiRttManager mWifiRttManager;
     private MacAddress mCachedPdMacAddress = null;
     private final WifiScanner mWifiScanner;
+    private static final String TAG = "WifiPdCapacitiesAdapter";
 
     /**
      * Is Wifi PD feature supported boolean.
@@ -126,6 +128,10 @@ public class WifiPdCapabilitiesAdapter extends CapabilitiesAdapter {
         }
         ProximityDetectionCharacteristics characteristics =
                 mWifiRttManager.getProximityDetectionCharacteristics();
+        if (characteristics == null) {
+            Log.d(TAG, "ProximityDetectionCharacteristics is null");
+            return null;
+        }
         Set<Integer> pasnModes = new HashSet<>();
         if (characteristics.isUnauthenticatedPasnModeSupported()) {
             pasnModes.add(WifiPdRangingCapabilities.UNAUTHENTICATED_PASN_MODE);
