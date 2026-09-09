@@ -35,6 +35,8 @@ import static com.android.server.uwb.config.ConfigParam.SWEEP_OFFSET_KEY;
 import static com.android.server.uwb.config.ConfigParam.RADAR_TIMING_PARAMS_KEY;
 import static com.android.server.uwb.config.ConfigParam.TX_POWER_KEY;
 
+import android.util.Log;
+
 import com.google.uwb.support.base.Params;
 import com.google.uwb.support.base.ProtocolVersion;
 import com.google.uwb.support.radar.RadarParams;
@@ -46,6 +48,7 @@ import java.nio.ByteOrder;
 
 /** Radar decoder */
 public class RadarDecoder extends TlvDecoder {
+    private static final String TAG = "RadarDecoder";
     @Override
     public <T extends Params> T getParams(TlvDecoderBuffer tlvs, Class<T> paramsType,
             ProtocolVersion protocolVersion)
@@ -78,7 +81,7 @@ public class RadarDecoder extends TlvDecoder {
             TlvDecoderBuffer tlvs) {
         byte[] radarTimingParams = tlvs.getByteArray(RADAR_TIMING_PARAMS_KEY);
         ByteBuffer buffer = ByteBuffer.wrap(radarTimingParams).order(ByteOrder.LITTLE_ENDIAN);
-        return new RadarRangingStartedParams.Builder()
+        RadarRangingStartedParams.Builder builder = new RadarRangingStartedParams.Builder()
                 .setBurstPeriod(buffer.getInt())
                 .setSweepPeriod(buffer.getShort())
                 .setSweepsPerBurst(buffer.get())
@@ -92,11 +95,32 @@ public class RadarDecoder extends TlvDecoder {
                 .setBitsPerSample(tlvs.getByte(BITS_PER_SAMPLE_KEY))
                 .setPrfMode(tlvs.getByte(PRF_MODE_KEY))
                 .setNumberOfBursts(tlvs.getShort(NUMBER_OF_BURSTS_KEY))
-                .setRadarDataType(tlvs.getByte(RADAR_DATA_TYPE_KEY))
-                .setAntennaBitmap(tlvs.getShort(ANTENNA_BITMAP_KEY))
-                .setGpioBitmap(tlvs.getByte(GPIO_BITMAP_KEY))
-                .setTxPower(tlvs.getByte(TX_POWER_KEY))
-                .setRxGain(tlvs.getByte(RX_GAIN_KEY))
-                .build();
+                .setRadarDataType(tlvs.getByte(RADAR_DATA_TYPE_KEY));
+
+        try {
+            builder.setAntennaBitmap(tlvs.getShort(ANTENNA_BITMAP_KEY));
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "ANTENNA_BITMAP_KEY not found");
+        }
+
+        try {
+            builder.setGpioBitmap(tlvs.getByte(GPIO_BITMAP_KEY));
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "GPIO_BITMAP_KEY not found");
+        }
+
+        try {
+            builder.setTxPower(tlvs.getByte(TX_POWER_KEY));
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "TX_POWER_KEY not found");
+        }
+
+        try {
+            builder.setRxGain(tlvs.getByte(RX_GAIN_KEY));
+        } catch (IllegalArgumentException e) {
+            Log.w(TAG, "RX_GAIN_KEY not found");
+        }
+
+        return builder.build();
     }
 }

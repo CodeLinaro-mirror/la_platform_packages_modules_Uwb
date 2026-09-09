@@ -307,10 +307,18 @@ public class RadarRangingStartedParams extends RadarParams {
             mPrfMode.set(builder.mPrfMode.get());
             mNumberOfBursts.set(builder.mNumberOfBursts.get());
             mRadarDataType.set(builder.mRadarDataType.get());
-            mAntennaBitmap.set(builder.mAntennaBitmap.get());
-            mGpioBitmap.set(builder.mGpioBitmap.get());
-            mTxPower.set(builder.mTxPower.get());
-            mRxGain.set(builder.mRxGain.get());
+            if (builder.mAntennaBitmap.isSet()) {
+                mAntennaBitmap.set(builder.mAntennaBitmap.get());
+            }
+            if (builder.mGpioBitmap.isSet()) {
+                mGpioBitmap.set(builder.mGpioBitmap.get());
+            }
+            if (builder.mTxPower.isSet()) {
+                mTxPower.set(builder.mTxPower.get());
+            }
+            if (builder.mRxGain.isSet()) {
+                mRxGain.set(builder.mRxGain.get());
+            }
         }
 
         public Builder(@NonNull RadarRangingStartedParams params) {
@@ -459,10 +467,10 @@ public class RadarRangingStartedParams extends RadarParams {
                     mPrfMode.get(),
                     mNumberOfBursts.get(),
                     mRadarDataType.get(),
-                    mAntennaBitmap.get(),
-                    mGpioBitmap.get(),
-                    mTxPower.get(),
-                    mRxGain.get());
+                    mAntennaBitmap.isSet() ? mAntennaBitmap.get() : 0,
+                    mGpioBitmap.isSet() ? mGpioBitmap.get() : 0,
+                    mTxPower.isSet() ? mTxPower.get() : 0,
+                    mRxGain.isSet() ? mRxGain.get() : 0);
         }
     }
 }
